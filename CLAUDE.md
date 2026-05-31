@@ -57,7 +57,7 @@ omnideck-cli/
 - **Repo name:** `omnideck-cli`
 - **Module path:** `github.com/omnideck-dev/cli`
 - **Config file:** `~/.config/omnideck-cli/config.yaml`
-- **Container image:** `ghcr.io/lefoulkrod/computron_9000:main`
+- **Container image:** `ghcr.io/omnideck-dev/omnideck:main`
 - **Default container name:** `omnideck`
 - **Default shared dir:** `~/Omnideck`
 - **Default state dir:** `~/Omnideck/state`

@@ -86,7 +86,7 @@ func DefaultConfig() *Config {
 		Memory:        "2g",
 		ShmSize:       "1024m",
 		WebUIPort:     "2337",
-		Image:         "ghcr.io/lefoulkrod/computron_9000:main",
+		Image:         "ghcr.io/omnideck-dev/omnideck:main",
 	}
 }
 
