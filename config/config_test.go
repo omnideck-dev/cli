@@ -133,3 +133,30 @@ func TestListInstancesMultiple(t *testing.T) {
 		t.Errorf("expected instances alpha and beta, got %v", names)
 	}
 }
+
+func TestMigrateImage(t *testing.T) {
+	tests := []struct {
+		name      string
+		image     string
+		want      string
+		wantMoved bool
+	}{
+		{"legacy main tag", "ghcr.io/lefoulkrod/computron_9000:main", DefaultImage, true},
+		{"legacy latest tag", "ghcr.io/lefoulkrod/computron_9000:latest", DefaultImage, true},
+		{"legacy no tag", "ghcr.io/lefoulkrod/computron_9000", DefaultImage, true},
+		{"already current", DefaultImage, DefaultImage, false},
+		{"custom override untouched", "ghcr.io/example/omnideck:dev", "ghcr.io/example/omnideck:dev", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := &Config{Image: tt.image}
+			moved := cfg.MigrateImage()
+			if moved != tt.wantMoved {
+				t.Errorf("MigrateImage returned %v, want %v", moved, tt.wantMoved)
+			}
+			if cfg.Image != tt.want {
+				t.Errorf("Image = %q, want %q", cfg.Image, tt.want)
+			}
+		})
+	}
+}
