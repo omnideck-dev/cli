@@ -23,6 +23,17 @@ type Config struct {
 	InstalledAt   time.Time `yaml:"installed_at"`
 }
 
+// DefaultImage is the current container image the CLI installs and updates to.
+const DefaultImage = "ghcr.io/omnideck-dev/omnideck:latest"
+
+// legacyImagePrefixes are image repositories that DefaultImage supersedes.
+// A config still pointing at one of these (regardless of tag) is migrated to
+// DefaultImage on update. Intentional custom images (e.g. via --image) are
+// left untouched.
+var legacyImagePrefixes = []string{
+	"ghcr.io/lefoulkrod/computron_9000",
+}
+
 // InstanceInfo is a resolved instance with its name, path, and loaded Config.
 type InstanceInfo struct {
 	Name   string
@@ -86,8 +97,22 @@ func DefaultConfig() *Config {
 		Memory:        "2g",
 		ShmSize:       "1024m",
 		WebUIPort:     "2337",
-		Image:         "ghcr.io/lefoulkrod/computron_9000:main",
+		Image:         DefaultImage,
 	}
+}
+
+// MigrateImage updates a legacy image reference to DefaultImage. It returns
+// true if the image was changed, so callers can persist the migrated config.
+// Images that are not recognized as legacy (including custom overrides) are
+// left as-is.
+func (c *Config) MigrateImage() bool {
+	for _, prefix := range legacyImagePrefixes {
+		if c.Image == prefix || strings.HasPrefix(c.Image, prefix+":") {
+			c.Image = DefaultImage
+			return true
+		}
+	}
+	return false
 }
 
 // WebUIPortOrDefault returns WebUIPort, falling back to "8080" for configs

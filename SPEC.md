@@ -35,7 +35,7 @@ Full interactive TUI wizard. The primary command — runs all phases in sequence
    - Create shared directory
    - Create state directory
    - Remove existing container (if present)
-   - Pull image (`ghcr.io/lefoulkrod/computron_9000:main`)
+   - Pull image (`ghcr.io/omnideck-dev/omnideck:latest`)
    - Run container
    - Write config to `~/.config/omnideck-cli/config.yaml`
 
@@ -203,7 +203,7 @@ shared_dir: /home/user/Omnideck
 state_dir: /home/user/Omnideck/state
 shm_size: 256m
 engine: docker                  # "docker" or "podman"
-image: ghcr.io/lefoulkrod/computron_9000:main
+image: ghcr.io/omnideck-dev/omnideck:latest
 installed_at: 2025-01-15T10:30:00Z
 ```
 
@@ -237,7 +237,7 @@ docker run -d \
   --network host \
   -v ~/Omnideck:/home/omnideck:Z \
   -v ~/Omnideck/state:/var/lib/omnideck:Z \
-  ghcr.io/lefoulkrod/computron_9000:main
+  ghcr.io/omnideck-dev/omnideck:latest
 ```
 
 **macOS differences:**

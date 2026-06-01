@@ -1,7 +1,10 @@
 package cmd
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/tui"
 	"github.com/spf13/cobra"
 )
@@ -21,6 +24,16 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	cfg := LoadedConfig
+
+	// Migrate configs that still point at a superseded image so update pulls
+	// and recreates with the current default. Persist before recreating so the
+	// stored config matches the container we're about to run.
+	if cfg.MigrateImage() {
+		if err := config.Save(ConfigPath, cfg); err != nil {
+			return fmt.Errorf("saving migrated config: %w", err)
+		}
+	}
+
 	eng, err := engineFromConfig(cfg.Engine)
 	if err != nil {
 		return err
