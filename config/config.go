@@ -24,7 +24,7 @@ type Config struct {
 }
 
 // DefaultImage is the current container image the CLI installs and updates to.
-const DefaultImage = "ghcr.io/omnideck-dev/omnideck:main"
+const DefaultImage = "ghcr.io/omnideck-dev/omnideck:latest"
 
 // legacyImagePrefixes are image repositories that DefaultImage supersedes.
 // A config still pointing at one of these (regardless of tag) is migrated to
