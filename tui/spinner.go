@@ -229,18 +229,13 @@ func StepCmd(index int, fn func() (string, error)) tea.Cmd {
 	}
 }
 
-// DefaultFlavorMessages are the cycling messages shown during image pulls.
-var DefaultFlavorMessages = []string{
+// defaultFlavorMessages are the cycling messages shown during image pulls.
+var defaultFlavorMessages = []string{
 	"Pulling from the mothership...",
 	"Downloading the good stuff...",
 	"This might take a minute...",
 	"Almost there...",
 	"Unpacking intelligence...",
-}
-
-// PullFlavorMessages returns the flavor message for the given index.
-func PullFlavorMessages(index int) string {
-	return DefaultFlavorMessages[index%len(DefaultFlavorMessages)]
 }
 
 func padRight(s string, n int) string {

@@ -41,7 +41,9 @@ func init() {
 }
 
 func runConfigShow(_ *cobra.Command, _ []string) error {
-	requireConfigMulti()
+	if err := requireConfigMulti(); err != nil {
+		return err
+	}
 	cfg := LoadedConfig
 
 	kv := lipgloss.NewStyle().Width(18)
@@ -62,7 +64,9 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 }
 
 func runConfigSet(_ *cobra.Command, args []string) error {
-	requireConfigMulti()
+	if err := requireConfigMulti(); err != nil {
+		return err
+	}
 	key, value := args[0], args[1]
 
 	if !isValidConfigKey(key) {

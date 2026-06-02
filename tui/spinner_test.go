@@ -8,7 +8,7 @@ import (
 
 func TestNewSpinnerModel(t *testing.T) {
 	labels := []string{"Step 1", "Step 2", "Step 3"}
-	m := NewSpinnerModel(labels, DefaultFlavorMessages)
+	m := NewSpinnerModel(labels, defaultFlavorMessages)
 
 	if m.StepCount() != 3 {
 		t.Errorf("expected 3 steps, got %d", m.StepCount())

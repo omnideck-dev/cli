@@ -2,7 +2,6 @@ package engine
 
 import (
 	"os/exec"
-	"strings"
 	"testing"
 )
 
@@ -219,19 +218,6 @@ func TestBuildPodmanRunArgsMemorySet(t *testing.T) {
 	assertContains(t, args, "--memory=2g")
 }
 
-// TestOllamaHostLinux checks the Linux Ollama host value.
-func TestOllamaHostLinux(t *testing.T) {
-	// We can only reliably test the current platform, but we verify the function
-	// returns a non-empty host:port string.
-	h := OllamaHost()
-	if h == "" {
-		t.Fatal("OllamaHost should not be empty")
-	}
-	// Must contain a port.
-	if !strings.Contains(h, ":") {
-		t.Errorf("OllamaHost should be host:port, got %q", h)
-	}
-}
 
 // --- helpers ---
 

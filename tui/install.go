@@ -388,7 +388,7 @@ func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "i":
 			m.Phase = PhaseInstall
-			m.spinnerModel = NewSpinnerModel(installStepLabels, DefaultFlavorMessages)
+			m.spinnerModel = NewSpinnerModel(installStepLabels, defaultFlavorMessages)
 			return m, tea.Batch(m.spinnerModel.Init(), m.startInstallStep(0))
 		}
 	}

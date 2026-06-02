@@ -3,7 +3,6 @@ package engine
 import (
 	"errors"
 	"os/exec"
-	"runtime"
 )
 
 // RunOptions captures all parameters for running the Omnideck container.
@@ -14,7 +13,6 @@ type RunOptions struct {
 	ShmSize    string
 	SharedDir  string
 	StateDir   string
-	Network    string // "host"
 	Restart    string // "always"
 	OllamaHost string // 127.0.0.1 or host.docker.internal
 	WebUIPort  string // host port for the web UI (e.g. "8080")
@@ -49,14 +47,6 @@ func Detect() (Engine, error) {
 		return docker, nil
 	}
 	return nil, errors.New("neither Docker nor Podman was found.\nInstall Docker: https://docs.docker.com/get-docker/")
-}
-
-// OllamaHost returns the OS-aware Ollama host:port string.
-func OllamaHost() string {
-	if runtime.GOOS == "darwin" {
-		return "host.docker.internal:11434"
-	}
-	return "127.0.0.1:11434"
 }
 
 // lookPath is a variable so tests can override it.
