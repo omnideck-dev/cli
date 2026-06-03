@@ -33,8 +33,9 @@ clean:
 
 release:
 	mkdir -p dist
-	GOOS=linux  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-amd64     .
-	GOOS=linux  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-linux-arm64     .
-	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-amd64    .
-	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY)-darwin-arm64    .
-	@echo "Binaries written to dist/"
+	GOOS=linux  GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY) . && tar -czf dist/$(BINARY)-linux-amd64.tar.gz  -C dist $(BINARY)
+	GOOS=linux  GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY) . && tar -czf dist/$(BINARY)-linux-arm64.tar.gz  -C dist $(BINARY)
+	GOOS=darwin GOARCH=amd64 go build $(LDFLAGS) -o dist/$(BINARY) . && tar -czf dist/$(BINARY)-darwin-amd64.tar.gz -C dist $(BINARY)
+	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY) . && tar -czf dist/$(BINARY)-darwin-arm64.tar.gz -C dist $(BINARY)
+	rm -f dist/$(BINARY)
+	@echo "Archives written to dist/"
