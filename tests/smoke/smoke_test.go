@@ -25,12 +25,11 @@ func TestMain(m *testing.M) {
 	}
 	binaryPath = filepath.Join(dir, "omnideck"+ext)
 
-	// Build from the repo root (two levels up from tests/smoke/).
-	repoRoot := filepath.Join("..", "..")
+	// Build from the module path so it works regardless of working directory.
 	cmd := exec.Command("go", "build",
 		"-ldflags", "-X main.version=test -X main.commit=abc1234 -X main.date=2025-01-01",
 		"-o", binaryPath,
-		repoRoot,
+		"github.com/omnideck-dev/cli",
 	)
 	cmd.Stderr = os.Stderr
 	if out, err := cmd.CombinedOutput(); err != nil {
