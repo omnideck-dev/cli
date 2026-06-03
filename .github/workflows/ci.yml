@@ -7,8 +7,24 @@ on:
     branches: ["main"]
 
 jobs:
+  # ── Unit tests + vet on all platforms ──────────────────────────
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            label: linux/amd64
+          - runs-on: ubuntu-24.04-arm
+            label: linux/arm64
+          - runs-on: macos-13
+            label: darwin/amd64
+          - runs-on: macos-latest
+            label: darwin/arm64
+          - runs-on: windows-latest
+            label: windows/amd64
+
+    runs-on: ${{ matrix.runs-on }}
     steps:
       - uses: actions/checkout@v4
 
@@ -24,3 +40,16 @@ jobs:
 
       - name: Build
         run: go build -o /dev/null .
+
+  # ── Smoke tests (build binary, run it) ─────────────────────────
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Smoke test binary
+        run: go test ./tests/smoke/ -v
