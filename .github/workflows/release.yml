@@ -23,9 +23,6 @@ jobs:
           - goos: darwin
             goarch: arm64
 
-    env:
-      BINARY: omnideck-${{ matrix.goos }}-${{ matrix.goarch }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -42,9 +39,12 @@ jobs:
           COMMIT=$(git rev-parse --short HEAD)
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
-          go build -ldflags "${LDFLAGS}" -o dist/${BINARY} .
+          mkdir -p dist
+          go build -ldflags "${LDFLAGS}" -o dist/omnideck .
+          chmod +x dist/omnideck
+          tar -czf dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz -C dist omnideck
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/${{ env.BINARY }}
+          files: dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
