@@ -161,7 +161,7 @@ memory: 3g
 shm_size: 1536m
 web_ui_port: "2337"
 engine: docker
-image: ghcr.io/omnideck-dev/omnideck:latest
+image: ghcr.io/omnideck-dev/omnideck:main
 installed_at: 2025-01-15T10:30:00Z
 ```
 

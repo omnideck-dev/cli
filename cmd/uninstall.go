@@ -287,6 +287,12 @@ func safeRemoveAll(path string) error {
 		return fmt.Errorf("path is empty")
 	}
 	clean := filepath.Clean(path)
+	// Resolve symlinks so a symlink pointing at / or /etc can't bypass the checks below.
+	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = resolved
+	}
+	// (If EvalSymlinks fails the path doesn't exist yet, so there's no symlink to follow.)
+
 	// Reject paths that are too short (fewer than 3 components deep).
 	// e.g. "/" "/home" "/etc" are all dangerous.
 	parts := strings.Split(strings.TrimPrefix(clean, "/"), string(filepath.Separator))

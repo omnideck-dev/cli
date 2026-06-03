@@ -65,10 +65,9 @@ func (e *PodmanEngine) RunContainer(opts RunOptions) error {
 
 func (e *PodmanEngine) StopContainer(name string) error {
 	cmd := buildCmd("podman", "stop", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman stop: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman stop: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -85,10 +84,9 @@ func (e *PodmanEngine) StartContainer(name string) error {
 
 func (e *PodmanEngine) RemoveContainer(name string) error {
 	cmd := buildCmd("podman", "rm", "-f", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman rm: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman rm: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

@@ -10,11 +10,12 @@ import (
 
 // PickerModel is a minimal Bubble Tea program for choosing one of several instances.
 type PickerModel struct {
-	title    string
-	subtitle string
-	items    []config.InstanceInfo
-	cursor   int
-	chosen   int // index into items, -1 = cancelled
+	title       string
+	subtitle    string
+	items       []config.InstanceInfo
+	cursor      int
+	chosen      int // index into items, -1 = cancelled
+	windowWidth int
 }
 
 // NewPickerModel creates a picker for the given instances.
@@ -31,6 +32,8 @@ func (m PickerModel) Init() tea.Cmd { return nil }
 
 func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.windowWidth = msg.Width
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "up", "k":
@@ -90,7 +93,7 @@ func (m PickerModel) Chosen() (config.InstanceInfo, bool) {
 // the chosen instance, or (zero, false) if the user cancelled.
 func RunPicker(title, subtitle string, items []config.InstanceInfo) (config.InstanceInfo, bool) {
 	m := NewPickerModel(title, subtitle, items)
-	p := tea.NewProgram(m)
+	p := tea.NewProgram(m, tea.WithAltScreen())
 	result, err := p.Run()
 	if err != nil {
 		return config.InstanceInfo{}, false

@@ -29,7 +29,7 @@ var updateStepLabels = []string{
 
 // NewUpdateModel creates the update TUI model.
 func NewUpdateModel(cfg *config.Config, eng engine.Engine) UpdateModel {
-	sm := NewSpinnerModel(updateStepLabels, DefaultFlavorMessages)
+	sm := NewSpinnerModel(updateStepLabels, defaultFlavorMessages)
 	return UpdateModel{
 		BaseModel:    BaseModel{Phase: PhaseInstall},
 		cfg:          cfg,
@@ -105,10 +105,10 @@ func (m *UpdateModel) startUpdateStep(i int) tea.Cmd {
 			opts := engine.RunOptions{
 				Name:       cfg.ContainerName,
 				Image:      cfg.Image,
+				Memory:     cfg.Memory,
 				ShmSize:    cfg.ShmSize,
 				SharedDir:  cfg.SharedDir,
 				StateDir:   cfg.StateDir,
-				Network:    "host",
 				Restart:    "always",
 				OllamaHost: checks.OllamaHost(),
 				WebUIPort:  cfg.WebUIPortOrDefault(),

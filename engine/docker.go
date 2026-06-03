@@ -76,10 +76,9 @@ func (e *DockerEngine) RunContainer(opts RunOptions) error {
 
 func (e *DockerEngine) StopContainer(name string) error {
 	cmd := buildCmd("docker", "stop", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker stop: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker stop: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -96,10 +95,9 @@ func (e *DockerEngine) StartContainer(name string) error {
 
 func (e *DockerEngine) RemoveContainer(name string) error {
 	cmd := buildCmd("docker", "rm", "-f", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker rm: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker rm: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }

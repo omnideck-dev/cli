@@ -132,6 +132,8 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 		ConfigPath = cfgPath
 		if cfg, err := config.Load(cfgPath); err == nil {
 			LoadedConfig = cfg
+		} else if _, statErr := os.Stat(cfgPath); statErr == nil {
+			fmt.Fprintf(os.Stderr, "Warning: config file %s is unreadable: %v\n", cfgPath, err)
 		}
 
 	case nameFlag != "":
@@ -139,6 +141,8 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 		ConfigPath = path
 		if cfg, err := config.Load(path); err == nil {
 			LoadedConfig = cfg
+		} else if _, statErr := os.Stat(path); statErr == nil {
+			fmt.Fprintf(os.Stderr, "Warning: config file %s is unreadable: %v\n", path, err)
 		}
 
 	default:
@@ -154,6 +158,8 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 			ConfigPath = legacyPath
 			if cfg, err := config.Load(legacyPath); err == nil {
 				LoadedConfig = cfg
+			} else if _, statErr := os.Stat(legacyPath); statErr == nil {
+				fmt.Fprintf(os.Stderr, "Warning: config file %s is unreadable: %v\n", legacyPath, err)
 			}
 		default:
 			// Multiple instances — leave LoadedConfig nil; commands that need
