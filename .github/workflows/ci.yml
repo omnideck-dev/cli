@@ -36,20 +36,7 @@ jobs:
         run: go vet ./...
 
       - name: Test
-        run: go test $(go list ./... | grep -v /tests/)
+        run: go test ./...
 
       - name: Build
         run: go build -o /dev/null .
-
-  # ── Smoke tests (build binary, run it) ─────────────────────────
-  smoke:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Smoke test binary
-        run: go test ./tests/smoke/ -v
