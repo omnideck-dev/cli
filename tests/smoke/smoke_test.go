@@ -118,7 +118,7 @@ func TestHelpFlag(t *testing.T) {
 
 func TestNoArgsShowsHelp(t *testing.T) {
 	stdout, _, code := run()
-	if code !: 0 {
+	if code != 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
 	if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "omnideck") {
