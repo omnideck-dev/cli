@@ -25,20 +25,46 @@ func TestMain(m *testing.M) {
 	}
 	binaryPath = filepath.Join(dir, "omnideck"+ext)
 
-	// Build from the module path so it works regardless of working directory.
+	// Find the module root (where go.mod lives) so we build local code,
+	// not the cached module from the proxy.
+	moduleRoot := findModuleRoot()
+
 	cmd := exec.Command("go", "build",
 		"-ldflags", "-X main.version=test -X main.commit=abc1234 -X main.date=2025-01-01",
 		"-o", binaryPath,
-		"github.com/omnideck-dev/cli",
+		".",
 	)
+	cmd.Dir = moduleRoot
 	cmd.Stderr = os.Stderr
-	if out, err := cmd.CombinedOutput(); err != nil {
-		os.Stderr.Write(out)
+	cmd.Stdout = os.Stderr
+	if err := cmd.Run(); err != nil {
 		os.Exit(1)
 	}
 
 	code := m.Run()
 	os.Exit(code)
+}
+
+// findModuleRoot walks up the directory tree looking for go.mod.
+func findModuleRoot() string {
+	// Prefer GITHUB_WORKSPACE in CI.
+	if ws := os.Getenv("GITHUB_WORKSPACE"); ws != "" {
+		return ws
+	}
+	dir, err := os.Getwd()
+	if err != nil {
+		return "."
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return "."
+		}
+		dir = parent
+	}
 }
 
 func run(args ...string) (string, string, int) {
@@ -92,7 +118,7 @@ func TestHelpFlag(t *testing.T) {
 
 func TestNoArgsShowsHelp(t *testing.T) {
 	stdout, _, code := run()
-	if code != 0 {
+	if code !: 0 {
 		t.Fatalf("expected exit 0, got %d", code)
 	}
 	if !strings.Contains(stdout, "Usage:") || !strings.Contains(stdout, "omnideck") {
