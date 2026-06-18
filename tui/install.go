@@ -46,6 +46,10 @@ type allPreflightDone struct{}
 type InstallModel struct {
 	BaseModel
 
+	// Embedded, when true, means this model runs inside DashboardModel.
+	// On done/error it emits WizardExitMsg instead of tea.Quit.
+	Embedded bool
+
 	// Preflight state.
 	eng          engine.Engine
 	engErr       error
@@ -181,6 +185,9 @@ func (m InstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateInstall(msg)
 	case PhaseDone, PhaseError:
 		if isKeyMsg(msg) {
+			if m.Embedded {
+				return m, func() tea.Msg { return WizardExitMsg{} }
+			}
 			return m, tea.Quit
 		}
 	}

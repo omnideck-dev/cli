@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/omnideck-dev/cli/cmd/debug"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
@@ -65,6 +66,10 @@ func init() {
 		if v {
 			fmt.Printf("omnideck version %s (%s) built %s\n", versionStr, commitStr, dateStr)
 			return nil
+		}
+		// Per DESIGNv2: launch the TUI when run interactively with no subcommand.
+		if isInteractive() {
+			return runTUI(cmd, args)
 		}
 		return cmd.Help()
 	}
@@ -172,6 +177,11 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 	if ConfigPath == "" {
 		ConfigPath = config.InstancePath("omnideck")
 	}
+}
+
+// isInteractive reports whether stdin is an interactive terminal.
+func isInteractive() bool {
+	return term.IsTerminal(os.Stdin.Fd())
 }
 
 // instanceName returns the short instance name derived from ConfigPath.

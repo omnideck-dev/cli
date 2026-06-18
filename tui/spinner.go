@@ -204,6 +204,32 @@ func (m SpinnerModel) View() string {
 // IsDone returns true when all steps have completed.
 func (m SpinnerModel) IsDone() bool { return m.done }
 
+// renderTNStep renders one wizard step in Tokyo Night style.
+// Pending steps are shown dim so the user can see what is coming.
+func renderTNStep(step Step, sm SpinnerModel) string {
+	switch step.Status {
+	case StepDone:
+		label := styles.TNDimText.Render(step.Label)
+		detail := ""
+		if step.Detail != "" {
+			detail = "  " + styles.TNFaintText.Render(step.Detail)
+		}
+		return styles.TNGreenTxt.Render("✓") + "  " + label + detail
+	case StepFailed:
+		errStr := ""
+		if step.Err != nil {
+			errStr = "  " + step.Err.Error()
+		}
+		return styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(step.Label+errStr)
+	case StepActive:
+		wave := progressWaveFrames[sm.progressIndex%len(progressWaveFrames)]
+		return sm.spinner.View() + "  " + styles.TNBlueTxt.Render(step.Label) + "\n" +
+			"     " + styles.TNBlueTxt.Render(wave)
+	default: // StepPending
+		return styles.TNFaintText.Render("○  " + step.Label)
+	}
+}
+
 // Error returns the first step error, if any.
 func (m SpinnerModel) Error() error { return m.err }
 
