@@ -39,4 +39,5 @@ jobs:
         run: go test ./...
 
       - name: Build
+        shell: bash
         run: go build -o /dev/null .
