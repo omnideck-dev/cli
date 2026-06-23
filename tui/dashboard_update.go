@@ -187,12 +187,12 @@ func (m DashboardModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
-	case "j", "down":
+	case "down", "tab":
 		if m.selected < len(m.instances)-1 {
 			m.selected++
 		}
 
-	case "k", "up":
+	case "up", "shift+tab":
 		if m.selected > 0 {
 			m.selected--
 		}
@@ -252,12 +252,12 @@ func (m DashboardModel) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "esc", "backspace":
 		m.screen = ScreenDashboard
 
-	case "j", "down":
+	case "down", "tab":
 		if m.detailMenuIdx < detailMenuCount-1 {
 			m.detailMenuIdx++
 		}
 
-	case "k", "up":
+	case "up", "shift+tab":
 		if m.detailMenuIdx > 0 {
 			m.detailMenuIdx--
 		}
@@ -397,17 +397,25 @@ func (m DashboardModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.screen = ScreenDetail
 		}
 
-	case "j", "down":
+	case "down":
 		if maxS := totalLines - visibleLines; m.logScroll < maxS {
 			m.logScroll++
 		}
-	case "k", "up":
+	case "up":
 		if m.logScroll > 0 {
 			m.logScroll--
 		}
-	case "g":
+	case "pgdown", "ctrl+f", "ctrl+v":
+		maxS := totalLines - visibleLines
+		if maxS < 0 {
+			maxS = 0
+		}
+		m.logScroll = min(m.logScroll+visibleLines, maxS)
+	case "pgup", "ctrl+b", "alt+v":
+		m.logScroll = max(m.logScroll-visibleLines, 0)
+	case "home", "g":
 		m.logScroll = 0
-	case "G":
+	case "end", "G":
 		if maxS := totalLines - visibleLines; maxS > 0 {
 			m.logScroll = maxS
 		}
@@ -504,12 +512,12 @@ func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-	case "j", "down":
+	case "down", "tab":
 		if m.cfgFocus < len(m.cfgFields)-1 {
 			m.cfgFocus++
 		}
 
-	case "k", "up":
+	case "up", "shift+tab":
 		if m.cfgFocus > 0 {
 			m.cfgFocus--
 		}

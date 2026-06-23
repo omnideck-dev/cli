@@ -67,9 +67,8 @@ func init() {
 			fmt.Printf("omnideck version %s (%s) built %s\n", versionStr, commitStr, dateStr)
 			return nil
 		}
-		// Per DESIGNv2: launch the TUI when run interactively with no subcommand.
 		if isInteractive() {
-			return runTUI(cmd, args)
+			return runLauncher()
 		}
 		return cmd.Help()
 	}
@@ -177,6 +176,26 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 	if ConfigPath == "" {
 		ConfigPath = config.InstancePath("omnideck")
 	}
+}
+
+// runLauncher shows the lightweight menu TUI and dispatches to the chosen command.
+func runLauncher() error {
+	eng, _ := engine.Detect()
+	action, ok := tui.RunMenu(versionStr, LoadedConfig, eng)
+	if !ok {
+		return nil
+	}
+	// Only external actions (tui/install/update) reach here; all others are
+	// handled inline inside the menu TUI.
+	switch action {
+	case "tui":
+		return runTUI(nil, nil)
+	case "install":
+		return runInstall(nil, nil)
+	case "update":
+		return runUpdate(nil, nil)
+	}
+	return nil
 }
 
 // isInteractive reports whether stdin is an interactive terminal.

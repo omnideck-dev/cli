@@ -123,11 +123,11 @@ func (m DashboardModel) footerHints() string {
 	switch m.screen {
 	case ScreenDashboard:
 		return keyHints([][2]string{
-			{"j/k", "move"}, {"enter", "inspect"}, {"n", "new"}, {"d", "doctor"}, {"r", "refresh"}, {"q", "quit"},
+			{"↑↓", "move"}, {"enter", "inspect"}, {"n", "new"}, {"d", "doctor"}, {"r", "refresh"}, {"q", "quit"},
 		})
 	case ScreenDetail:
 		return keyHints([][2]string{
-			{"j/k", "navigate"}, {"enter", "select"}, {"c", "config"}, {"d", "doctor"}, {"esc", "back"},
+			{"↑↓", "navigate"}, {"enter", "select"}, {"c", "config"}, {"d", "doctor"}, {"esc", "back"},
 		})
 	case ScreenLogs:
 		if m.logSearchMode {
@@ -135,18 +135,18 @@ func (m DashboardModel) footerHints() string {
 		}
 		if m.logSearchQuery != "" {
 			return keyHints([][2]string{
-				{"j/k ↑↓", "scroll"}, {"/", "edit filter"}, {"esc", "clear filter"}, {"y", "copy"}, {"r", "refresh"},
+				{"↑↓", "scroll"}, {"pg↑↓", "page"}, {"/", "edit filter"}, {"esc", "clear filter"}, {"y", "copy"}, {"r", "refresh"},
 			})
 		}
 		return keyHints([][2]string{
-			{"j/k ↑↓", "scroll"}, {"g/G", "top/bot"}, {"/", "search"}, {"y", "copy"}, {"r", "refresh"}, {"esc", "back"},
+			{"↑↓", "scroll"}, {"pg↑↓", "page"}, {"home/end", "top/bot"}, {"/", "search"}, {"y", "copy"}, {"r", "refresh"}, {"esc", "back"},
 		})
 	case ScreenConfig:
 		if m.cfgEditing {
 			return keyHints([][2]string{{"enter", "confirm"}, {"esc", "cancel"}})
 		}
 		return keyHints([][2]string{
-			{"j/k", "move"}, {"enter", "edit"}, {"ctrl+s", "save"}, {"esc", "close"},
+			{"↑↓", "move"}, {"enter", "edit"}, {"ctrl+s", "save"}, {"esc", "close"},
 		})
 	case ScreenDoctor:
 		return keyHints([][2]string{{"esc", "close"}})

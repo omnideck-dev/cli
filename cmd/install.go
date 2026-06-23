@@ -10,7 +10,6 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
-	"github.com/omnideck-dev/cli/styles"
 	"github.com/omnideck-dev/cli/tui"
 	"github.com/spf13/cobra"
 )
@@ -50,33 +49,6 @@ func runInstall(_ *cobra.Command, _ []string) error {
 	}
 
 	instances, _ := config.ListInstances()
-
-	if LoadedConfig != nil {
-		fmt.Printf("\nExisting installation %s detected.\n\n",
-			styles.Active.Render(LoadedConfig.ContainerName))
-
-		if !promptYN("Install a new instance instead? [y/N]: ") {
-			fmt.Println()
-			eng, err := engineFromConfig(LoadedConfig.Engine)
-			if err != nil {
-				return err
-			}
-			selectedIdx := 0
-			for i, inst := range instances {
-				if inst.Config != nil && inst.Config.ContainerName == LoadedConfig.ContainerName {
-					selectedIdx = i
-					break
-				}
-			}
-			model := tui.NewDashboardModelForUpdate(eng, instances, LoadedConfig, selectedIdx)
-			p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-			_, err = p.Run()
-			return err
-		}
-
-		fmt.Println()
-	}
-
 	eng, _ := engine.Detect()
 	model := tui.NewDashboardModelForInstall(eng, instances, installImageFlag)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())

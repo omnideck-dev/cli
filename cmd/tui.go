@@ -17,7 +17,7 @@ var tuiCmd = &cobra.Command{
 all installed instances. Shows live CPU/memory stats, logs, config, and health checks.
 
 Key bindings (Dashboard):
-  j/k     move selection
+  ↑↓      move selection
   enter   inspect instance
   n       install new instance
   u       update selected instance
@@ -35,7 +35,7 @@ func init() {
 func runTUI(_ *cobra.Command, _ []string) error {
 	eng, err := engine.Detect()
 	if err != nil {
-		return fmt.Errorf("no container engine available: %w\nInstall Docker: https://docs.docker.com/get-docker/", err)
+		return fmt.Errorf("no container engine available: %w", err)
 	}
 
 	instances, _ := config.ListInstances()

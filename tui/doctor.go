@@ -47,17 +47,20 @@ func RunDoctorChecks(cfg *config.Config, eng engine.Engine) []CheckResult {
 	// 0: Engine version
 	runCheck(0, func() CheckResult {
 		if eng == nil {
-			return CheckResult{"Container engine", CheckFail, "not found",
-				"Install Docker: https://docs.docker.com/get-docker/"}
+			return CheckResult{"Container engine", CheckFail, "not found — install Podman or Docker",
+				"Install Podman: https://podman.io/docs/installation"}
 		}
 		return CheckResult{"Container engine", CheckPass, eng.Name() + " " + eng.Version(), ""}
 	})
 
-	// 1: Docker socket permissions
+	// 1: Engine socket permissions
 	runCheck(1, func() CheckResult {
-		if eng == nil || !eng.HasPermission() {
-			return CheckResult{"Engine permissions", CheckFail, "permission denied",
-				"sudo usermod -aG docker $USER  (then log out and back in)"}
+		if eng == nil {
+			return CheckResult{"Engine permissions", CheckFail, "n/a — no engine found", ""}
+		}
+		if !eng.HasPermission() {
+			hint := "sudo usermod -aG " + eng.Name() + " $USER  (then log out and back in)"
+			return CheckResult{"Engine permissions", CheckFail, "permission denied", hint}
 		}
 		return CheckResult{"Engine permissions", CheckPass, "ok", ""}
 	})

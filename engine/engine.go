@@ -66,7 +66,7 @@ func Detect() (Engine, error) {
 	if docker.IsAvailable() {
 		return docker, nil
 	}
-	return nil, errors.New("neither Docker nor Podman was found.\nInstall Docker: https://docs.docker.com/get-docker/")
+	return nil, errors.New("neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation")
 }
 
 // lookPath is a variable so tests can override it.

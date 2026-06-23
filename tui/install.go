@@ -238,12 +238,16 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case allPreflightDone:
 		if m.engErr != nil {
 			m.Phase = PhaseError
-			m.errorMsg = fmt.Sprintf("Error: Neither Docker nor Podman was found.\nInstall Docker: https://docs.docker.com/get-docker/")
+			m.errorMsg = "Error: Neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation"
 			return m, nil
 		}
 		if m.permErr != nil {
+			engName := "docker"
+			if m.eng != nil {
+				engName = m.eng.Name()
+			}
 			m.Phase = PhaseError
-			m.errorMsg = "Error: Docker found but permission denied.\nFix: sudo usermod -aG docker $USER\nThen log out and back in."
+			m.errorMsg = "Error: " + engName + " found but permission denied.\nFix: sudo usermod -aG " + engName + " $USER\nThen log out and back in."
 			return m, nil
 		}
 		m.Phase = PhaseConfig

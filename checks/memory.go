@@ -74,16 +74,26 @@ func totalMemoryDarwin() (int64, error) {
 }
 
 // DefaultContainerMemory returns suggested --memory and --shm-size strings
-// based on total system RAM using M = max(1, min(floor(0.2*HostRAM_GB), 8)).
-// SHM is set to 50% of the memory value.
+// based on total system RAM. SHM is set to 50% of the memory value.
+//
+// Step table (midpoints between target values):
+//
+//	< 6 GB  → 1g  |  6–11 GB → 2g  |  12–23 GB → 3g
+//	24–47 GB → 4g  |  ≥ 48 GB → 6g
 func DefaultContainerMemory(totalMB int64) (memory, shmSize string) {
 	totalGB := totalMB / 1024
-	memGB := int64(float64(totalGB) * 0.2)
-	if memGB < 1 {
+	var memGB int64
+	switch {
+	case totalGB < 6:
 		memGB = 1
-	}
-	if memGB > 8 {
-		memGB = 8
+	case totalGB < 12:
+		memGB = 2
+	case totalGB < 24:
+		memGB = 3
+	case totalGB < 48:
+		memGB = 4
+	default:
+		memGB = 6
 	}
 	shmMB := memGB * 1024 / 2
 	return fmt.Sprintf("%dg", memGB), fmt.Sprintf("%dm", shmMB)
