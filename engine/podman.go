@@ -74,10 +74,9 @@ func (e *PodmanEngine) StopContainer(name string) error {
 
 func (e *PodmanEngine) StartContainer(name string) error {
 	cmd := buildCmd("podman", "start", name)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman start: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman start: %w: %s", err, strings.TrimSpace(string(out)))
 	}
 	return nil
 }
@@ -187,6 +186,67 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 
 	args = append(args, opts.Image)
 	return args
+}
+
+// ContainerStats returns live CPU and memory stats for a running container.
+func (e *PodmanEngine) ContainerStats(name string) (cpu string, cpuPct float64, ram, ramTotal string, ramPct float64, err error) {
+	cmd := exec.Command("podman", "stats", "--no-stream",
+		"--format", "{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}", name)
+	out, runErr := cmd.Output()
+	if runErr != nil {
+		return "", 0, "", "", 0, runErr
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", 0, "", "", 0, nil
+	}
+	parts := strings.SplitN(line, "\t", 3)
+	cpu = strings.TrimSpace(parts[0])
+	cpuPct = parsePctFloat(cpu)
+	if len(parts) >= 2 {
+		mem := strings.TrimSpace(parts[1])
+		if slash := strings.Index(mem, "/"); slash >= 0 {
+			ram = strings.TrimSpace(mem[:slash])
+			ramTotal = strings.TrimSpace(mem[slash+1:])
+		} else {
+			ram = mem
+		}
+	}
+	if len(parts) >= 3 {
+		ramPct = parsePctFloat(strings.TrimSpace(parts[2]))
+	}
+	// Podman/Docker reports MemPerc as 0 when no memory limit is set.
+	// Fall back to computing the ratio from the MemUsage "used / host_total" pair.
+	if ramPct == 0 && ram != "" && ramTotal != "" {
+		used := parseMemBytes(ram)
+		total := parseMemBytes(ramTotal)
+		if total > 0 {
+			ramPct = used / total
+		}
+	}
+	return cpu, cpuPct, ram, ramTotal, ramPct, nil
+}
+
+// ContainerInspect returns metadata about a container.
+func (e *PodmanEngine) ContainerInspect(name string) (InspectData, error) {
+	format := `{{.State.StartedAt}}|{{.Created}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}`
+	cmd := buildCmd("podman", "inspect", "--format", format, name)
+	out, err := cmd.Output()
+	if err != nil {
+		return InspectData{}, fmt.Errorf("podman inspect: %w", err)
+	}
+	return parseInspectLine(strings.TrimSpace(string(out)))
+}
+
+// FetchLogs returns the last tail lines of container log output (stdout + stderr).
+func (e *PodmanEngine) FetchLogs(name string, tail int) ([]string, error) {
+	cmd := buildCmd("podman", "logs", "--tail", fmt.Sprintf("%d", tail), "--timestamps", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("podman logs: %w", err)
+	}
+	raw := strings.Split(strings.TrimSpace(string(out)), "\n")
+	return raw, nil
 }
 
 // Ensure PodmanEngine implements Engine at compile time.

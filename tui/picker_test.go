@@ -27,31 +27,31 @@ func TestPickerInit(t *testing.T) {
 
 func TestPickerNavigateDown(t *testing.T) {
 	m := NewPickerModel("", "", makePickerItems())
-	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyDown})
 	if m.cursor != 1 {
-		t.Errorf("after j: cursor should be 1, got %d", m.cursor)
+		t.Errorf("after down: cursor should be 1, got %d", m.cursor)
 	}
 }
 
 func TestPickerNavigateUp(t *testing.T) {
 	m := NewPickerModel("", "", makePickerItems())
-	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyDown})
+	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyUp})
 	if m.cursor != 0 {
-		t.Errorf("after j then k: cursor should be 0, got %d", m.cursor)
+		t.Errorf("after down then up: cursor should be 0, got %d", m.cursor)
 	}
 }
 
 func TestPickerNoWrapAtBounds(t *testing.T) {
 	m := NewPickerModel("", "", makePickerItems())
 	// Navigate up at top — should stay at 0.
-	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyUp})
 	if m.cursor != 0 {
 		t.Errorf("cursor should not go below 0")
 	}
 	// Navigate past end — should stop at last.
 	for i := 0; i < 10; i++ {
-		m = updatePicker(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+		m = updatePicker(m, tea.KeyMsg{Type: tea.KeyDown})
 	}
 	if m.cursor != len(makePickerItems())-1 {
 		t.Errorf("cursor should not exceed last item, got %d", m.cursor)
@@ -61,7 +61,7 @@ func TestPickerNoWrapAtBounds(t *testing.T) {
 func TestPickerEnterSelects(t *testing.T) {
 	m := NewPickerModel("", "", makePickerItems())
 	// Navigate to beta.
-	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyDown})
 	m = updatePicker(m, tea.KeyMsg{Type: tea.KeyEnter})
 	if m.chosen != 1 {
 		t.Errorf("chosen should be 1 after Enter on beta, got %d", m.chosen)

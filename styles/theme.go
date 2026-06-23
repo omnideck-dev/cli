@@ -142,13 +142,6 @@ func Header(title, phase string, windowWidth int) string {
 	return line + "\n  " + Separator(50) + "\n"
 }
 
-func max(a, b int) int {
-	if a > b {
-		return a
-	}
-	return b
-}
-
 // ── Misc ──────────────────────────────────────────────────────────────────────
 
 // NoColor disables lipgloss colour rendering (e.g. for CI / pipe output).

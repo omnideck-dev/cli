@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"runtime"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/checks"
@@ -14,6 +15,11 @@ import (
 // UpdateModel is the Bubble Tea model for the update command.
 type UpdateModel struct {
 	BaseModel
+
+	// Embedded, when true, means this model runs inside DashboardModel.
+	// On done/error it emits WizardExitMsg instead of tea.Quit.
+	Embedded bool
+
 	cfg          *config.Config
 	eng          engine.Engine
 	spinnerModel SpinnerModel
@@ -48,6 +54,9 @@ func (m UpdateModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.HandleWindowSize(msg)
 	case tea.KeyMsg:
 		if m.Phase == PhaseDone || m.Phase == PhaseError {
+			if m.Embedded {
+				return m, func() tea.Msg { return WizardExitMsg{} }
+			}
 			return m, tea.Quit
 		}
 		_ = msg
@@ -118,6 +127,29 @@ func (m *UpdateModel) startUpdateStep(i int) tea.Cmd {
 		})
 	}
 	return tea.Sequence(startCmd, workCmd)
+}
+
+// TNView renders the update progress in Tokyo Night style.
+// Called by DashboardModel.viewUpdate() to render in the log-panel area.
+func (m UpdateModel) TNView(_ int) string {
+	var sb strings.Builder
+	switch m.Phase {
+	case PhaseDone:
+		sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render("Updated successfully!") + "\n\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press any key to return to dashboard.") + "\n")
+	case PhaseError:
+		sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render("Update failed") + "\n\n")
+		if m.errorMsg != "" {
+			sb.WriteString("     " + styles.TNDimText.Render(m.errorMsg) + "\n\n")
+		}
+		sb.WriteString("  " + styles.TNDimText.Render("Press any key to return.") + "\n")
+	default:
+		sb.WriteString("\n")
+		for _, step := range m.spinnerModel.Steps {
+			sb.WriteString("  " + renderTNStep(step, m.spinnerModel) + "\n")
+		}
+	}
+	return sb.String()
 }
 
 func (m UpdateModel) View() string {

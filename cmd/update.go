@@ -39,8 +39,17 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		return err
 	}
 
-	model := tui.NewUpdateModel(cfg, eng)
-	p := tea.NewProgram(model, tea.WithAltScreen())
+	instances, _ := config.ListInstances()
+	selectedIdx := 0
+	for i, inst := range instances {
+		if inst.Config != nil && inst.Config.ContainerName == cfg.ContainerName {
+			selectedIdx = i
+			break
+		}
+	}
+
+	model := tui.NewDashboardModelForUpdate(eng, instances, cfg, selectedIdx)
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
 }

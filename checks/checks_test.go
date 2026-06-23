@@ -153,12 +153,12 @@ func TestDefaultContainerMemory(t *testing.T) {
 		wantMem  string
 		wantShm  string
 	}{
-		{512, "1g", "512m"},    // 0.5 GB → floor(0.1) = 0, clamped to 1
-		{4096, "1g", "512m"},   // 4 GB → floor(0.8) = 0, clamped to 1
-		{8192, "1g", "512m"},   // 8 GB → floor(1.6) = 1
-		{16384, "3g", "1536m"}, // 16 GB → floor(3.2) = 3
-		{32768, "6g", "3072m"}, // 32 GB → floor(6.4) = 6
-		{65536, "8g", "4096m"}, // 64 GB → floor(12.8) = 12, clamped to 8
+		{512, "1g", "512m"},    // 0.5 GB  → < 6 GB tier
+		{4096, "1g", "512m"},   // 4 GB   → < 6 GB tier
+		{8192, "2g", "1024m"},  // 8 GB   → 6–11 GB tier
+		{16384, "3g", "1536m"}, // 16 GB  → 12–23 GB tier
+		{32768, "4g", "2048m"}, // 32 GB  → 24–47 GB tier
+		{65536, "6g", "3072m"}, // 64 GB  → ≥ 48 GB tier
 	}
 	for _, c := range cases {
 		mem, shm := DefaultContainerMemory(c.totalMB)

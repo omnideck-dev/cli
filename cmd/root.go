@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/x/term"
 	"github.com/omnideck-dev/cli/cmd/debug"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
@@ -65,6 +66,9 @@ func init() {
 		if v {
 			fmt.Printf("omnideck version %s (%s) built %s\n", versionStr, commitStr, dateStr)
 			return nil
+		}
+		if isInteractive() {
+			return runLauncher()
 		}
 		return cmd.Help()
 	}
@@ -174,11 +178,36 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 	}
 }
 
+// runLauncher shows the lightweight menu TUI and dispatches to the chosen command.
+func runLauncher() error {
+	eng, _ := engine.Detect()
+	action, ok := tui.RunMenu(versionStr, LoadedConfig, eng)
+	if !ok {
+		return nil
+	}
+	// Only external actions (tui/install/update) reach here; all others are
+	// handled inline inside the menu TUI.
+	switch action {
+	case "tui":
+		return runTUI(nil, nil)
+	case "install":
+		return runInstall(nil, nil)
+	case "update":
+		return runUpdate(nil, nil)
+	}
+	return nil
+}
+
+// isInteractive reports whether stdin is an interactive terminal.
+func isInteractive() bool {
+	return term.IsTerminal(os.Stdin.Fd())
+}
+
 // instanceName returns the short instance name derived from ConfigPath.
 func instanceName() string {
 	if nameFlag != "" {
 		return nameFlag
 	}
-	base := strings.TrimSuffix(fmt.Sprintf("%s", ConfigPath), ".yaml")
-	return fmt.Sprintf("%s", strings.TrimPrefix(base, config.InstancesDir()+"/"))
+	base := strings.TrimSuffix(ConfigPath, ".yaml")
+	return strings.TrimPrefix(base, config.InstancesDir()+"/")
 }
