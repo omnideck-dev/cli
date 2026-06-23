@@ -36,11 +36,11 @@ func (m PickerModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windowWidth = msg.Width
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "up", "k":
+		case "up", "shift+tab":
 			if m.cursor > 0 {
 				m.cursor--
 			}
-		case "down", "j":
+		case "down", "tab":
 			if m.cursor < len(m.items)-1 {
 				m.cursor++
 			}
@@ -77,7 +77,7 @@ func (m PickerModel) View() string {
 		out += cursor + nameStyle.Render(item.Name) + detail + "\n"
 	}
 
-	out += "\n" + styles.Dim.Render("  ↑↓ / jk  navigate    Enter  select    q  cancel") + "\n"
+	out += "\n" + styles.Dim.Render("  ↑↓  navigate    Enter  select    q  cancel") + "\n"
 	return out
 }
 

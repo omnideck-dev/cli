@@ -134,6 +134,36 @@ func TestListInstancesMultiple(t *testing.T) {
 	}
 }
 
+func TestWebUIPortOrDefault(t *testing.T) {
+	cfg := &Config{}
+	if got := cfg.WebUIPortOrDefault(); got != "2337" {
+		t.Errorf("empty WebUIPort: got %q, want '2337'", got)
+	}
+	cfg.WebUIPort = "8080"
+	if got := cfg.WebUIPortOrDefault(); got != "8080" {
+		t.Errorf("explicit port: got %q, want '8080'", got)
+	}
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.ContainerName != "omnideck" {
+		t.Errorf("ContainerName: got %q, want 'omnideck'", cfg.ContainerName)
+	}
+	if cfg.WebUIPort != "2337" {
+		t.Errorf("WebUIPort: got %q, want '2337'", cfg.WebUIPort)
+	}
+	if cfg.Image != DefaultImage {
+		t.Errorf("Image: got %q, want %q", cfg.Image, DefaultImage)
+	}
+	if cfg.Memory == "" {
+		t.Error("Memory should have a default value")
+	}
+	if cfg.ShmSize == "" {
+		t.Error("ShmSize should have a default value")
+	}
+}
+
 func TestMigrateImage(t *testing.T) {
 	tests := []struct {
 		name      string

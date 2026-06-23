@@ -219,6 +219,107 @@ func TestBuildPodmanRunArgsMemorySet(t *testing.T) {
 }
 
 
+// --- parsePctFloat ---
+
+func TestParsePctFloat(t *testing.T) {
+	cases := []struct {
+		in   string
+		want float64
+	}{
+		{"0%", 0.0},
+		{"100%", 1.0},
+		{"50%", 0.5},
+		{"  25.0%  ", 0.25},
+		{"", 0.0},
+		{"abc%", 0.0},
+	}
+	const eps = 1e-9
+	for _, c := range cases {
+		got := parsePctFloat(c.in)
+		diff := got - c.want
+		if diff < -eps || diff > eps {
+			t.Errorf("parsePctFloat(%q): got %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+// --- parseMemBytes ---
+
+func TestParseMemBytes(t *testing.T) {
+	cases := []struct {
+		in   string
+		want float64
+	}{
+		{"500MiB", 500 * (1 << 20)},
+		{"1GiB", 1 << 30},
+		{"2GB", 2e9},
+		{"512KiB", 512 * (1 << 10)},
+		{"1024B", 1024},
+		{"0", 0},
+	}
+	for _, c := range cases {
+		got := parseMemBytes(c.in)
+		if got != c.want {
+			t.Errorf("parseMemBytes(%q): got %v, want %v", c.in, got, c.want)
+		}
+	}
+}
+
+func TestParseMemBytesInvalid(t *testing.T) {
+	got := parseMemBytes("abc")
+	if got != 0 {
+		t.Errorf("parseMemBytes(\"abc\"): got %v, want 0", got)
+	}
+}
+
+// --- parseInspectLine ---
+
+func TestParseInspectLineValid(t *testing.T) {
+	line := "2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|3|healthy"
+	d, err := parseInspectLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.RestartCount != 3 {
+		t.Errorf("RestartCount: got %d, want 3", d.RestartCount)
+	}
+	if d.HealthStatus != "healthy" {
+		t.Errorf("HealthStatus: got %q, want 'healthy'", d.HealthStatus)
+	}
+	if d.StartedAt.IsZero() {
+		t.Error("StartedAt should be parsed")
+	}
+}
+
+func TestParseInspectLineHealthNone(t *testing.T) {
+	line := "2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|0|none"
+	d, err := parseInspectLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.HealthStatus != "" {
+		t.Errorf("HealthStatus 'none' should map to empty string, got %q", d.HealthStatus)
+	}
+}
+
+func TestParseInspectLineNoValue(t *testing.T) {
+	line := "2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|0|<no value>"
+	d, err := parseInspectLine(line)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if d.HealthStatus != "" {
+		t.Errorf("HealthStatus '<no value>' should map to empty string, got %q", d.HealthStatus)
+	}
+}
+
+func TestParseInspectLineTooFewFields(t *testing.T) {
+	_, err := parseInspectLine("only|two|fields")
+	if err == nil {
+		t.Fatal("expected error for < 4 pipe-separated fields")
+	}
+}
+
 // --- helpers ---
 
 func assertContains(t *testing.T, slice []string, want string) {

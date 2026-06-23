@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"testing"
 )
 
@@ -116,6 +117,62 @@ func TestValidateInputMemoryGood(t *testing.T) {
 	m.inputs[inputMemory].SetValue("4g")
 	if !m.validateCurrentInput() {
 		t.Error("'4g' should pass memory validation")
+	}
+}
+
+func TestValidContainerName(t *testing.T) {
+	valid := []string{"omnideck", "my-container", "box_1", "X123"}
+	for _, s := range valid {
+		if !validContainerName(s) {
+			t.Errorf("expected %q to be a valid container name", s)
+		}
+	}
+	invalid := []string{"", "-leadingdash", "has space", "dot.start"}
+	for _, s := range invalid {
+		// dot.start is actually valid by the regex (starts with letter)
+		// only check the ones we know are invalid
+		_ = s
+	}
+	definitelyInvalid := []string{"", "-leadingdash", "has space"}
+	for _, s := range definitelyInvalid {
+		if validContainerName(s) {
+			t.Errorf("expected %q to be an invalid container name", s)
+		}
+	}
+}
+
+func TestValidPort(t *testing.T) {
+	valid := []string{"1", "2337", "8080", "65535"}
+	for _, s := range valid {
+		if !validPort(s) {
+			t.Errorf("expected %q to be a valid port", s)
+		}
+	}
+	invalid := []string{"0", "65536", "-1", "abc", "", "8080.5"}
+	for _, s := range invalid {
+		if validPort(s) {
+			t.Errorf("expected %q to be an invalid port", s)
+		}
+	}
+}
+
+func TestExpandTilde(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	got := expandTilde("~/documents")
+	want := home + "/documents"
+	if got != want {
+		t.Errorf("expandTilde(~/documents): got %q, want %q", got, want)
+	}
+
+	abs := "/absolute/path"
+	if got := expandTilde(abs); got != abs {
+		t.Errorf("absolute path should pass through unchanged, got %q", got)
+	}
+
+	rel := "relative/path"
+	if got := expandTilde(rel); got != rel {
+		t.Errorf("relative path should pass through unchanged, got %q", got)
 	}
 }
 
