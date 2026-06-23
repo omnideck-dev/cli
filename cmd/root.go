@@ -208,6 +208,6 @@ func instanceName() string {
 	if nameFlag != "" {
 		return nameFlag
 	}
-	base := strings.TrimSuffix(fmt.Sprintf("%s", ConfigPath), ".yaml")
-	return fmt.Sprintf("%s", strings.TrimPrefix(base, config.InstancesDir()+"/"))
+	base := strings.TrimSuffix(ConfigPath, ".yaml")
+	return strings.TrimPrefix(base, config.InstancesDir()+"/")
 }

@@ -83,15 +83,21 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Rebuild instance list, preserving existing runtime state where possible.
 		existing := map[string]InstanceState{}
 		for _, inst := range m.instances {
+			if inst.Info.Config == nil {
+				continue
+			}
 			existing[inst.Info.Config.ContainerName] = inst
 		}
-		newStates := make([]InstanceState, len(msg))
-		for i, info := range msg {
+		newStates := make([]InstanceState, 0, len(msg))
+		for _, info := range msg {
+			if info.Config == nil {
+				continue
+			}
 			if prev, ok := existing[info.Config.ContainerName]; ok {
 				prev.Info = info
-				newStates[i] = prev
+				newStates = append(newStates, prev)
 			} else {
-				newStates[i] = InstanceState{Info: info, Status: "unknown"}
+				newStates = append(newStates, InstanceState{Info: info, Status: "unknown"})
 			}
 		}
 		m.instances = newStates

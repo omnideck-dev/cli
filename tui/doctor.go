@@ -71,6 +71,9 @@ func RunDoctorChecks(cfg *config.Config, eng engine.Engine) []CheckResult {
 			return CheckResult{"Container", CheckFail, "no config found",
 				"Run: omnideck install"}
 		}
+		if eng == nil {
+			return CheckResult{"Container", CheckWarn, "skipped — no engine found", ""}
+		}
 		status, err := eng.ContainerStatus(cfg.ContainerName)
 		if err != nil {
 			return CheckResult{"Container", CheckFail, fmt.Sprintf("'%s' not found", cfg.ContainerName),
@@ -214,9 +217,3 @@ func dirCheck(label, path string) CheckResult {
 	return CheckResult{label, CheckPass, path + " — writable", ""}
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
