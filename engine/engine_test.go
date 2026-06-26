@@ -127,6 +127,28 @@ func TestBuildRunArgsMacOS(t *testing.T) {
 	assertNotContains(t, args, "--user")
 }
 
+// TestBuildRunArgsWindows verifies Windows uses host.docker.internal (Docker
+// Desktop resolves it automatically) and omits Linux-only flags.
+func TestBuildRunArgsWindows(t *testing.T) {
+	opts := RunOptions{
+		Name:      "omnideck",
+		Image:     "ghcr.io/example/img:latest",
+		ShmSize:   "256m",
+		SharedDir: `C:\Users\user\Omnideck`,
+		StateDir:  `C:\Users\user\Omnideck\.state`,
+		WebUIPort: "2337",
+		Platform:  "windows",
+	}
+
+	args := buildRunArgs("docker", opts)
+
+	assertContains(t, args, "2337:8080")
+	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
+	assertNotContains(t, args, "--add-host=host-gateway:host-gateway")
+	// --user must be absent off Linux.
+	assertNotContains(t, args, "--user")
+}
+
 // TestBuildPodmanRunArgsHasReplace verifies --replace is present and Linux uses host.containers.internal.
 func TestBuildPodmanRunArgsHasReplace(t *testing.T) {
 	opts := RunOptions{

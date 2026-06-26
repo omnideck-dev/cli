@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -160,7 +161,7 @@ func TestExpandTilde(t *testing.T) {
 	home, _ := os.UserHomeDir()
 
 	got := expandTilde("~/documents")
-	want := home + "/documents"
+	want := filepath.Join(home, "documents")
 	if got != want {
 		t.Errorf("expandTilde(~/documents): got %q, want %q", got, want)
 	}

@@ -176,10 +176,13 @@ func buildRunArgs(binary string, opts RunOptions) []string {
 	// OLLAMA_HOST — always set so the container can find Ollama on the host.
 	ollamaHost := opts.OllamaHost
 	if ollamaHost == "" {
-		if opts.Platform == "darwin" {
-			ollamaHost = "host.docker.internal:11434"
-		} else {
+		// Docker Desktop (macOS + Windows) resolves host.docker.internal to the
+		// host automatically. On Linux there is no such name, so we point at
+		// host-gateway, which is mapped via --add-host above.
+		if opts.Platform == "linux" {
 			ollamaHost = "host-gateway:11434"
+		} else {
+			ollamaHost = "host.docker.internal:11434"
 		}
 	}
 	if !strings.HasPrefix(ollamaHost, "http") {

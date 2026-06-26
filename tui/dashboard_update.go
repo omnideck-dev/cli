@@ -437,12 +437,14 @@ func (m DashboardModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // copyToClipboard writes text to the system clipboard via pbcopy (macOS),
-// xclip, or xsel (Linux).
+// clip (Windows), or xclip/xsel (Linux).
 func copyToClipboard(text string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {
 	case "darwin":
 		cmd = exec.Command("pbcopy")
+	case "windows":
+		cmd = exec.Command("clip")
 	default:
 		if _, err := exec.LookPath("xclip"); err == nil {
 			cmd = exec.Command("xclip", "-selection", "clipboard")
@@ -577,9 +579,13 @@ func (m DashboardModel) toggleContainer() tea.Cmd {
 func openBrowserCmd(url string) tea.Cmd {
 	return func() tea.Msg {
 		var cmd *exec.Cmd
-		if runtime.GOOS == "darwin" {
+		switch runtime.GOOS {
+		case "darwin":
 			cmd = exec.Command("open", url)
-		} else {
+		case "windows":
+			// rundll32 opens the URL in the default browser.
+			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
+		default:
 			cmd = exec.Command("xdg-open", url)
 		}
 		_ = cmd.Start()

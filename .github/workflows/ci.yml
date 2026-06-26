@@ -7,8 +7,26 @@ on:
     branches: ["main"]
 
 jobs:
+  # ── Unit + smoke tests on natively-available runners ───────────
+  # macos-13 (Intel) is intentionally omitted: GitHub's Intel macOS
+  # runners are scarce and frequently fail to allocate (jobs queue for
+  # hours and get cancelled). darwin/amd64 is covered by cross-build below.
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-latest
+            label: linux/amd64
+          - runs-on: ubuntu-24.04-arm
+            label: linux/arm64
+          - runs-on: macos-latest
+            label: darwin/arm64
+          - runs-on: windows-latest
+            label: windows/amd64
+
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
@@ -23,4 +41,26 @@ jobs:
         run: go test ./...
 
       - name: Build
+        shell: bash
+        run: go build -o /dev/null .
+
+  # ── darwin/amd64 compile check ─────────────────────────────────
+  # Verifies the Intel macOS build still compiles without depending on
+  # a scarce native Intel runner. Pure-Go (no cgo), so cross-compiling
+  # from Linux is equivalent for build-breakage detection.
+  cross-build:
+    name: cross-build (darwin/amd64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Build darwin/amd64
+        env:
+          GOOS: darwin
+          GOARCH: amd64
         run: go build -o /dev/null .
