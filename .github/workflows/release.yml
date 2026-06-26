@@ -22,6 +22,8 @@ jobs:
             goarch: amd64
           - goos: darwin
             goarch: arm64
+          - goos: windows
+            goarch: amd64
 
     steps:
       - uses: actions/checkout@v4
@@ -40,11 +42,25 @@ jobs:
           DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
           mkdir -p dist
-          go build -ldflags "${LDFLAGS}" -o dist/omnideck .
-          chmod +x dist/omnideck
-          tar -czf dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz -C dist omnideck
+
+          # Windows binaries need a .exe extension.
+          BIN=omnideck
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            BIN=omnideck.exe
+          fi
+
+          go build -ldflags "${LDFLAGS}" -o "dist/${BIN}" .
+
+          # Package: zip for Windows, tar.gz for everything else.
+          ARCHIVE=omnideck-${{ matrix.goos }}-${{ matrix.goarch }}
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            (cd dist && zip "${ARCHIVE}.zip" "${BIN}")
+          else
+            chmod +x "dist/${BIN}"
+            tar -czf "dist/${ARCHIVE}.tar.gz" -C dist "${BIN}"
+          fi
 
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz
+          files: dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.*
