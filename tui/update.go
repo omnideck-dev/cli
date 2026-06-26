@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
@@ -119,7 +118,6 @@ func (m *UpdateModel) startUpdateStep(i int) tea.Cmd {
 				SharedDir:  cfg.SharedDir,
 				StateDir:   cfg.StateDir,
 				Restart:    "always",
-				OllamaHost: checks.OllamaHost(),
 				WebUIPort:  cfg.WebUIPortOrDefault(),
 				Platform:   runtime.GOOS,
 			}

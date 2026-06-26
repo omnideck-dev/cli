@@ -109,18 +109,12 @@ Pages speculative:                   1024.
 
 func TestOllamaHostCurrentPlatform(t *testing.T) {
 	h := OllamaHost()
-	if h == "" {
-		t.Fatal("OllamaHost should not be empty")
-	}
-	switch runtime.GOOS {
-	case "linux":
-		if h != "127.0.0.1:11434" {
-			t.Errorf("Linux: expected 127.0.0.1:11434, got %q", h)
-		}
-	case "darwin":
-		if h != "host.docker.internal:11434" {
-			t.Errorf("macOS: expected host.docker.internal:11434, got %q", h)
-		}
+	// OllamaHost is the address the CLI dials to check whether Ollama is running.
+	// The CLI runs on the host and Ollama listens on the host loopback, so this
+	// is 127.0.0.1 on every platform — notably NOT host.docker.internal, which
+	// only resolves inside containers, not from the host process.
+	if h != "127.0.0.1:11434" {
+		t.Errorf("expected 127.0.0.1:11434 on all platforms, got %q", h)
 	}
 }
 
