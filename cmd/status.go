@@ -2,7 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
 	"sync"
 
 	"github.com/charmbracelet/lipgloss"
@@ -45,12 +44,12 @@ func runStatus(_ *cobra.Command, _ []string) error {
 
 	// Gather status concurrently.
 	type result struct {
-		containerStatus string
-		containerErr    error
-		ollamaOK        bool
-		ollamaHost      string
-		sharedExists    bool
-		stateExists     bool
+		containerStatus   string
+		containerErr      error
+		ollamaOK          bool
+		ollamaHost        string
+		homeVolumeExists  bool
+		stateVolumeExists bool
 	}
 
 	var res result
@@ -69,10 +68,10 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}()
 	go func() {
 		defer wg.Done()
-		_, err := os.Stat(cfg.SharedDir)
-		res.sharedExists = err == nil
-		_, err = os.Stat(cfg.StateDir)
-		res.stateExists = err == nil
+		ok, _ := eng.VolumeExists(cfg.HomeVolumeName())
+		res.homeVolumeExists = ok
+		ok, _ = eng.VolumeExists(cfg.StateVolumeName())
+		res.stateVolumeExists = ok
 	}()
 
 	wg.Wait()
@@ -94,13 +93,13 @@ func runStatus(_ *cobra.Command, _ []string) error {
 		ollamaStatus = styles.Success.Render("✓ reachable at " + res.ollamaHost)
 	}
 
-	sharedStatus := styles.Error.Render("✗ missing")
-	if res.sharedExists {
-		sharedStatus = styles.Success.Render("✓ exists")
+	homeVolumeStatus := styles.Error.Render("✗ missing")
+	if res.homeVolumeExists {
+		homeVolumeStatus = styles.Success.Render("✓ exists")
 	}
-	stateStatus := styles.Error.Render("✗ missing")
-	if res.stateExists {
-		stateStatus = styles.Success.Render("✓ exists")
+	stateVolumeStatus := styles.Error.Render("✗ missing")
+	if res.stateVolumeExists {
+		stateVolumeStatus = styles.Success.Render("✓ exists")
 	}
 
 	fmt.Println()
@@ -109,8 +108,8 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  %s %s %s\n", label.Render("Container"), value.Render(cfg.ContainerName), containerDot+" "+res.containerStatus)
 	fmt.Printf("  %s %s\n", label.Render("Image"), value.Render(cfg.Image))
 	fmt.Printf("  %s %s\n", label.Render("Engine"), value.Render(cfg.Engine))
-	fmt.Printf("  %s %s  %s\n", label.Render("Shared dir"), value.Render(cfg.SharedDir), sharedStatus)
-	fmt.Printf("  %s %s  %s\n", label.Render("State dir"), value.Render(cfg.StateDir), stateStatus)
+	fmt.Printf("  %s %s  %s\n", label.Render("Home volume"), value.Render(cfg.HomeVolumeName()), homeVolumeStatus)
+	fmt.Printf("  %s %s  %s\n", label.Render("State volume"), value.Render(cfg.StateVolumeName()), stateVolumeStatus)
 	fmt.Printf("  %s %s\n", label.Render("Ollama"), ollamaStatus)
 	fmt.Printf("  %s %s\n", label.Render("Web UI"), value.Render("http://localhost:"+cfg.WebUIPortOrDefault()))
 	fmt.Println()

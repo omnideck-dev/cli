@@ -51,17 +51,18 @@ func TestRenderDoctorReportShowsHint(t *testing.T) {
 	}
 }
 
-func TestDirCheckMissing(t *testing.T) {
-	r := dirCheck("Test dir", "/nonexistent/path/12345")
+func TestVolumeCheckMissing(t *testing.T) {
+	r := volumeCheck("Test volume", "missing-volume", &mockEngine{})
 	if r.Status != CheckFail {
-		t.Error("missing dir should be CheckFail")
+		t.Error("missing volume should be CheckFail")
 	}
 }
 
-func TestDirCheckExists(t *testing.T) {
-	dir := t.TempDir()
-	r := dirCheck("Test dir", dir)
+func TestVolumeCheckExists(t *testing.T) {
+	r := volumeCheck("Test volume", "omnideck-home", &mockEngine{
+		volumes: map[string]bool{"omnideck-home": true},
+	})
 	if r.Status != CheckPass {
-		t.Errorf("existing writable dir should be CheckPass, got status %d detail=%q", r.Status, r.Detail)
+		t.Errorf("existing volume should be CheckPass, got status %d detail=%q", r.Status, r.Detail)
 	}
 }

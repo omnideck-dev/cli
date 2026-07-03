@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"os/user"
 	"strings"
 
 	"github.com/omnideck-dev/cli/cmd/debug"
@@ -43,6 +42,46 @@ func (e *DockerEngine) ContainerExists(name string) (bool, error) {
 		return false, fmt.Errorf("docker ps: %w", err)
 	}
 	return strings.TrimSpace(string(out)) == name, nil
+}
+
+func (e *DockerEngine) CreateVolume(name string) error {
+	cmd := buildCmd("docker", "volume", "create", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker volume create: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (e *DockerEngine) VolumeExists(name string) (bool, error) {
+	cmd := buildCmd("docker", "volume", "inspect", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return false, nil
+		}
+		return false, fmt.Errorf("docker volume inspect: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return true, nil
+}
+
+func (e *DockerEngine) RemoveVolume(name string) error {
+	cmd := buildCmd("docker", "volume", "rm", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("docker volume rm: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (e *DockerEngine) ExportVolume(name string, w io.Writer) error {
+	cmd := buildCmd("docker", "run", "--rm", "-v", name+":/data", "alpine", "tar", "-C", "/data", "-c", ".")
+	cmd.Stdout = w
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("docker volume export: %w", err)
+	}
+	return nil
 }
 
 func (e *DockerEngine) PullImage(image string, msgs chan<- string) error {
@@ -157,24 +196,10 @@ func buildRunArgs(binary string, opts RunOptions) []string {
 		args = append(args, "--add-host=host-gateway:host-gateway")
 	}
 
-	// Run as the current host user on Linux so files written into volumes are
-	// owned by the host user, preventing permission errors during uninstall.
-	// Skipped on macOS — Docker Desktop's volume sharing handles ownership
-	// differently and the UID space doesn't map the same way.
-	if opts.Platform == "linux" {
-		if u, err := user.Current(); err == nil {
-			args = append(args, "--user", u.Uid+":"+u.Gid)
-		}
-	}
-
-	// Volume mount — append :Z on Linux for SELinux.
-	sharedMount := opts.SharedDir + ":/home/computron"
-	stateMount := opts.StateDir + ":/var/lib/computron"
-	if opts.Platform == "linux" {
-		sharedMount += ":Z"
-		stateMount += ":Z"
-	}
-	args = append(args, "-v", sharedMount, "-v", stateMount)
+	args = append(args,
+		"-v", opts.HomeVolume+":/home/omnideck",
+		"-v", opts.StateVolume+":/var/lib/omnideck",
+	)
 
 	// OLLAMA_HOST — always set so the container can find Ollama on the host.
 	ollamaHost := opts.OllamaHost

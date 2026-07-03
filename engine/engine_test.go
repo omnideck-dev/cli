@@ -70,17 +70,17 @@ func TestDetectDockerFallback(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgsLinux verifies correct docker run args on Linux (with :Z mounts, port mapping, host-gateway).
+// TestBuildRunArgsLinux verifies correct docker run args on Linux.
 func TestBuildRunArgsLinux(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: "/home/user/Omnideck",
-		StateDir:  "/home/user/Omnideck/.state",
-		Restart:   "always",
-		WebUIPort: "2337",
-		Platform:  "linux",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		Restart:     "always",
+		WebUIPort:   "2337",
+		Platform:    "linux",
 	}
 
 	args := buildRunArgs("docker", opts)
@@ -88,54 +88,54 @@ func TestBuildRunArgsLinux(t *testing.T) {
 	assertContains(t, args, "--shm-size=256m")
 	assertContains(t, args, "2337:8080")
 	assertContains(t, args, "--add-host=host-gateway:host-gateway")
-	assertContains(t, args, "/home/user/Omnideck:/home/computron:Z")
-	assertContains(t, args, "/home/user/Omnideck/.state:/var/lib/computron:Z")
+	assertContains(t, args, "omnideck-home:/home/omnideck")
+	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host-gateway:11434")
 	assertContains(t, args, "PORT=8080")
 	assertNotContains(t, args, "--network")
-	// --user should be present on Linux (value depends on test runner UID).
-	assertContains(t, args, "--user")
+	assertNotContains(t, args, "--user")
 }
 
 // TestBuildRunArgsLinuxSecondInstance verifies a second instance maps a different host port.
 func TestBuildRunArgsLinuxSecondInstance(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck2",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: "/home/user/Omnideck2",
-		StateDir:  "/home/user/Omnideck2/.state",
-		WebUIPort: "2338",
-		Platform:  "linux",
+		Name:        "omnideck2",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck2-home",
+		StateVolume: "omnideck2-state",
+		WebUIPort:   "2338",
+		Platform:    "linux",
 	}
 
 	args := buildRunArgs("docker", opts)
 
 	assertContains(t, args, "2338:8080")
+	assertContains(t, args, "omnideck2-home:/home/omnideck")
+	assertContains(t, args, "omnideck2-state:/var/lib/omnideck")
 	// Internal PORT is always 8080 regardless of host port.
 	assertContains(t, args, "PORT=8080")
 }
 
-// TestBuildRunArgsMacOS verifies macOS-specific behaviour (no :Z, no host-gateway, OLLAMA_HOST via docker.internal).
+// TestBuildRunArgsMacOS verifies macOS-specific behaviour (no Linux host-gateway flag).
 func TestBuildRunArgsMacOS(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: "/Users/user/Omnideck",
-		StateDir:  "/Users/user/Omnideck/.state",
-		WebUIPort: "2337",
-		Platform:  "darwin",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		WebUIPort:   "2337",
+		Platform:    "darwin",
 	}
 
 	args := buildRunArgs("docker", opts)
 
 	assertContains(t, args, "2337:8080")
-	assertNotContains(t, args, "/Users/user/Omnideck:/home/computron:Z")
-	assertContains(t, args, "/Users/user/Omnideck:/home/computron")
+	assertContains(t, args, "omnideck-home:/home/omnideck")
+	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
 	assertNotContains(t, args, "--add-host=host-gateway:host-gateway")
-	// --user must be absent on macOS — Docker Desktop handles ownership differently.
 	assertNotContains(t, args, "--user")
 }
 
@@ -143,34 +143,35 @@ func TestBuildRunArgsMacOS(t *testing.T) {
 // Desktop resolves it automatically) and omits Linux-only flags.
 func TestBuildRunArgsWindows(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: `C:\Users\user\Omnideck`,
-		StateDir:  `C:\Users\user\Omnideck\.state`,
-		WebUIPort: "2337",
-		Platform:  "windows",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		WebUIPort:   "2337",
+		Platform:    "windows",
 	}
 
 	args := buildRunArgs("docker", opts)
 
 	assertContains(t, args, "2337:8080")
+	assertContains(t, args, "omnideck-home:/home/omnideck")
+	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
 	assertNotContains(t, args, "--add-host=host-gateway:host-gateway")
-	// --user must be absent off Linux.
 	assertNotContains(t, args, "--user")
 }
 
 // TestBuildPodmanRunArgsHasReplace verifies --replace is present and Linux uses host.containers.internal.
 func TestBuildPodmanRunArgsHasReplace(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: "/home/user/Omnideck",
-		StateDir:  "/home/user/Omnideck/.state",
-		WebUIPort: "2337",
-		Platform:  "linux",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		WebUIPort:   "2337",
+		Platform:    "linux",
 	}
 
 	args := buildPodmanRunArgs(opts)
@@ -178,42 +179,40 @@ func TestBuildPodmanRunArgsHasReplace(t *testing.T) {
 	assertContains(t, args, "2337:8080")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
 	assertNotContains(t, args, "--network")
-	assertContains(t, args, "/home/user/Omnideck:/home/computron:Z,U")
-	assertContains(t, args, "/home/user/Omnideck/.state:/var/lib/computron:Z,U")
+	assertContains(t, args, "omnideck-home:/home/omnideck")
+	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
 }
 
-// TestBuildPodmanRunArgsMacOS verifies Podman macOS uses host.docker.internal and no :Z,U mounts.
+// TestBuildPodmanRunArgsMacOS verifies Podman macOS uses host.docker.internal.
 func TestBuildPodmanRunArgsMacOS(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: "/Users/user/Omnideck",
-		StateDir:  "/Users/user/Omnideck/.state",
-		WebUIPort: "2337",
-		Platform:  "darwin",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		WebUIPort:   "2337",
+		Platform:    "darwin",
 	}
 
 	args := buildPodmanRunArgs(opts)
 	assertContains(t, args, "--replace")
 	assertContains(t, args, "2337:8080")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
-	// No SELinux or user-namespace flags on macOS.
-	assertNotContains(t, args, "/Users/user/Omnideck:/home/computron:Z,U")
-	assertNotContains(t, args, "/Users/user/Omnideck:/home/computron:Z")
-	assertContains(t, args, "/Users/user/Omnideck:/home/computron")
+	assertContains(t, args, "omnideck-home:/home/omnideck")
+	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
 }
 
 // TestBuildRunArgsMemorySet verifies --memory is included when Memory is set.
 func TestBuildRunArgsMemorySet(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		Memory:    "4g",
-		ShmSize:   "2048m",
-		SharedDir: "/home/user/Omnideck",
-		StateDir:  "/home/user/Omnideck/.state",
-		Platform:  "linux",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		Memory:      "4g",
+		ShmSize:     "2048m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		Platform:    "linux",
 	}
 	args := buildRunArgs("docker", opts)
 	assertContains(t, args, "--memory=4g")
@@ -222,12 +221,12 @@ func TestBuildRunArgsMemorySet(t *testing.T) {
 // TestBuildRunArgsMemoryEmpty verifies --memory is omitted when Memory is not set.
 func TestBuildRunArgsMemoryEmpty(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		ShmSize:   "256m",
-		SharedDir: "/home/user/Omnideck",
-		StateDir:  "/home/user/Omnideck/.state",
-		Platform:  "linux",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		Platform:    "linux",
 	}
 	args := buildRunArgs("docker", opts)
 	for _, a := range args {
@@ -240,18 +239,17 @@ func TestBuildRunArgsMemoryEmpty(t *testing.T) {
 // TestBuildPodmanRunArgsMemorySet verifies --memory is included for Podman too.
 func TestBuildPodmanRunArgsMemorySet(t *testing.T) {
 	opts := RunOptions{
-		Name:      "omnideck",
-		Image:     "ghcr.io/example/img:latest",
-		Memory:    "2g",
-		ShmSize:   "1024m",
-		SharedDir: "/home/user/Omnideck",
-		StateDir:  "/home/user/Omnideck/.state",
-		Platform:  "linux",
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		Memory:      "2g",
+		ShmSize:     "1024m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		Platform:    "linux",
 	}
 	args := buildPodmanRunArgs(opts)
 	assertContains(t, args, "--memory=2g")
 }
-
 
 // --- parsePctFloat ---
 
@@ -385,4 +383,3 @@ func assertContainsPrefix(t *testing.T, slice []string, prefix string) {
 	}
 	t.Errorf("args %v: expected an element with prefix %q", slice, prefix)
 }
-

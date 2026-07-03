@@ -35,6 +35,46 @@ func (e *PodmanEngine) ContainerExists(name string) (bool, error) {
 	return strings.TrimSpace(string(out)) == name, nil
 }
 
+func (e *PodmanEngine) CreateVolume(name string) error {
+	cmd := buildCmd("podman", "volume", "create", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman volume create: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (e *PodmanEngine) VolumeExists(name string) (bool, error) {
+	cmd := buildCmd("podman", "volume", "inspect", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if _, ok := err.(*exec.ExitError); ok {
+			return false, nil
+		}
+		return false, fmt.Errorf("podman volume inspect: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return true, nil
+}
+
+func (e *PodmanEngine) RemoveVolume(name string) error {
+	cmd := buildCmd("podman", "volume", "rm", name)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("podman volume rm: %w: %s", err, strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+func (e *PodmanEngine) ExportVolume(name string, w io.Writer) error {
+	cmd := buildCmd("podman", "volume", "export", name)
+	cmd.Stdout = w
+	cmd.Stderr = os.Stderr
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("podman volume export: %w", err)
+	}
+	return nil
+}
+
 func (e *PodmanEngine) PullImage(image string, msgs chan<- string) error {
 	cmd := buildCmd("podman", "pull", image)
 	stdout, err := cmd.StdoutPipe()
@@ -159,15 +199,10 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 	// Map host port → container port 8080 for multi-instance support.
 	args = append(args, "-p", hostPort+":8080")
 
-	sharedMount := opts.SharedDir + ":/home/computron"
-	stateMount := opts.StateDir + ":/var/lib/computron"
-	if opts.Platform == "linux" {
-		// :Z — SELinux relabelling; :U — remap volume ownership to the container's
-		// user namespace so host user can read/delete files after uninstall.
-		sharedMount += ":Z,U"
-		stateMount += ":Z,U"
-	}
-	args = append(args, "-v", sharedMount, "-v", stateMount)
+	args = append(args,
+		"-v", opts.HomeVolume+":/home/omnideck",
+		"-v", opts.StateVolume+":/var/lib/omnideck",
+	)
 
 	// OLLAMA_HOST — always set. On Linux, Podman 4+ automatically resolves
 	// host.containers.internal to the host IP without extra flags.

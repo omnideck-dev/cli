@@ -34,27 +34,17 @@ unreachable on any host port.
 
 ---
 
-## 3. File Ownership / Uninstall
+## 3. Named Volume Persistence / Uninstall
 
-**Approach:** Docker uses `--user UID:GID`; Podman uses `:U` on volume mounts.
-Both should cause container-written files to be owned by the host user.
+**Approach:** Docker and Podman use named volumes for `/home/omnideck` and
+`/var/lib/omnideck`, so host filesystem ownership no longer affects uninstall.
 
 **To test:**
-- After install and running, check ownership: `ls -la ~/Omnideck/`
-- Files should be owned by the current user, not root or an unknown UID
-- Uninstall → delete data dirs → should succeed without `sudo`
+- After install, inspect mounts and confirm `Type:"volume"`, not `Type:"bind"`
+- Confirm volumes are named `{container}-home` and `{container}-state`
+- Uninstall → delete data volumes → should succeed without `sudo`
 - Test the backup path (answer yes to backup prompt) — tar.gz created and complete
-- Test with a container that has written files before uninstall (not just empty dirs)
-
-**Open question — Docker `--user` compatibility:**
-- Does the container app function correctly when run as the host user (UID/GID)?
-  Some images set up `/home`, permissions, etc. for a specific internal UID.
-  If the app breaks under `--user`, this flag needs to be removed and the
-  `sudo rm -rf` fallback message is the only option.
-
-**Open question — Podman `:U` in rootful mode:**
-- `:U` is designed for rootless Podman user namespace remapping. In rootful
-  Podman (running as root), the behavior may differ or have no effect.
+- Test with a container that has written files before uninstall (not just empty volumes)
 
 ---
 
@@ -64,12 +54,12 @@ Combinations to validate end-to-end (install → use → uninstall):
 
 | Engine          | OS              | Notes                                      |
 |-----------------|-----------------|---------------------------------------------|
-| Docker          | Linux           | Primary target. `host-gateway`, `--user`    |
-| Podman rootless | Linux (Fedora)  | Primary target. `:Z,U`, `host.containers.internal` |
+| Docker          | Linux           | Primary target. `OLLAMA_HOST=http://host-gateway:11434` |
+| Podman rootless | Linux (Fedora)  | Primary target. Built-in host aliases      |
 | Podman rootless | Linux (Ubuntu)  | Podman version may differ                  |
-| Podman rootful  | Linux           | `:U` behavior unclear; `--user` not used   |
+| Podman rootful  | Linux           | Named volume behavior should match rootless |
 | Docker Desktop  | macOS           | Volume ownership handled by Desktop        |
-| Podman Desktop  | macOS           | `host.docker.internal` may not be auto-set |
+| Podman Desktop  | macOS           | Host aliases resolved by Podman machine DNS |
 
 ---
 
@@ -93,10 +83,8 @@ and using that as a literal IP address instead of `host-gateway`.
 **`host.containers.internal`** is automatically injected into container
 `/etc/hosts` starting in Podman 4.0.
 
-**`:U` volume flag** requires Podman 4.0+.
-
 **Risk:** RHEL 8 ships Podman 3.x. Ubuntu 20.04 LTS ships an older version.
-On these systems, Ollama would be silently unreachable and `:U` would error.
+On these systems, Ollama may be silently unreachable.
 
 **To test:**
 - `podman --version` — confirm ≥ 4.0
@@ -110,9 +98,12 @@ On these systems, Ollama would be silently unreachable and `:U` would error.
 With the switch from `--network host` to bridge networking, Ollama access routes
 through a host alias instead of the loopback.
 
-**Docker/Linux:** `host-gateway` → resolves to host IP (requires Docker 20.10+)
-**Podman/Linux:** `host.containers.internal` → auto-injected by Podman 4.0+
-**macOS:** `host.docker.internal` → provided by Docker Desktop / needs verification on Podman Desktop
+The CLI always sets `OLLAMA_HOST` inside the Omnideck container. The app should
+read that env var instead of hardcoding a host name.
+
+**Docker/Linux:** `OLLAMA_HOST=http://host-gateway:11434` (requires Docker 20.10+)
+**Podman/Linux:** `OLLAMA_HOST=http://host.containers.internal:11434`
+**macOS/Windows Docker:** `OLLAMA_HOST=http://host.docker.internal:11434`
 
 **To test:**
 - Install with Ollama running → confirm the web UI can use Ollama models
@@ -124,13 +115,11 @@ through a host alias instead of the loopback.
 
 ## 8. SELinux (RHEL / Fedora)
 
-`:Z` on volume mounts relabels the directory for SELinux access. Without it,
-the container can't read or write the mounted path on SELinux-enforcing systems.
+Named volumes do not require bind-mount relabel flags.
 
 **To test:**
 - Install on Fedora/RHEL with SELinux enforcing
 - Confirm no AVC denial in `journalctl -xe` or `ausearch -m avc`
-- With the `:U` flag combined (`:Z,U`), confirm both flags apply correctly
 
 ---
 
@@ -161,26 +150,27 @@ time. SHM = 50% of M.
 
 ---
 
-## 11. Uninstall — StateDir Inside SharedDir
+## 11. Uninstall — Named Volumes
 
-`StateDir` is now `SharedDir/.state`. Deleting `SharedDir` in the uninstall loop
-removes `.state` at the same time. The second loop iteration for `StateDir` will
-hit `IsNotExist` and show "(already removed)".
+`omnideck uninstall` removes Docker/Podman named volumes when the user confirms
+data deletion. Host bind-mount directories are no longer removed by the CLI.
 
 **To test:**
-- Confirm uninstall shows check for SharedDir and "(already removed)" for StateDir
-- Confirm the resulting "(already removed)" warning is not alarming to users
-  (may want to suppress it or skip StateDir if it's a subpath of SharedDir)
+- Confirm uninstall prompts to delete `{container}-home` and `{container}-state`
+- Confirm declining the prompt preserves both volumes
+- Confirm accepting the prompt removes both volumes
 
 ---
 
 ## 12. Backup Archive
 
-`omnideck uninstall` optionally creates a `.tar.gz` backup before deletion.
+`omnideck uninstall` optionally creates a `.tar.gz` backup before deleting
+volumes. The archive contains native volume exports as `home.tar` and
+`state.tar`.
 
 **To test:**
 - Answer yes to backup prompt — verify archive created in home directory
-- Verify archive contains `shared/` and `state/` prefixes
+- Verify archive contains `home.tar` and `state.tar`
 - Verify archive can be extracted: `tar xzf omnideck-backup-*.tar.gz`
-- Test with symlinks in the shared directory (code handles them but untested)
+- Verify a nested export can be inspected with `tar tf home.tar`
 - Test with very large shared directories — does it block the terminal?

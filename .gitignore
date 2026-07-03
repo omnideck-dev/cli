@@ -8,6 +8,9 @@
 *.so
 *.dylib
 
+# dist folder for local tests
+dist/
+
 # Test binary, built with `go test -c`
 *.test
 

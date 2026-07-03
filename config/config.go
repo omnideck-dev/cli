@@ -13,9 +13,9 @@ import (
 // Config holds all persisted settings for omnideck.
 type Config struct {
 	ContainerName string    `yaml:"container_name"`
-	SharedDir     string    `yaml:"shared_dir"`
-	StateDir      string    `yaml:"state_dir"`
-	Memory        string    `yaml:"memory"`      // container --memory limit (e.g. "2g")
+	HomeVolume    string    `yaml:"home_volume,omitempty"`
+	StateVolume   string    `yaml:"state_volume,omitempty"`
+	Memory        string    `yaml:"memory"` // container --memory limit (e.g. "2g")
 	ShmSize       string    `yaml:"shm_size"`
 	WebUIPort     string    `yaml:"web_ui_port"` // host port for the web UI (default "2337")
 	Engine        string    `yaml:"engine"`      // "docker" or "podman"
@@ -92,13 +92,29 @@ func DefaultPath() string {
 func DefaultConfig() *Config {
 	return &Config{
 		ContainerName: "omnideck",
-		SharedDir:     expandHome("~/Omnideck"),
-		StateDir:      expandHome("~/Omnideck/.state"),
 		Memory:        "2g",
 		ShmSize:       "1024m",
 		WebUIPort:     "2337",
 		Image:         DefaultImage,
 	}
+}
+
+// HomeVolumeName returns the configured home volume or derives one from the
+// container name. Empty keeps older configs usable without migration.
+func (c *Config) HomeVolumeName() string {
+	if c.HomeVolume != "" {
+		return c.HomeVolume
+	}
+	return c.ContainerName + "-home"
+}
+
+// StateVolumeName returns the configured state volume or derives one from the
+// container name. Empty keeps older configs usable without migration.
+func (c *Config) StateVolumeName() string {
+	if c.StateVolume != "" {
+		return c.StateVolume
+	}
+	return c.ContainerName + "-state"
 }
 
 // MigrateImage updates a legacy image reference to DefaultImage. It returns
@@ -135,8 +151,6 @@ func Load(path string) (*Config, error) {
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("parsing config: %w", err)
 	}
-	cfg.SharedDir = expandHome(cfg.SharedDir)
-	cfg.StateDir = expandHome(cfg.StateDir)
 	return &cfg, nil
 }
 

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
@@ -18,19 +19,28 @@ type mockEngine struct {
 	stopErr         error
 	fetchLines      []string
 	fetchErr        error
+	volumes         map[string]bool
 }
 
-func (m *mockEngine) Name() string                    { return "mock" }
-func (m *mockEngine) IsAvailable() bool               { return true }
-func (m *mockEngine) HasPermission() bool              { return true }
-func (m *mockEngine) Version() string                  { return "1.0" }
-func (m *mockEngine) ImageDigest(string) string        { return "" }
+func (m *mockEngine) Name() string                          { return "mock" }
+func (m *mockEngine) IsAvailable() bool                     { return true }
+func (m *mockEngine) HasPermission() bool                   { return true }
+func (m *mockEngine) Version() string                       { return "1.0" }
+func (m *mockEngine) ImageDigest(string) string             { return "" }
 func (m *mockEngine) PullImage(string, chan<- string) error { return nil }
-func (m *mockEngine) RunContainer(engine.RunOptions) error { return nil }
-func (m *mockEngine) RemoveContainer(string) error     { return nil }
-func (m *mockEngine) TailLogs(string, bool, int) error { return nil }
+func (m *mockEngine) RunContainer(engine.RunOptions) error  { return nil }
+func (m *mockEngine) RemoveContainer(string) error          { return nil }
+func (m *mockEngine) TailLogs(string, bool, int) error      { return nil }
 func (m *mockEngine) ContainerExists(string) (bool, error) {
 	return m.containerExists, nil
+}
+func (m *mockEngine) CreateVolume(string) error { return nil }
+func (m *mockEngine) VolumeExists(name string) (bool, error) {
+	return m.volumes[name], nil
+}
+func (m *mockEngine) RemoveVolume(string) error { return nil }
+func (m *mockEngine) ExportVolume(string, io.Writer) error {
+	return nil
 }
 func (m *mockEngine) StartContainer(string) error { return m.startErr }
 func (m *mockEngine) StopContainer(string) error  { return m.stopErr }
@@ -49,8 +59,6 @@ func (m *mockEngine) ContainerInspect(string) (engine.InspectData, error) {
 
 var testCfg = &config.Config{
 	ContainerName: "omnideck",
-	SharedDir:     "/tmp/shared",
-	StateDir:      "/tmp/state",
 	Image:         "ghcr.io/omnideck-dev/omnideck:main",
 	WebUIPort:     "2337",
 }

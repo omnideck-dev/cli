@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"net"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -123,20 +122,20 @@ func RunDoctorChecks(cfg *config.Config, eng engine.Engine) []CheckResult {
 		return CheckResult{"Port " + port + " (Web UI)", CheckPass, "reachable", ""}
 	})
 
-	// 6: Shared dir writable
+	// 6: Home volume exists
 	runCheck(6, func() CheckResult {
 		if cfg == nil {
-			return CheckResult{"Shared dir", CheckWarn, "no config", ""}
+			return CheckResult{"Home volume", CheckWarn, "no config", ""}
 		}
-		return dirCheck("Shared dir", cfg.SharedDir)
+		return volumeCheck("Home volume", cfg.HomeVolumeName(), eng)
 	})
 
-	// 7: State dir writable
+	// 7: State volume exists
 	runCheck(7, func() CheckResult {
 		if cfg == nil {
-			return CheckResult{"State dir", CheckWarn, "no config", ""}
+			return CheckResult{"State volume", CheckWarn, "no config", ""}
 		}
-		return dirCheck("State dir", cfg.StateDir)
+		return volumeCheck("State volume", cfg.StateVolumeName(), eng)
 	})
 
 	// 8: Memory
@@ -197,23 +196,16 @@ func RenderDoctorReport(results []CheckResult) (string, bool) {
 	return out, allPass
 }
 
-func dirCheck(label, path string) CheckResult {
-	fi, err := os.Stat(path)
+func volumeCheck(label, name string, eng engine.Engine) CheckResult {
+	if eng == nil {
+		return CheckResult{label, CheckWarn, "skipped — no engine found", ""}
+	}
+	exists, err := eng.VolumeExists(name)
 	if err != nil {
-		return CheckResult{label, CheckFail, path + " — not found",
-			"Run: omnideck install"}
+		return CheckResult{label, CheckWarn, name + " — could not check", err.Error()}
 	}
-	if !fi.IsDir() {
-		return CheckResult{label, CheckFail, path + " — not a directory", ""}
+	if !exists {
+		return CheckResult{label, CheckFail, name + " — not found", "Run: omnideck install"}
 	}
-	// Check writability by attempting to create a temp file.
-	f, err := os.CreateTemp(path, ".omnideck-check-*")
-	if err != nil {
-		return CheckResult{label, CheckFail, path + " — not writable",
-			"Check directory permissions"}
-	}
-	f.Close()
-	os.Remove(f.Name())
-	return CheckResult{label, CheckPass, path + " — writable", ""}
+	return CheckResult{label, CheckPass, name + " — exists", ""}
 }
-
