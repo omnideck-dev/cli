@@ -135,14 +135,20 @@ type Engine interface {
 ```go
 type Config struct {
     ContainerName string    `yaml:"container_name"`
-    SharedDir     string    `yaml:"shared_dir"`
-    StateDir      string    `yaml:"state_dir"`
+    HomeVolume    string    `yaml:"home_volume,omitempty"`
+    StateVolume   string    `yaml:"state_volume,omitempty"`
+    Memory        string    `yaml:"memory"`
     ShmSize       string    `yaml:"shm_size"`
+    WebUIPort     string    `yaml:"web_ui_port"`
     Engine        string    `yaml:"engine"`   // "docker" or "podman"
     Image         string    `yaml:"image"`
     InstalledAt   time.Time `yaml:"installed_at"`
 }
 ```
+
+Volume override fields are optional. Use `cfg.HomeVolumeName()` and
+`cfg.StateVolumeName()` so missing values derive from `{ContainerName}-home`
+and `{ContainerName}-state`.
 
 ---
 

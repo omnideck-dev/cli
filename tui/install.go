@@ -86,7 +86,7 @@ type InstallModel struct {
 	savedCfg   *config.Config
 
 	// Error.
-	errorMsg     string
+	errorMsg      string
 	noEngineFound bool // true when neither Docker nor Podman was detected
 
 	preflightSpinner spinner.Model
@@ -94,7 +94,6 @@ type InstallModel struct {
 
 const (
 	inputContainerName = iota
-	inputSharedDir
 	inputMemory
 	inputShmSize
 	inputWebUIPort
@@ -129,9 +128,6 @@ func NewInstallModel(configPath string, initial *config.Config, imageOverride st
 	}
 	inputs[inputContainerName].Placeholder = "omnideck"
 	inputs[inputContainerName].SetValue(defaults.ContainerName)
-
-	inputs[inputSharedDir].Placeholder = "~/Omnideck"
-	inputs[inputSharedDir].SetValue(defaults.SharedDir)
 
 	inputs[inputMemory].Placeholder = "2g"
 	inputs[inputMemory].SetValue(defaultMem)
@@ -365,12 +361,6 @@ func (m *InstallModel) validateCurrentInput() bool {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
 			return false
 		}
-	case inputSharedDir:
-		expanded := expandTilde(val)
-		if !filepath.IsAbs(expanded) {
-			m.inputErrs[m.inputFocus] = "must be an absolute path (e.g. /home/user/Omnideck)"
-			return false
-		}
 	case inputMemory, inputShmSize:
 		if !validMemSize(val) {
 			m.inputErrs[m.inputFocus] = "must be a number + unit (e.g. 512m, 2g)"
@@ -425,10 +415,6 @@ func (m *InstallModel) buildConfirmWarnings() {
 	if m.memWarning != "" {
 		m.confirmWarnings = append(m.confirmWarnings, "⚠  "+m.memWarning)
 	}
-	if runtime.GOOS == "darwin" {
-		m.confirmWarnings = append(m.confirmWarnings,
-			"⚠  macOS: --network host behaves differently in Docker Desktop.\n   Ports may not be exposed as expected.")
-	}
 }
 
 func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -454,8 +440,8 @@ func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 var installStepLabels = []string{
-	"Create shared directory",
-	"Create state directory",
+	"Create home volume",
+	"Create state volume",
 	"Remove existing container (if present)",
 	"Pull image",
 	"Run container",
@@ -517,13 +503,13 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 
 	var workCmd tea.Cmd
 	switch i {
-	case 0: // Create shared dir.
+	case 0: // Create home volume.
 		workCmd = StepCmd(i, func() (string, error) {
-			return "", os.MkdirAll(cfg.SharedDir, 0o755)
+			return "", eng.CreateVolume(cfg.HomeVolumeName())
 		})
-	case 1: // Create state dir.
+	case 1: // Create state volume.
 		workCmd = StepCmd(i, func() (string, error) {
-			return "", os.MkdirAll(cfg.StateDir, 0o755)
+			return "", eng.CreateVolume(cfg.StateVolumeName())
 		})
 	case 2: // Remove existing container.
 		workCmd = StepCmd(i, func() (string, error) {
@@ -547,15 +533,15 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 	case 4: // Run container.
 		workCmd = StepCmd(i, func() (string, error) {
 			opts := engine.RunOptions{
-				Name:      cfg.ContainerName,
-				Image:     cfg.Image,
-				Memory:    cfg.Memory,
-				ShmSize:   cfg.ShmSize,
-				SharedDir: cfg.SharedDir,
-				StateDir:  cfg.StateDir,
-				Restart:   "always",
-				WebUIPort: cfg.WebUIPortOrDefault(),
-				Platform:  runtime.GOOS,
+				Name:        cfg.ContainerName,
+				Image:       cfg.Image,
+				Memory:      cfg.Memory,
+				ShmSize:     cfg.ShmSize,
+				HomeVolume:  cfg.HomeVolumeName(),
+				StateVolume: cfg.StateVolumeName(),
+				Restart:     "always",
+				WebUIPort:   cfg.WebUIPortOrDefault(),
+				Platform:    runtime.GOOS,
 			}
 			return "", eng.RunContainer(opts)
 		})
@@ -574,16 +560,12 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 }
 
 func (m *InstallModel) buildConfig() *config.Config {
-	sharedDir := strings.TrimSpace(m.inputs[inputSharedDir].Value())
-	stateDir := expandTilde(sharedDir) + "/.state"
 	image := config.DefaultConfig().Image
 	if m.imageOverride != "" {
 		image = m.imageOverride
 	}
 	return &config.Config{
 		ContainerName: strings.TrimSpace(m.inputs[inputContainerName].Value()),
-		SharedDir:     sharedDir,
-		StateDir:      stateDir,
 		Memory:        strings.TrimSpace(m.inputs[inputMemory].Value()),
 		ShmSize:       strings.TrimSpace(m.inputs[inputShmSize].Value()),
 		WebUIPort:     strings.TrimSpace(m.inputs[inputWebUIPort].Value()),
@@ -616,7 +598,11 @@ func (m InstallModel) View() string {
 func (m InstallModel) viewPreflight() string {
 	out := styles.Header("OMNIDECK", "Preflight", m.WindowWidth)
 
-	type row struct{ label, detail string; ok, done bool; warn bool }
+	type row struct {
+		label, detail string
+		ok, done      bool
+		warn          bool
+	}
 	var rows []row
 
 	engDone := m.eng != nil || m.engErr != nil
@@ -707,10 +693,9 @@ func (m InstallModel) viewPreflight() string {
 func (m InstallModel) viewConfig() string {
 	out := styles.Header("OMNIDECK", "Configuration", m.WindowWidth)
 
-	fieldNames := []string{"Container name", "Shared directory", "Memory limit", "SHM size", "Web UI port"}
+	fieldNames := []string{"Container name", "Memory limit", "SHM size", "Web UI port"}
 	fieldDescs := []string{
 		"name for the Docker/Podman container",
-		"host path mounted into the container as ~/Omnideck",
 		"container RAM limit  (e.g. 2g, 4g) — default based on your system RAM",
 		"shared memory size  (e.g. 512m, 1g) — default is 50% of memory limit",
 		"host port for the web UI  (e.g. 2337, 2338 for a second instance)",
@@ -746,13 +731,13 @@ func (m InstallModel) viewConfirm() string {
 	if m.imageOverride != "" {
 		image = m.imageOverride
 	}
-	sharedDir := m.inputs[inputSharedDir].Value()
+	cfg := m.buildConfig()
 	summary := kv("Engine", m.eng.Name()) +
 		kv("OS / Arch", runtime.GOOS+" / "+runtime.GOARCH) +
 		"\n" +
 		kv("Container name", m.inputs[inputContainerName].Value()) +
-		kv("Shared dir", sharedDir) +
-		kv("State dir", expandTilde(sharedDir)+"/.state") +
+		kv("Home volume", cfg.HomeVolumeName()) +
+		kv("State volume", cfg.StateVolumeName()) +
 		kv("Memory limit", m.inputs[inputMemory].Value()) +
 		kv("SHM size", m.inputs[inputShmSize].Value()) +
 		kv("Web UI port", m.inputs[inputWebUIPort].Value()) +
@@ -785,7 +770,9 @@ func (m InstallModel) viewDone() string {
 	}
 	out += kv("Web UI", "http://localhost:"+m.inputs[inputWebUIPort].Value())
 	out += kv("Ollama", checks.OllamaHost())
-	out += kv("Shared dir", m.inputs[inputSharedDir].Value())
+	cfg := m.buildConfig()
+	out += kv("Home volume", cfg.HomeVolumeName())
+	out += kv("State volume", cfg.StateVolumeName())
 	out += kv("Config", m.configPath)
 	out += "\n" + styles.Dim.Render("  Press any key to exit.")
 	return out
@@ -867,4 +854,3 @@ func runMemoryCheck() tea.Msg {
 	}
 	return memoryCheckResult{mb: mb, warning: checks.MemoryWarning(mb)}
 }
-

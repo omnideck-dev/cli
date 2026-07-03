@@ -33,7 +33,7 @@ var configPathCmd = &cobra.Command{
 	RunE:  runConfigPath,
 }
 
-var validConfigKeys = []string{"container_name", "shared_dir", "state_dir", "shm_size"}
+var validConfigKeys = []string{"container_name", "home_volume", "state_volume", "shm_size"}
 
 func init() {
 	configCmd.AddCommand(configShowCmd, configSetCmd, configPathCmd)
@@ -53,8 +53,8 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 	fmt.Println(styles.Title.Render("  Omnideck Configuration"))
 	fmt.Println("  " + styles.Dim.Render("─────────────────────────────"))
 	fmt.Printf("  %s %s\n", kv.Render("container_name:"), val.Render(cfg.ContainerName))
-	fmt.Printf("  %s %s\n", kv.Render("shared_dir:"), val.Render(cfg.SharedDir))
-	fmt.Printf("  %s %s\n", kv.Render("state_dir:"), val.Render(cfg.StateDir))
+	fmt.Printf("  %s %s\n", kv.Render("home_volume:"), val.Render(cfg.HomeVolumeName()))
+	fmt.Printf("  %s %s\n", kv.Render("state_volume:"), val.Render(cfg.StateVolumeName()))
 	fmt.Printf("  %s %s\n", kv.Render("shm_size:"), val.Render(cfg.ShmSize))
 	fmt.Printf("  %s %s\n", kv.Render("engine:"), val.Render(cfg.Engine))
 	fmt.Printf("  %s %s\n", kv.Render("image:"), val.Render(cfg.Image))
@@ -77,10 +77,10 @@ func runConfigSet(_ *cobra.Command, args []string) error {
 	switch key {
 	case "container_name":
 		cfg.ContainerName = value
-	case "shared_dir":
-		cfg.SharedDir = value
-	case "state_dir":
-		cfg.StateDir = value
+	case "home_volume":
+		cfg.HomeVolume = value
+	case "state_volume":
+		cfg.StateVolume = value
 	case "shm_size":
 		cfg.ShmSize = value
 	}

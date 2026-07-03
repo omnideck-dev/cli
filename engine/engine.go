@@ -3,6 +3,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -11,16 +12,16 @@ import (
 
 // RunOptions captures all parameters for running the Omnideck container.
 type RunOptions struct {
-	Name       string
-	Image      string
-	Memory     string // container memory limit (e.g. "2g")
-	ShmSize    string
-	SharedDir  string
-	StateDir   string
-	Restart    string // "always"
-	OllamaHost string // 127.0.0.1 or host.docker.internal
-	WebUIPort  string // host port for the web UI (e.g. "8080")
-	Platform   string // runtime.GOOS
+	Name        string
+	Image       string
+	Memory      string // container memory limit (e.g. "2g")
+	ShmSize     string
+	HomeVolume  string
+	StateVolume string
+	Restart     string // "always"
+	OllamaHost  string // 127.0.0.1 or host.docker.internal
+	WebUIPort   string // host port for the web UI (e.g. "8080")
+	Platform    string // runtime.GOOS
 }
 
 // InspectData holds container inspection metadata.
@@ -37,6 +38,10 @@ type Engine interface {
 	IsAvailable() bool
 	HasPermission() bool
 	ContainerExists(name string) (bool, error)
+	CreateVolume(name string) error
+	VolumeExists(name string) (bool, error)
+	RemoveVolume(name string) error
+	ExportVolume(name string, w io.Writer) error
 	PullImage(image string, msgs chan<- string) error
 	RunContainer(opts RunOptions) error
 	StopContainer(name string) error

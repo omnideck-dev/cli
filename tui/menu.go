@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 
@@ -329,8 +328,8 @@ func menuCmdStatus(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 		containerErr    error
 		ollamaOK        bool
 		ollamaHost      string
-		sharedOK        bool
-		stateOK         bool
+		homeVolumeOK    bool
+		stateVolumeOK   bool
 	}
 	var g gathered
 	var wg sync.WaitGroup
@@ -348,8 +347,10 @@ func menuCmdStatus(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 	}()
 	go func() {
 		defer wg.Done()
-		g.sharedOK = dirExists(cfg.SharedDir)
-		g.stateOK = dirExists(cfg.StateDir)
+		ok, _ := eng.VolumeExists(cfg.HomeVolumeName())
+		g.homeVolumeOK = ok
+		ok, _ = eng.VolumeExists(cfg.StateVolumeName())
+		g.stateVolumeOK = ok
 	}()
 	wg.Wait()
 
@@ -371,13 +372,13 @@ func menuCmdStatus(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 		ollamaVal = styles.TNGreenTxt.Render("✓ reachable at " + g.ollamaHost)
 	}
 
-	sharedVal := styles.TNRedTxt.Render("✗ not found")
-	if g.sharedOK {
-		sharedVal = styles.TNGreenTxt.Render("✓ exists")
+	homeVolumeVal := styles.TNRedTxt.Render("✗ not found")
+	if g.homeVolumeOK {
+		homeVolumeVal = styles.TNGreenTxt.Render("✓ exists")
 	}
-	stateVal := styles.TNRedTxt.Render("✗ not found")
-	if g.stateOK {
-		stateVal = styles.TNGreenTxt.Render("✓ exists")
+	stateVolumeVal := styles.TNRedTxt.Render("✗ not found")
+	if g.stateVolumeOK {
+		stateVolumeVal = styles.TNGreenTxt.Render("✓ exists")
 	}
 
 	sep := styles.TNFaintText.Render(strings.Repeat("─", 46))
@@ -391,8 +392,8 @@ func menuCmdStatus(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 		kv("IMAGE", cfg.Image, styles.TNCyanTxt),
 		kv("ENGINE", cfg.Engine, styles.TNTextSub),
 		kv("PORT", ":"+cfg.WebUIPortOrDefault(), styles.TNTextSub),
-		kv("SHARED DIR", cfg.SharedDir+"  "+sharedVal, styles.TNFaintText),
-		kv("STATE DIR", cfg.StateDir+"  "+stateVal, styles.TNFaintText),
+		kv("HOME VOLUME", cfg.HomeVolumeName()+"  "+homeVolumeVal, styles.TNFaintText),
+		kv("STATE VOLUME", cfg.StateVolumeName()+"  "+stateVolumeVal, styles.TNFaintText),
 		kv("OLLAMA", ollamaVal, styles.TNFaintText),
 		kv("WEB UI", "http://localhost:"+cfg.WebUIPortOrDefault(), styles.TNBlueTxt),
 	}
@@ -445,11 +446,6 @@ func menuCmdFetchLogs(cfg *config.Config, eng engine.Engine) menuLogsReadyMsg {
 		out = append(out, "  "+num+"  "+ts+"  "+lvl+"  "+msg)
 	}
 	return menuLogsReadyMsg(out)
-}
-
-func dirExists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 // ─── View ─────────────────────────────────────────────────────────────────────
@@ -591,7 +587,7 @@ func (m MenuModel) menuFooter(hints [][2]string) string {
 	if gap < 1 {
 		gap = 1
 	}
-	return styles.TNFooterBar.Width(m.width).Render(left+safeRepeat(" ", gap)+right)
+	return styles.TNFooterBar.Width(m.width).Render(left + safeRepeat(" ", gap) + right)
 }
 
 // ─── Chosen / RunMenu ─────────────────────────────────────────────────────────

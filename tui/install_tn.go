@@ -33,7 +33,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 	sb.WriteString("\n")
 
 	type checkRow struct {
-		label, detail string
+		label, detail  string
 		ok, done, warn bool
 	}
 	var rows []checkRow
@@ -90,10 +90,9 @@ func (m InstallModel) tnConfig(w int) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 
-	fieldNames := []string{"Container name", "Shared directory", "Memory limit", "SHM size", "Web UI port"}
+	fieldNames := []string{"Container name", "Memory limit", "SHM size", "Web UI port"}
 	fieldDescs := []string{
 		"Docker/Podman container name",
-		"Host path mounted into container",
 		"RAM limit  e.g. 2g, 4g",
 		"Shared memory  e.g. 512m",
 		"Host port  e.g. 2337",
@@ -141,13 +140,13 @@ func (m InstallModel) tnConfirm(w int) string {
 		engName = m.eng.Name()
 	}
 
-	sharedDir := m.inputs[inputSharedDir].Value()
+	cfg := m.buildConfig()
 	sb.WriteString(kv("Engine", engName))
 	sb.WriteString(kv("OS / Arch", runtime.GOOS+" / "+runtime.GOARCH))
 	sb.WriteString("\n")
 	sb.WriteString(kv("Container name", m.inputs[inputContainerName].Value()))
-	sb.WriteString(kv("Shared dir", sharedDir))
-	sb.WriteString(kv("State dir", expandTilde(sharedDir)+"/.state"))
+	sb.WriteString(kv("Home volume", cfg.HomeVolumeName()))
+	sb.WriteString(kv("State volume", cfg.StateVolumeName()))
 	sb.WriteString(kv("Memory", m.inputs[inputMemory].Value()))
 	sb.WriteString(kv("SHM size", m.inputs[inputShmSize].Value()))
 	sb.WriteString(kv("Web UI port", ":"+m.inputs[inputWebUIPort].Value()))
@@ -183,7 +182,9 @@ func (m InstallModel) tnDone(_ int) string {
 		return "  " + styles.TNDimText.Render(padRight(k, 12)) + styles.TNTextSub.Render(v) + "\n"
 	}
 	sb.WriteString(kv("Web UI", "http://localhost:"+m.inputs[inputWebUIPort].Value()))
-	sb.WriteString(kv("Shared dir", m.inputs[inputSharedDir].Value()))
+	cfg := m.buildConfig()
+	sb.WriteString(kv("Home volume", cfg.HomeVolumeName()))
+	sb.WriteString(kv("State volume", cfg.StateVolumeName()))
 	sb.WriteString(kv("Config", m.configPath))
 
 	sb.WriteString("\n  " + styles.TNDimText.Render("Press any key to return to dashboard.") + "\n")

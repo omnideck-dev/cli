@@ -13,8 +13,8 @@ func TestSaveAndLoad(t *testing.T) {
 
 	cfg := &Config{
 		ContainerName: "mybox",
-		SharedDir:     "/tmp/shared",
-		StateDir:      "/tmp/state",
+		HomeVolume:    "custom-home",
+		StateVolume:   "custom-state",
 		ShmSize:       "512m",
 		Engine:        "docker",
 		Image:         "example.com/img:latest",
@@ -32,6 +32,12 @@ func TestSaveAndLoad(t *testing.T) {
 
 	if got.ContainerName != cfg.ContainerName {
 		t.Errorf("ContainerName: got %q, want %q", got.ContainerName, cfg.ContainerName)
+	}
+	if got.HomeVolume != cfg.HomeVolume {
+		t.Errorf("HomeVolume: got %q, want %q", got.HomeVolume, cfg.HomeVolume)
+	}
+	if got.StateVolume != cfg.StateVolume {
+		t.Errorf("StateVolume: got %q, want %q", got.StateVolume, cfg.StateVolume)
 	}
 	if got.ShmSize != cfg.ShmSize {
 		t.Errorf("ShmSize: got %q, want %q", got.ShmSize, cfg.ShmSize)
@@ -156,11 +162,59 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Image != DefaultImage {
 		t.Errorf("Image: got %q, want %q", cfg.Image, DefaultImage)
 	}
+	if cfg.HomeVolume != "" || cfg.StateVolume != "" {
+		t.Errorf("DefaultConfig should leave volume overrides empty, got %q %q", cfg.HomeVolume, cfg.StateVolume)
+	}
+	if got := cfg.HomeVolumeName(); got != "omnideck-home" {
+		t.Errorf("HomeVolumeName: got %q, want 'omnideck-home'", got)
+	}
+	if got := cfg.StateVolumeName(); got != "omnideck-state" {
+		t.Errorf("StateVolumeName: got %q, want 'omnideck-state'", got)
+	}
 	if cfg.Memory == "" {
 		t.Error("Memory should have a default value")
 	}
 	if cfg.ShmSize == "" {
 		t.Error("ShmSize should have a default value")
+	}
+}
+
+func TestVolumeNameAccessors(t *testing.T) {
+	cfg := &Config{ContainerName: "omnideck2"}
+	if got := cfg.HomeVolumeName(); got != "omnideck2-home" {
+		t.Errorf("derived HomeVolumeName: got %q", got)
+	}
+	if got := cfg.StateVolumeName(); got != "omnideck2-state" {
+		t.Errorf("derived StateVolumeName: got %q", got)
+	}
+
+	cfg.HomeVolume = "custom-home"
+	cfg.StateVolume = "custom-state"
+	if got := cfg.HomeVolumeName(); got != "custom-home" {
+		t.Errorf("explicit HomeVolumeName: got %q", got)
+	}
+	if got := cfg.StateVolumeName(); got != "custom-state" {
+		t.Errorf("explicit StateVolumeName: got %q", got)
+	}
+}
+
+func TestLoadOldBindMountConfigDerivesVolumes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "old.yaml")
+	data := []byte("container_name: legacy\nshared_dir: /tmp/shared\nstate_dir: /tmp/shared/.state\n")
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := cfg.HomeVolumeName(); got != "legacy-home" {
+		t.Errorf("HomeVolumeName: got %q", got)
+	}
+	if got := cfg.StateVolumeName(); got != "legacy-state" {
+		t.Errorf("StateVolumeName: got %q", got)
 	}
 }
 

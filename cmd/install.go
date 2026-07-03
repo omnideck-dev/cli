@@ -2,8 +2,6 @@ package cmd
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"runtime"
 	"strconv"
 
@@ -15,13 +13,12 @@ import (
 )
 
 var (
-	installImageFlag   string
-	installPlainFlag   bool
-	installPortFlag    string
-	installMemoryFlag  string
-	installShmFlag     string
-	installSharedFlag  string
-	installEngineFlag  string
+	installImageFlag  string
+	installPlainFlag  bool
+	installPortFlag   string
+	installMemoryFlag string
+	installShmFlag    string
+	installEngineFlag string
 )
 
 var installCmd = &cobra.Command{
@@ -41,7 +38,6 @@ func init() {
 	installCmd.Flags().StringVar(&installPortFlag, "port", "", "web UI host port (default: 2337)")
 	installCmd.Flags().StringVar(&installMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
 	installCmd.Flags().StringVar(&installShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
-	installCmd.Flags().StringVar(&installSharedFlag, "shared-dir", "", "host shared directory path")
 	installCmd.Flags().StringVar(&installEngineFlag, "engine", "", "container engine to use: docker or podman (default: auto-detect, prefers podman)")
 }
 
@@ -98,10 +94,6 @@ func runInstallPlain() error {
 	if installShmFlag != "" {
 		cfg.ShmSize = installShmFlag
 	}
-	if installSharedFlag != "" {
-		cfg.SharedDir = installSharedFlag
-		cfg.StateDir = installSharedFlag + "/.state"
-	}
 	if installImageFlag != "" {
 		cfg.Image = installImageFlag
 	}
@@ -112,8 +104,8 @@ func runInstallPlain() error {
 		label string
 		fn    func() error
 	}{
-		{"Create shared directory", func() error { return os.MkdirAll(cfg.SharedDir, 0o755) }},
-		{"Create state directory", func() error { return os.MkdirAll(cfg.StateDir, 0o755) }},
+		{"Create home volume", func() error { return eng.CreateVolume(cfg.HomeVolumeName()) }},
+		{"Create state volume", func() error { return eng.CreateVolume(cfg.StateVolumeName()) }},
 		{"Remove existing container", func() error {
 			exists, err := eng.ContainerExists(cfg.ContainerName)
 			if err != nil || !exists {
@@ -133,15 +125,15 @@ func runInstallPlain() error {
 		}},
 		{"Run container", func() error {
 			return eng.RunContainer(engine.RunOptions{
-				Name:      cfg.ContainerName,
-				Image:     cfg.Image,
-				Memory:    cfg.Memory,
-				ShmSize:   cfg.ShmSize,
-				SharedDir: cfg.SharedDir,
-				StateDir:  cfg.StateDir,
-				Restart:   "always",
-				WebUIPort: cfg.WebUIPortOrDefault(),
-				Platform:  runtime.GOOS,
+				Name:        cfg.ContainerName,
+				Image:       cfg.Image,
+				Memory:      cfg.Memory,
+				ShmSize:     cfg.ShmSize,
+				HomeVolume:  cfg.HomeVolumeName(),
+				StateVolume: cfg.StateVolumeName(),
+				Restart:     "always",
+				WebUIPort:   cfg.WebUIPortOrDefault(),
+				Platform:    runtime.GOOS,
 			})
 		}},
 		{"Save configuration", func() error { return config.Save(savePath, cfg) }},
@@ -161,7 +153,7 @@ func runInstallPlain() error {
 }
 
 // suggestNewInstanceDefaults inspects existing instances and returns a Config
-// pre-filled with a unique container name, data directories, and web UI port.
+// pre-filled with a unique container name and web UI port.
 func suggestNewInstanceDefaults() *config.Config {
 	instances, _ := config.ListInstances()
 
@@ -184,17 +176,8 @@ func suggestNewInstanceDefaults() *config.Config {
 		name = fmt.Sprintf("omnideck%d", i)
 	}
 
-	// Derive directory names from the numeric suffix (omnideck2 → Omnideck2).
-	suffix := name[len("omnideck"):]
-	dirBase := "Omnideck" + suffix
-
-	home, _ := os.UserHomeDir()
-	sharedDir := filepath.Join(home, dirBase)
-
 	d := config.DefaultConfig()
 	d.ContainerName = name
-	d.SharedDir = sharedDir
-	d.StateDir = filepath.Join(sharedDir, ".state")
 	d.WebUIPort = strconv.Itoa(maxPort + 1)
 	return d
 }

@@ -44,7 +44,6 @@ func TestBuildConfig(t *testing.T) {
 	m := NewInstallModel("/tmp/test-config.yaml", nil, "")
 	// Set custom values.
 	m.inputs[inputContainerName].SetValue("mycontainer")
-	m.inputs[inputSharedDir].SetValue("/data/shared")
 	m.inputs[inputMemory].SetValue("4g")
 	m.inputs[inputShmSize].SetValue("512m")
 
@@ -52,11 +51,11 @@ func TestBuildConfig(t *testing.T) {
 	if cfg.ContainerName != "mycontainer" {
 		t.Errorf("ContainerName: got %q, want 'mycontainer'", cfg.ContainerName)
 	}
-	if cfg.SharedDir != "/data/shared" {
-		t.Errorf("SharedDir: got %q", cfg.SharedDir)
+	if cfg.HomeVolumeName() != "mycontainer-home" {
+		t.Errorf("HomeVolumeName: got %q", cfg.HomeVolumeName())
 	}
-	if cfg.StateDir != "/data/shared/.state" {
-		t.Errorf("StateDir: got %q, want '/data/shared/.state'", cfg.StateDir)
+	if cfg.StateVolumeName() != "mycontainer-state" {
+		t.Errorf("StateVolumeName: got %q", cfg.StateVolumeName())
 	}
 	if cfg.Memory != "4g" {
 		t.Errorf("Memory: got %q", cfg.Memory)

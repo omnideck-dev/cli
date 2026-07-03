@@ -111,15 +111,15 @@ func (m *UpdateModel) startUpdateStep(i int) tea.Cmd {
 	case 3: // Run container.
 		workCmd = StepCmd(i, func() (string, error) {
 			opts := engine.RunOptions{
-				Name:       cfg.ContainerName,
-				Image:      cfg.Image,
-				Memory:     cfg.Memory,
-				ShmSize:    cfg.ShmSize,
-				SharedDir:  cfg.SharedDir,
-				StateDir:   cfg.StateDir,
-				Restart:    "always",
-				WebUIPort:  cfg.WebUIPortOrDefault(),
-				Platform:   runtime.GOOS,
+				Name:        cfg.ContainerName,
+				Image:       cfg.Image,
+				Memory:      cfg.Memory,
+				ShmSize:     cfg.ShmSize,
+				HomeVolume:  cfg.HomeVolumeName(),
+				StateVolume: cfg.StateVolumeName(),
+				Restart:     "always",
+				WebUIPort:   cfg.WebUIPortOrDefault(),
+				Platform:    runtime.GOOS,
 			}
 			return "", eng.RunContainer(opts)
 		})
@@ -167,4 +167,3 @@ func (m UpdateModel) View() string {
 		return styles.Header("OMNIDECK", "Updating", m.WindowWidth) + m.spinnerModel.View()
 	}
 }
-

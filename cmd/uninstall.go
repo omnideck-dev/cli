@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -77,38 +78,32 @@ func runUninstall(_ *cobra.Command, _ []string) error {
 		fmt.Println(styles.CheckMark)
 	}
 
-	// Optionally delete data directories (with optional backup).
-	if promptYN(fmt.Sprintf("Delete data directories (%s, %s)? [y/N]: ", cfg.SharedDir, cfg.StateDir)) {
-		if promptYN("Back up data directories before deleting? [y/N]: ") {
+	homeVolume := cfg.HomeVolumeName()
+	stateVolume := cfg.StateVolumeName()
+
+	// Optionally delete data volumes (with optional backup).
+	if promptYN(fmt.Sprintf("Delete data volumes (%s, %s)? [y/N]: ", homeVolume, stateVolume)) {
+		if promptYN("Back up data volumes before deleting? [y/N]: ") {
 			fmt.Printf("Creating backup archive... ")
-			archivePath, err := backupDirs(cfg.SharedDir, cfg.StateDir, cfg.ContainerName)
+			archivePath, err := backupVolumes(eng, homeVolume, stateVolume, cfg.ContainerName)
 			if err != nil {
 				fmt.Println(styles.CrossMark)
-				fmt.Fprintf(os.Stderr, "Warning: backup failed: %v\nData directories were NOT deleted.\n", err)
+				fmt.Fprintf(os.Stderr, "Warning: backup failed: %v\nData volumes were NOT deleted.\n", err)
 				goto removeConfig
 			}
 			fmt.Println(styles.CheckMark)
 			fmt.Printf("  Saved to: %s\n", styles.Active.Render(archivePath))
 		}
 
-		for _, dir := range []string{cfg.SharedDir, cfg.StateDir} {
-			if err := safeRemoveAll(dir); err != nil {
-				fmt.Printf("Skipping %s: %v\n", dir, err)
+		for _, volume := range []string{homeVolume, stateVolume} {
+			if err := validateVolumeName(volume); err != nil {
+				fmt.Printf("Skipping %s: %v\n", volume, err)
 				continue
 			}
-			fmt.Printf("Removing %s... ", dir)
-			if err := os.RemoveAll(dir); err != nil {
-				if os.IsPermission(err) {
-					fmt.Println(styles.CrossMark)
-					fmt.Fprintf(os.Stderr, "  Permission denied — some files are owned by the container user.\n")
-					fmt.Fprintf(os.Stderr, "  Remove manually: sudo rm -rf %s\n", dir)
-				} else if os.IsNotExist(err) {
-					// Already deleted (e.g. StateDir is inside SharedDir which was just removed).
-					fmt.Println(styles.Warning.Render("(already removed)"))
-				} else {
-					fmt.Println(styles.CrossMark)
-					fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
-				}
+			fmt.Printf("Removing volume %s... ", volume)
+			if err := eng.RemoveVolume(volume); err != nil {
+				fmt.Println(styles.CrossMark)
+				fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
 			} else {
 				fmt.Println(styles.CheckMark)
 			}
@@ -179,10 +174,12 @@ func promptYN(prompt string) bool {
 	return false
 }
 
-// backupDirs creates a timestamped .tar.gz in the user's home directory
-// containing sharedDir (archived as "shared/") and stateDir (as "state/").
+// backupVolumes creates a timestamped .tar.gz in the user's home directory
+// containing native volume exports as home.tar and state.tar.
 // Returns the path to the created archive.
-func backupDirs(sharedDir, stateDir, containerName string) (string, error) {
+func backupVolumes(eng interface {
+	ExportVolume(string, io.Writer) error
+}, homeVolume, stateVolume, containerName string) (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
@@ -202,113 +199,68 @@ func backupDirs(sharedDir, stateDir, containerName string) (string, error) {
 	tw := tar.NewWriter(gz)
 	defer tw.Close()
 
-	for _, entry := range []struct{ src, prefix string }{
-		{sharedDir, "shared"},
-		{stateDir, "state"},
+	tmpDir, err := os.MkdirTemp("", "omnideck-volume-backup-*")
+	if err != nil {
+		return "", fmt.Errorf("creating temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	for _, entry := range []struct {
+		volume string
+		name   string
+	}{
+		{homeVolume, "home.tar"},
+		{stateVolume, "state.tar"},
 	} {
-		if _, err := os.Stat(entry.src); os.IsNotExist(err) {
-			continue // dir doesn't exist, skip silently
+		if err := validateVolumeName(entry.volume); err != nil {
+			return "", err
 		}
-		if err := addDirToTar(tw, entry.src, entry.prefix); err != nil {
-			return "", fmt.Errorf("archiving %s: %w", entry.src, err)
+		tmpPath := filepath.Join(tmpDir, entry.name)
+		f, err := os.Create(tmpPath)
+		if err != nil {
+			return "", fmt.Errorf("creating temporary export: %w", err)
+		}
+		if err := eng.ExportVolume(entry.volume, f); err != nil {
+			f.Close()
+			return "", fmt.Errorf("exporting volume %s: %w", entry.volume, err)
+		}
+		if err := f.Close(); err != nil {
+			return "", fmt.Errorf("closing temporary export: %w", err)
+		}
+		if err := addFileToTar(tw, tmpPath, entry.name); err != nil {
+			return "", fmt.Errorf("archiving volume %s: %w", entry.volume, err)
 		}
 	}
 	return archivePath, nil
 }
 
-// addDirToTar walks srcDir and writes every file and directory into tw
-// under the given prefix (e.g. "shared/").
-func addDirToTar(tw *tar.Writer, srcDir, prefix string) error {
-	return filepath.Walk(srcDir, func(path string, fi os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(srcDir, path)
-		if err != nil {
-			return err
-		}
-		// Build the in-archive name.
-		archiveName := filepath.Join(prefix, rel)
-
-		switch {
-		case fi.Mode()&os.ModeSymlink != 0:
-			// Preserve symlink target.
-			link, err := os.Readlink(path)
-			if err != nil {
-				return err
-			}
-			header := &tar.Header{
-				Typeflag: tar.TypeSymlink,
-				Name:     archiveName,
-				Linkname: link,
-				ModTime:  fi.ModTime(),
-				Mode:     int64(fi.Mode()),
-			}
-			return tw.WriteHeader(header)
-
-		case fi.IsDir():
-			header := &tar.Header{
-				Typeflag: tar.TypeDir,
-				Name:     archiveName + "/",
-				ModTime:  fi.ModTime(),
-				Mode:     int64(fi.Mode()),
-			}
-			return tw.WriteHeader(header)
-
-		case fi.Mode().IsRegular():
-			header, err := tar.FileInfoHeader(fi, "")
-			if err != nil {
-				return err
-			}
-			header.Name = archiveName
-			if err := tw.WriteHeader(header); err != nil {
-				return err
-			}
-			src, err := os.Open(path)
-			if err != nil {
-				return err
-			}
-			defer src.Close()
-			_, err = io.Copy(tw, src)
-			return err
-
-		default:
-			// Skip devices, sockets, etc.
-			return nil
-		}
-	})
+func addFileToTar(tw *tar.Writer, path, archiveName string) error {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	header, err := tar.FileInfoHeader(fi, "")
+	if err != nil {
+		return err
+	}
+	header.Name = archiveName
+	if err := tw.WriteHeader(header); err != nil {
+		return err
+	}
+	src, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+	_, err = io.Copy(tw, src)
+	return err
 }
 
-// safeRemoveAll returns an error if path looks dangerous (too short, a root
-// directory, or a known system path) to prevent accidental data loss from a
-// corrupted config file.
-func safeRemoveAll(path string) error {
-	if path == "" {
-		return fmt.Errorf("path is empty")
-	}
-	clean := filepath.Clean(path)
-	// Resolve symlinks so a symlink pointing at / or /etc can't bypass the checks below.
-	if resolved, err := filepath.EvalSymlinks(clean); err == nil {
-		clean = resolved
-	}
-	// (If EvalSymlinks fails the path doesn't exist yet, so there's no symlink to follow.)
+var volumeNameRegex = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 
-	// Reject paths that are too short (fewer than 3 components deep).
-	// e.g. "/" "/home" "/etc" are all dangerous.
-	parts := strings.Split(strings.TrimPrefix(clean, "/"), string(filepath.Separator))
-	if len(parts) < 3 {
-		return fmt.Errorf("refusing to remove %q: path is too short (possible misconfiguration)", clean)
-	}
-	// Block well-known system roots.
-	dangerousPrefixes := []string{
-		"/bin", "/boot", "/dev", "/etc", "/lib", "/lib64",
-		"/proc", "/root", "/run", "/sbin", "/sys", "/tmp",
-		"/usr", "/var",
-	}
-	for _, prefix := range dangerousPrefixes {
-		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
-			return fmt.Errorf("refusing to remove %q: looks like a system directory", clean)
-		}
+func validateVolumeName(name string) error {
+	if !volumeNameRegex.MatchString(name) {
+		return fmt.Errorf("invalid volume name %q", name)
 	}
 	return nil
 }

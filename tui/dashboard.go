@@ -2,8 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -23,10 +21,10 @@ const (
 	ScreenDashboard Screen = iota
 	ScreenDetail
 	ScreenLogs
-	ScreenConfig   // modal overlay over Detail
-	ScreenDoctor   // modal overlay over Dashboard/Detail
-	ScreenInstall  // embedded install wizard
-	ScreenUpdate   // embedded update wizard
+	ScreenConfig  // modal overlay over Detail
+	ScreenDoctor  // modal overlay over Dashboard/Detail
+	ScreenInstall // embedded install wizard
+	ScreenUpdate  // embedded update wizard
 )
 
 // LogLine is one parsed container log entry.
@@ -58,9 +56,9 @@ type InstanceState struct {
 	Restarts string
 	Created  string
 	Health   string
-	NetUp    string // e.g. "1.2 KB"
-	NetDown  string // e.g. "3.4 KB"
-	Disk     string // e.g. "2.1 GB"
+	NetUp    string    // e.g. "1.2 KB"
+	NetDown  string    // e.g. "3.4 KB"
+	Disk     string    // e.g. "2.1 GB"
 	Logs     []LogLine // last N lines cached for detail/logs screens
 }
 
@@ -131,8 +129,8 @@ type DashboardModel struct {
 
 	// Detail screen menu
 	detailMenuIdx    int
-	detailBusy       bool         // true while start/stop is in flight
-	detailBusyAction string       // "Stopping" or "Starting", set at trigger time
+	detailBusy       bool   // true while start/stop is in flight
+	detailBusyAction string // "Stopping" or "Starting", set at trigger time
 	detailSpinner    spinner.Model
 
 	// Config modal
@@ -336,7 +334,8 @@ func (m *DashboardModel) buildCfgFields() {
 	cfg := inst.Info.Config
 	m.cfgFields = []cfgField{
 		{Key: "container_name", Type: "string", Value: cfg.ContainerName, Orig: cfg.ContainerName},
-		{Key: "shared_dir", Type: "path", Value: cfg.SharedDir, Orig: cfg.SharedDir},
+		{Key: "home_volume", Type: "string", Value: cfg.HomeVolumeName(), Orig: cfg.HomeVolumeName()},
+		{Key: "state_volume", Type: "string", Value: cfg.StateVolumeName(), Orig: cfg.StateVolumeName()},
 		{Key: "memory", Type: "memory", Value: cfg.Memory, Orig: cfg.Memory},
 		{Key: "shm_size", Type: "memory", Value: cfg.ShmSize, Orig: cfg.ShmSize},
 		{Key: "web_ui_port", Type: "port", Value: cfg.WebUIPortOrDefault(), Orig: cfg.WebUIPortOrDefault()},
@@ -359,8 +358,10 @@ func (m *DashboardModel) saveCfgFields() error {
 		switch f.Key {
 		case "container_name":
 			cfg.ContainerName = f.Value
-		case "shared_dir":
-			cfg.SharedDir = f.Value
+		case "home_volume":
+			cfg.HomeVolume = f.Value
+		case "state_volume":
+			cfg.StateVolume = f.Value
 		case "memory":
 			cfg.Memory = f.Value
 		case "shm_size":
@@ -409,7 +410,7 @@ func reloadInstancesCmd() tea.Cmd {
 	}
 }
 
-// suggestInstallDefaults builds a Config pre-filled with a unique name/port/dirs.
+// suggestInstallDefaults builds a Config pre-filled with a unique name and port.
 func suggestInstallDefaults() *config.Config {
 	instances, _ := config.ListInstances()
 	takenNames := map[string]bool{}
@@ -427,13 +428,8 @@ func suggestInstallDefaults() *config.Config {
 	for i := 2; takenNames[name]; i++ {
 		name = fmt.Sprintf("omnideck%d", i)
 	}
-	suffix := name[len("omnideck"):]
-	dirBase := "Omnideck" + suffix
-	home, _ := os.UserHomeDir()
 	d := config.DefaultConfig()
 	d.ContainerName = name
-	d.SharedDir = filepath.Join(home, dirBase)
-	d.StateDir = filepath.Join(d.SharedDir, ".state")
 	d.WebUIPort = strconv.Itoa(maxPort + 1)
 	return d
 }

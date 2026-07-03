@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-7C3AED)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos-6B7280)](#install)
 
-CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/computron) — a containerized AI assistant. Wraps Docker or Podman with a Bubble Tea TUI and guided install wizard.
+CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/omnideck) — a containerized AI assistant. Wraps Docker or Podman with a Bubble Tea TUI and guided install wizard.
 
 ---
 
@@ -30,8 +30,8 @@ CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnid
 
 | Engine | Minimum version | Notes |
 |--------|----------------|-------|
-| Docker | 20.10+ | Required for `host-gateway` host alias (Ollama connectivity) |
-| Podman | 4.0+ | Required for `host.containers.internal` and `:U` volume remapping |
+| Docker | 20.10+ | Required for `host-gateway` host alias on Linux |
+| Podman | 4.0+ | Required for built-in host aliases |
 
 Ollama is optional at install time — the wizard warns if it isn't reachable but proceeds anyway.
 
@@ -150,7 +150,7 @@ omnideck --name omnideck2 uninstall
 
 ### Multiple instances
 
-If Omnideck is already installed, `omnideck install` asks whether to update the existing instance or install a new one. New instances get a unique container name (`omnideck2`, `omnideck3`, …), separate data directories, and an incremented port.
+If Omnideck is already installed, `omnideck install` asks whether to update the existing instance or install a new one. New instances get a unique container name (`omnideck2`, `omnideck3`, …), separate named volumes, and an incremented port.
 
 Commands that need an instance (e.g. `start`, `status`) show a picker when more than one instance exists, or accept `--name` to skip the prompt.
 
@@ -166,8 +166,8 @@ Config files live at:
 
 ```yaml
 container_name: omnideck
-shared_dir: /home/user/Omnideck
-state_dir: /home/user/Omnideck/.state
+home_volume: omnideck-home
+state_volume: omnideck-state
 memory: 3g
 shm_size: 1536m
 web_ui_port: "2337"
@@ -176,8 +176,8 @@ image: ghcr.io/omnideck-dev/omnideck:main
 installed_at: 2025-01-15T10:30:00Z
 ```
 
-**`shared_dir`** is mounted into the container and visible to you as `~/Omnideck`.  
-**`state_dir`** is a hidden subdirectory (`Omnideck/.state`) used for persistent container state — you won't normally interact with it.  
+**`home_volume`** is mounted into the container at `/home/omnideck`. Empty or missing means `{container_name}-home`.
+**`state_volume`** is mounted into the container at `/var/lib/omnideck`. Empty or missing means `{container_name}-state`.
 **`memory`** and **`shm_size`** are set by the wizard based on your system RAM and can be adjusted here or during install.
 
 ---
@@ -195,9 +195,8 @@ installed_at: 2025-01-15T10:30:00Z
 
 | Concern | Linux | macOS |
 |---------|-------|-------|
-| Volume SELinux flag | `:Z` (Docker), `:Z,U` (Podman) | Omit |
-| Volume ownership | `--user UID:GID` (Docker), `:U` (Podman) | Omit |
-| Ollama host | `host-gateway` (Docker), `host.containers.internal` (Podman) | `host.docker.internal` |
+| Volumes | Named volumes | Named volumes |
+| Ollama env | CLI sets runtime-specific `OLLAMA_HOST` | CLI sets runtime-specific `OLLAMA_HOST` |
 
 See `CLAUDE.md` for the full platform table and architecture notes.
 
