@@ -86,7 +86,8 @@ type InstallModel struct {
 	savedCfg   *config.Config
 
 	// Error.
-	errorMsg string
+	errorMsg     string
+	noEngineFound bool // true when neither Docker nor Podman was detected
 
 	preflightSpinner spinner.Model
 }
@@ -279,7 +280,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case allPreflightDone:
 		if m.engErr != nil {
 			m.Phase = PhaseError
-			m.errorMsg = "Error: Neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation"
+			m.noEngineFound = true
 			return m, nil
 		}
 		if m.permErr != nil && len(m.availableEngines) <= 1 {
@@ -604,6 +605,9 @@ func (m InstallModel) View() string {
 	case PhaseDone:
 		return m.viewDone()
 	case PhaseError:
+		if m.noEngineFound {
+			return m.viewNoEngine()
+		}
 		return m.viewError()
 	}
 	return ""
@@ -783,6 +787,37 @@ func (m InstallModel) viewDone() string {
 	out += kv("Ollama", checks.OllamaHost())
 	out += kv("Shared dir", m.inputs[inputSharedDir].Value())
 	out += kv("Config", m.configPath)
+	out += "\n" + styles.Dim.Render("  Press any key to exit.")
+	return out
+}
+
+func (m InstallModel) viewNoEngine() string {
+	out := "\n" + styles.Error.Render("  ✗  No container engine found") + "\n"
+	out += styles.Dim.Render("  ─────────────────────────────────────") + "\n\n"
+	out += "  " + styles.Active.Render("Omnideck requires Docker or Podman to run containers.") + "\n\n"
+
+	divider := styles.Dim.Render("  ─────────────────────────────────────") + "\n"
+
+	if runtime.GOOS == "darwin" {
+		out += divider
+		out += "  " + styles.Accent.Render("Docker Desktop") + styles.Dim.Render("  (recommended)") + "\n"
+		out += "  " + styles.Dim.Render("https://www.docker.com/products/docker-desktop/") + "\n\n"
+		out += "  " + styles.Accent.Render("Podman Desktop") + "\n"
+		out += "  " + styles.Dim.Render("https://podman-desktop.io") + "\n"
+		out += divider
+	} else {
+		out += divider
+		out += "  " + styles.Accent.Render("Docker") + "\n"
+		out += "  " + styles.Dim.Render("sudo apt install docker.io   # Debian / Ubuntu") + "\n"
+		out += "  " + styles.Dim.Render("sudo dnf install docker      # Fedora / RHEL") + "\n\n"
+		out += "  " + styles.Accent.Render("Podman") + styles.Dim.Render("  (rootless, no daemon required)") + "\n"
+		out += "  " + styles.Dim.Render("sudo apt install podman      # Debian / Ubuntu") + "\n"
+		out += "  " + styles.Dim.Render("sudo dnf install podman      # Fedora / RHEL") + "\n"
+		out += divider
+	}
+
+	out += "\n  " + styles.Dim.Render("After installing, restart your terminal and run:") + "\n"
+	out += "  " + styles.Active.Render("omnideck install") + "\n"
 	out += "\n" + styles.Dim.Render("  Press any key to exit.")
 	return out
 }
