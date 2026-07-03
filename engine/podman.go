@@ -19,8 +19,7 @@ func (e *PodmanEngine) IsAvailable() bool {
 		return false
 	}
 	// Verify the daemon/machine is actually running, not just the binary present.
-	err := exec.Command("podman", "info").Run()
-	return err == nil
+	return runInfo("podman") == nil
 }
 
 // HasPermission always returns true for rootless Podman.

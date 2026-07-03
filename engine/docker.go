@@ -22,8 +22,7 @@ func (e *DockerEngine) IsAvailable() bool {
 		return false
 	}
 	// Verify the daemon is actually running, not just the binary present.
-	err := exec.Command("docker", "info").Run()
-	return err == nil
+	return runInfo("docker") == nil
 }
 
 func (e *DockerEngine) HasPermission() bool {

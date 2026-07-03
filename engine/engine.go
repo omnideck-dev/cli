@@ -103,6 +103,12 @@ func ByName(name string) (Engine, error) {
 // lookPath is a variable so tests can override it.
 var lookPath = exec.LookPath
 
+// runInfo executes "<name> info" to verify the daemon is running.
+// It is a variable so tests can override it without spawning real processes.
+var runInfo = func(name string) error {
+	return exec.Command(name, "info").Run()
+}
+
 // parsePctFloat strips a trailing "%" and returns the value as a [0,1] fraction.
 func parsePctFloat(s string) float64 {
 	s = strings.TrimSuffix(strings.TrimSpace(s), "%")
