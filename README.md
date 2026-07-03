@@ -116,9 +116,14 @@ omnideck <command> [flags]
 
 ### Install flags
 
+These flags are hidden from `--help` but fully supported:
+
 ```
+--engine string   Container engine to use: docker or podman (default: auto-detect, prefers podman)
 --image string    Override the container image (for testing alternate builds)
 ```
+
+`--engine` is useful on machines where both Docker and Podman are installed but only one is configured correctly. The interactive wizard also lets you switch engines from the preflight screen (`[tab]` to toggle).
 
 ### Examples
 
@@ -130,8 +135,14 @@ omnideck logs --follow --tail 100
 omnideck --name omnideck2 status
 omnideck --name omnideck2 stop
 
+# Force Docker when both engines are installed
+omnideck install --engine docker
+
 # Test an alternate image without changing the default
 omnideck install --image ghcr.io/example/omnideck:dev
+
+# Non-interactive install for CI/CD
+omnideck install --plain --engine docker --port 2337
 
 # Uninstall a specific instance
 omnideck --name omnideck2 uninstall

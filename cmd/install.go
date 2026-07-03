@@ -21,6 +21,7 @@ var (
 	installMemoryFlag  string
 	installShmFlag     string
 	installSharedFlag  string
+	installEngineFlag  string
 )
 
 var installCmd = &cobra.Command{
@@ -41,6 +42,7 @@ func init() {
 	installCmd.Flags().StringVar(&installMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
 	installCmd.Flags().StringVar(&installShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
 	installCmd.Flags().StringVar(&installSharedFlag, "shared-dir", "", "host shared directory path")
+	installCmd.Flags().StringVar(&installEngineFlag, "engine", "", "container engine to use: docker or podman (default: auto-detect, prefers podman)")
 }
 
 func runInstall(_ *cobra.Command, _ []string) error {
@@ -49,7 +51,16 @@ func runInstall(_ *cobra.Command, _ []string) error {
 	}
 
 	instances, _ := config.ListInstances()
-	eng, _ := engine.Detect()
+	var eng engine.Engine
+	if installEngineFlag != "" {
+		var err error
+		eng, err = engine.ByName(installEngineFlag)
+		if err != nil {
+			return fmt.Errorf("--engine: %w", err)
+		}
+	} else {
+		eng, _ = engine.Detect()
+	}
 	model := tui.NewDashboardModelForInstall(eng, instances, installImageFlag)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
@@ -59,9 +70,18 @@ func runInstall(_ *cobra.Command, _ []string) error {
 // runInstallPlain performs a non-interactive install suitable for CI/CD and scripts.
 // All settings come from flags or sensible defaults.
 func runInstallPlain() error {
-	eng, err := engine.Detect()
-	if err != nil {
-		return fmt.Errorf("no container engine found: %w", err)
+	var eng engine.Engine
+	var err error
+	if installEngineFlag != "" {
+		eng, err = engine.ByName(installEngineFlag)
+		if err != nil {
+			return fmt.Errorf("--engine: %w", err)
+		}
+	} else {
+		eng, err = engine.Detect()
+		if err != nil {
+			return fmt.Errorf("no container engine found: %w", err)
+		}
 	}
 	fmt.Printf("Engine: %s\n", eng.Name())
 

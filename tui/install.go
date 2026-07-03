@@ -23,6 +23,7 @@ import (
 
 type engineCheckResult struct {
 	eng engine.Engine
+	all []engine.Engine
 	err error
 }
 
@@ -51,14 +52,17 @@ type InstallModel struct {
 	Embedded bool
 
 	// Preflight state.
-	eng          engine.Engine
-	engErr       error
-	permErr      error
-	ollamaOK     bool
-	ollamaHost   string
-	memMB        int64
-	memWarning   string
-	preflightDone int // count of completed checks
+	eng              engine.Engine
+	engErr           error
+	availableEngines []engine.Engine // all detected engines (for switching)
+	preflightReady   bool            // true when checks pass and user must confirm engine
+	permChecking     bool            // true while re-checking permission after engine switch
+	permErr          error
+	ollamaOK         bool
+	ollamaHost       string
+	memMB            int64
+	memWarning       string
+	preflightDone    int // count of completed checks
 
 	// Config inputs.
 	inputs     []textinput.Model
@@ -206,10 +210,41 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.preflightSpinner, cmd = m.preflightSpinner.Update(msg)
 		return m, cmd
 
+	case tea.KeyMsg:
+		if !m.preflightReady || m.permChecking {
+			if msg.Type == tea.KeyCtrlC {
+				return m, tea.Quit
+			}
+			return m, nil
+		}
+		switch msg.String() {
+		case "ctrl+c", "esc", "q":
+			return m, tea.Quit
+		case "enter", " ":
+			if m.permErr != nil {
+				return m, nil // block advance if new engine has no permission
+			}
+			m.Phase = PhaseConfig
+		case "tab", "s":
+			if len(m.availableEngines) < 2 {
+				return m, nil
+			}
+			for i, e := range m.availableEngines {
+				if e.Name() == m.eng.Name() {
+					m.eng = m.availableEngines[(i+1)%len(m.availableEngines)]
+					break
+				}
+			}
+			m.permErr = nil
+			m.permChecking = true
+			return m, runPermissionCheck(m.eng)
+		}
+
 	case engineCheckResult:
 		m.preflightDone++
 		m.eng = msg.eng
 		m.engErr = msg.err
+		m.availableEngines = msg.all
 		// Run permission check only after engine is known.
 		if msg.eng != nil {
 			return m, runPermissionCheck(msg.eng)
@@ -219,6 +254,12 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, m.maybeAdvancePreflight()
 
 	case permissionCheckResult:
+		if m.preflightReady {
+			// Engine was switched — update result without touching the counter.
+			m.permChecking = false
+			m.permErr = msg.err
+			return m, nil
+		}
 		m.preflightDone++
 		m.permErr = msg.err
 		return m, m.maybeAdvancePreflight()
@@ -241,13 +282,18 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = "Error: Neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation"
 			return m, nil
 		}
-		if m.permErr != nil {
+		if m.permErr != nil && len(m.availableEngines) <= 1 {
 			engName := "docker"
 			if m.eng != nil {
 				engName = m.eng.Name()
 			}
 			m.Phase = PhaseError
 			m.errorMsg = "Error: " + engName + " found but permission denied.\nFix: sudo usermod -aG " + engName + " $USER\nThen log out and back in."
+			return m, nil
+		}
+		// Multiple engines available — pause so user can choose before continuing.
+		if len(m.availableEngines) > 1 {
+			m.preflightReady = true
 			return m, nil
 		}
 		m.Phase = PhaseConfig
@@ -627,6 +673,30 @@ func (m InstallModel) viewPreflight() string {
 				styles.Error.Render(r.detail) + "\n"
 		}
 	}
+
+	if m.preflightReady {
+		out += "\n"
+		if m.permChecking {
+			out += "   " + m.preflightSpinner.View() + "  " + styles.Dim.Render("Checking permissions for "+m.eng.Name()+"...") + "\n"
+		} else if m.permErr != nil {
+			engName := m.eng.Name()
+			out += "   " + styles.CrossMark + "  " + styles.Error.Render(engName+" permission denied — switch engine or fix permissions") + "\n"
+			out += "   " + styles.Dim.Render("     Fix: sudo usermod -aG "+engName+" $USER  (then log out and back in)") + "\n"
+		}
+		if len(m.availableEngines) > 1 {
+			other := m.availableEngines[0]
+			for _, e := range m.availableEngines {
+				if e.Name() != m.eng.Name() {
+					other = e
+					break
+				}
+			}
+			out += "\n   " + styles.Accent.Render("[tab]") + styles.Dim.Render(" switch to "+other.Name()+"    ") +
+				styles.Accent.Render("[enter]") + styles.Dim.Render(" continue with "+m.eng.Name()) + "\n"
+		} else {
+			out += "\n   " + styles.Accent.Render("[enter]") + styles.Dim.Render(" continue") + "\n"
+		}
+	}
 	return out
 }
 
@@ -734,8 +804,11 @@ func isKeyMsg(msg tea.Msg) bool {
 // --- Preflight commands ---
 
 func runEngineCheck() tea.Msg {
-	eng, err := engine.Detect()
-	return engineCheckResult{eng: eng, err: err}
+	all := engine.DetectAll()
+	if len(all) == 0 {
+		return engineCheckResult{err: fmt.Errorf("neither Podman nor Docker was found")}
+	}
+	return engineCheckResult{eng: all[0], all: all}
 }
 
 func runPermissionCheck(eng engine.Engine) tea.Cmd {
