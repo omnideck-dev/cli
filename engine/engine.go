@@ -58,19 +58,56 @@ type Engine interface {
 
 // Detect tries Podman first, then Docker. Returns an error if neither is found.
 func Detect() (Engine, error) {
+	all := DetectAll()
+	if len(all) == 0 {
+		return nil, errors.New("neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation")
+	}
+	return all[0], nil
+}
+
+// DetectAll returns all available container engines (Podman first, then Docker).
+func DetectAll() []Engine {
+	var engines []Engine
 	podman := &PodmanEngine{}
 	if podman.IsAvailable() {
-		return podman, nil
+		engines = append(engines, podman)
 	}
 	docker := &DockerEngine{}
 	if docker.IsAvailable() {
-		return docker, nil
+		engines = append(engines, docker)
 	}
-	return nil, errors.New("neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation")
+	return engines
+}
+
+// ByName returns the engine matching the given name ("docker" or "podman"),
+// or an error if that engine is not available.
+func ByName(name string) (Engine, error) {
+	switch name {
+	case "podman":
+		e := &PodmanEngine{}
+		if !e.IsAvailable() {
+			return nil, errors.New("podman not found")
+		}
+		return e, nil
+	case "docker":
+		e := &DockerEngine{}
+		if !e.IsAvailable() {
+			return nil, errors.New("docker not found")
+		}
+		return e, nil
+	default:
+		return nil, fmt.Errorf("unknown engine %q (must be docker or podman)", name)
+	}
 }
 
 // lookPath is a variable so tests can override it.
 var lookPath = exec.LookPath
+
+// runInfo executes "<name> info" to verify the daemon is running.
+// It is a variable so tests can override it without spawning real processes.
+var runInfo = func(name string) error {
+	return exec.Command(name, "info").Run()
+}
 
 // parsePctFloat strips a trailing "%" and returns the value as a [0,1] fraction.
 func parsePctFloat(s string) float64 {

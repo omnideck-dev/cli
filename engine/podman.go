@@ -15,8 +15,11 @@ type PodmanEngine struct{}
 func (e *PodmanEngine) Name() string { return "podman" }
 
 func (e *PodmanEngine) IsAvailable() bool {
-	_, err := lookPath("podman")
-	return err == nil
+	if _, err := lookPath("podman"); err != nil {
+		return false
+	}
+	// Verify the daemon/machine is actually running, not just the binary present.
+	return runInfo("podman") == nil
 }
 
 // HasPermission always returns true for rootless Podman.

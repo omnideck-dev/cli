@@ -5,14 +5,38 @@ import (
 	"testing"
 )
 
-// TestDetectNone verifies that Detect returns an error when neither docker nor
-// podman is on PATH. We override lookPath to simulate a missing binary.
-func TestDetectNone(t *testing.T) {
-	orig := lookPath
+// stubEngines sets up lookPath and runInfo stubs for the duration of a test.
+// available is the set of engine names that should appear present and running.
+func stubEngines(t *testing.T, available ...string) {
+	t.Helper()
+	set := make(map[string]bool, len(available))
+	for _, n := range available {
+		set[n] = true
+	}
+	origLP := lookPath
+	origRI := runInfo
 	lookPath = func(file string) (string, error) {
+		if set[file] {
+			return "/usr/bin/" + file, nil
+		}
 		return "", exec.ErrNotFound
 	}
-	defer func() { lookPath = orig }()
+	runInfo = func(name string) error {
+		if set[name] {
+			return nil
+		}
+		return exec.ErrNotFound
+	}
+	t.Cleanup(func() {
+		lookPath = origLP
+		runInfo = origRI
+	})
+}
+
+// TestDetectNone verifies that Detect returns an error when neither docker nor
+// podman is on PATH.
+func TestDetectNone(t *testing.T) {
+	stubEngines(t) // none available
 
 	_, err := Detect()
 	if err == nil {
@@ -22,12 +46,7 @@ func TestDetectNone(t *testing.T) {
 
 // TestDetectPodmanFirst verifies that Podman is preferred when both are available.
 func TestDetectPodmanFirst(t *testing.T) {
-	orig := lookPath
-	lookPath = func(file string) (string, error) {
-		// Both available.
-		return "/usr/bin/" + file, nil
-	}
-	defer func() { lookPath = orig }()
+	stubEngines(t, "podman", "docker")
 
 	eng, err := Detect()
 	if err != nil {
@@ -40,14 +59,7 @@ func TestDetectPodmanFirst(t *testing.T) {
 
 // TestDetectDockerFallback verifies Docker is returned when Podman is absent.
 func TestDetectDockerFallback(t *testing.T) {
-	orig := lookPath
-	lookPath = func(file string) (string, error) {
-		if file == "podman" {
-			return "", exec.ErrNotFound
-		}
-		return "/usr/bin/docker", nil
-	}
-	defer func() { lookPath = orig }()
+	stubEngines(t, "docker")
 
 	eng, err := Detect()
 	if err != nil {
