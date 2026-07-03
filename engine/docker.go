@@ -18,7 +18,11 @@ type DockerEngine struct{}
 func (e *DockerEngine) Name() string { return "docker" }
 
 func (e *DockerEngine) IsAvailable() bool {
-	_, err := lookPath("docker")
+	if _, err := lookPath("docker"); err != nil {
+		return false
+	}
+	// Verify the daemon is actually running, not just the binary present.
+	err := exec.Command("docker", "info").Run()
 	return err == nil
 }
 

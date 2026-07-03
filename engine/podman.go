@@ -15,7 +15,11 @@ type PodmanEngine struct{}
 func (e *PodmanEngine) Name() string { return "podman" }
 
 func (e *PodmanEngine) IsAvailable() bool {
-	_, err := lookPath("podman")
+	if _, err := lookPath("podman"); err != nil {
+		return false
+	}
+	// Verify the daemon/machine is actually running, not just the binary present.
+	err := exec.Command("podman", "info").Run()
 	return err == nil
 }
 
