@@ -143,6 +143,24 @@ func parseMemBytes(s string) float64 {
 	return v
 }
 
+// inspectTimeFormats lists the time layouts tried when parsing inspect timestamps.
+// Docker emits RFC3339Nano; Podman emits a space-separated layout with a named TZ.
+var inspectTimeFormats = []string{
+	time.RFC3339Nano,
+	"2006-01-02 15:04:05.999999999 -0700 MST",
+	"2006-01-02T15:04:05.999999999 -0700 MST",
+	time.RFC3339,
+}
+
+func parseInspectTime(s string) time.Time {
+	for _, layout := range inspectTimeFormats {
+		if t, err := time.Parse(layout, s); err == nil {
+			return t
+		}
+	}
+	return time.Time{}
+}
+
 // parseInspectLine parses the pipe-delimited output produced by ContainerInspect format strings.
 func parseInspectLine(s string) (InspectData, error) {
 	parts := strings.SplitN(s, "|", 4)
@@ -150,8 +168,8 @@ func parseInspectLine(s string) (InspectData, error) {
 		return InspectData{}, fmt.Errorf("unexpected inspect output: %q", s)
 	}
 	var d InspectData
-	d.StartedAt, _ = time.Parse(time.RFC3339Nano, parts[0])
-	d.CreatedAt, _ = time.Parse(time.RFC3339Nano, parts[1])
+	d.StartedAt = parseInspectTime(parts[0])
+	d.CreatedAt = parseInspectTime(parts[1])
 	d.RestartCount, _ = strconv.Atoi(parts[2])
 	d.HealthStatus = parts[3]
 	if d.HealthStatus == "none" || d.HealthStatus == "<no value>" {

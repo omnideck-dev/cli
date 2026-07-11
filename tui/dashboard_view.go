@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -51,8 +50,7 @@ func (m DashboardModel) renderHeader() string {
 	clock := styles.TNFaintText.Render("  " + m.clock)
 	right := daemonDot + daemonLabel + countLabel + clock
 
-	// Pad to full width.
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2 // -2 for padding
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
 		gap = 1
 	}
@@ -63,11 +61,6 @@ func (m DashboardModel) renderHeader() string {
 func (m DashboardModel) breadcrumb() string {
 	switch m.screen {
 	case ScreenDashboard:
-		return "Instances"
-	case ScreenDetail:
-		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name
-		}
 		return "Instances"
 	case ScreenLogs:
 		if inst := m.CurrentInstance(); inst != nil {
@@ -122,12 +115,18 @@ func (m DashboardModel) renderFooter() string {
 func (m DashboardModel) footerHints() string {
 	switch m.screen {
 	case ScreenDashboard:
+		if m.chipFocus >= 0 {
+			return keyHints([][2]string{
+				{"tab", "cycle"}, {"enter", "activate"}, {"esc", "deselect"},
+			})
+		}
+		if m.isExpanded() {
+			return keyHints([][2]string{
+				{"↑↓", "move"}, {"enter", "collapse"}, {"tab", "chip"}, {"l", "logs"}, {"s", "toggle"}, {"esc", "collapse"},
+			})
+		}
 		return keyHints([][2]string{
-			{"↑↓", "move"}, {"enter", "inspect"}, {"n", "new"}, {"d", "doctor"}, {"r", "refresh"}, {"q", "quit"},
-		})
-	case ScreenDetail:
-		return keyHints([][2]string{
-			{"↑↓", "navigate"}, {"enter", "select"}, {"c", "config"}, {"d", "doctor"}, {"esc", "back"},
+			{"↑↓", "move"}, {"enter", "expand"}, {"l", "logs"}, {"s", "toggle"}, {"n", "new"}, {"d", "doctor"}, {"q", "quit"},
 		})
 	case ScreenLogs:
 		if m.logSearchMode {
@@ -188,8 +187,6 @@ func (m DashboardModel) renderBody() string {
 	switch m.screen {
 	case ScreenDashboard:
 		return m.viewDashboard()
-	case ScreenDetail:
-		return m.viewDetail()
 	case ScreenLogs:
 		return m.viewLogs()
 	case ScreenConfig:
@@ -204,167 +201,394 @@ func (m DashboardModel) renderBody() string {
 	return ""
 }
 
-// --- Dashboard screen ---
+// viewModalOverlay centers modal in the content area over a dark background.
+func (m DashboardModel) viewModalOverlay(modal string) string {
+	h := m.contentHeight()
+	w := m.width
+	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, modal,
+		lipgloss.WithWhitespaceBackground(styles.TNBg),
+		lipgloss.WithWhitespaceForeground(styles.TNBg))
+}
 
-const (
-	colPort   = 7
-	colStatus = 14 // "● running  "
-	colCPU    = 8
-	colRAM    = 12
-	tableGap  = 2
-)
+// --- Dashboard screen (card layout) ---
 
 func (m DashboardModel) viewDashboard() string {
 	h := m.contentHeight()
 	w := m.width
 
 	var sb strings.Builder
-
-	// Title row.
 	sb.WriteString("\n")
+
+	// Title row with status chips right-aligned.
 	title := styles.TNTextBold.Render("Instances")
 	sub := styles.TNFaintText.Render(" managed by this host")
-	sb.WriteString("  " + title + sub + "\n\n")
+	titleLeft := title + sub
 
-	// Column headers.
-	nameW := w - colPort - colStatus - colCPU - colRAM - 4 // 4 for padding+gap
-	if nameW < 10 {
-		nameW = 10
-	}
-
-	hdr := padRight("NAME", nameW) + padRight("PORT", colPort) + padRight("STATUS", colStatus) + padRight("CPU", colCPU) + "MEMORY"
-	sb.WriteString("  " + styles.TNDimText.Render(strings.ToUpper(hdr)) + "\n")
-	sb.WriteString("  " + styles.TNFaintText.Render(safeRepeat("─", w-4)) + "\n")
-
-	if len(m.instances) == 0 {
-		sb.WriteString("\n  " + styles.TNDimText.Render("No instances installed.") + "\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press ") + styles.TNKeyChip.Render("n") + styles.TNDimText.Render(" to install one.") + "\n")
-		return padToHeight(sb.String(), h)
-	}
-
-	for i, inst := range m.instances {
-		selected := i == m.selected
-		caret := " "
-		nameStyle := styles.TNTextMid
-		if selected {
-			caret = styles.TNBlueTxt.Render("▸")
-			nameStyle = styles.TNTextBold
-		}
-
-		name := nameStyle.Render(tnTruncate(inst.Info.Name, nameW-2))
-		name = padRightStyled(name, nameW)
-
-		port := ":" + inst.Info.Config.WebUIPortOrDefault()
-		portS := styles.TNDimText.Render(padRight(port, colPort))
-
-		dot := styles.TNStatusDot(inst.Status)
-		statusLabel := inst.Status
-		if statusLabel == "unknown" {
-			statusLabel = "…"
-		}
-		statusS := dot + " " + lipgloss.NewStyle().Foreground(styles.TNStatusColor(inst.Status)).Render(padRight(statusLabel, colStatus-3))
-
-		cpu := inst.CPU
-		if cpu == "" {
-			cpu = "—"
-		}
-		cpuS := styles.TNTextSub.Render(padRight(cpu, colCPU))
-
-		ram := inst.RAM
-		if ram == "" {
-			ram = "—"
-		}
-		ramS := styles.TNTextSub.Render(ram)
-
-		row := " " + caret + " " + name + portS + statusS + cpuS + ramS
-
-		if selected {
-			row = styles.TNSelRow.Render(row)
-		}
-		sb.WriteString(row + "\n")
-	}
-
-	// Summary chips.
-	sb.WriteString("\n  ")
 	counts := map[string]int{}
 	for _, inst := range m.instances {
 		counts[inst.Status]++
 	}
-	for _, s := range []string{"running", "stopped", "paused"} {
+	var chipParts []string
+	for _, s := range []string{"running", "paused", "stopped"} {
 		if n := counts[s]; n > 0 {
 			dot := lipgloss.NewStyle().Foreground(styles.TNStatusColor(s)).Render("●")
-			label := styles.TNDimText.Render(fmt.Sprintf(" %d %s  ", n, s))
-			sb.WriteString(dot + label)
+			chip := lipgloss.NewStyle().
+				Background(lipgloss.Color("#1e2030")).
+				Foreground(styles.TNStatusColor(s)).
+				Padding(0, 1).
+				Render(fmt.Sprintf("%s %d %s", dot, n, s))
+			chipParts = append(chipParts, chip)
 		}
 	}
-	sb.WriteString("\n")
+	chipsStr := strings.Join(chipParts, "  ")
+	titleGap := w - lipgloss.Width(titleLeft) - lipgloss.Width(chipsStr) - 4
+	if titleGap < 1 {
+		titleGap = 1
+	}
+	sb.WriteString("  " + titleLeft + safeRepeat(" ", titleGap) + chipsStr + "\n\n")
+
+	if len(m.instances) == 0 {
+		sb.WriteString("  " + styles.TNDimText.Render("No instances installed.") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press ") + styles.TNKeyChip.Render("n") + styles.TNDimText.Render(" to install one.") + "\n")
+		return padToHeight(sb.String(), h)
+	}
+
+	// cardW is the Lipgloss Width() arg. Lipgloss wraps at cardW-2 (subtracts
+	// left+right padding). Outer card = cardW + 2 (border). With "  " prefix
+	// total line = cardW + 4. Set cardW = w - 6 so cards span w - 2 columns.
+	cardW := w - 6
+	if cardW < 20 {
+		cardW = 20
+	}
+
+	for i := range m.instances {
+		card := m.renderInstanceCard(i, cardW)
+		for _, line := range strings.Split(card, "\n") {
+			sb.WriteString("  " + line + "\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	// Toast pinned at bottom.
+	if m.toast != "" {
+		toastLine := "  " + styles.TNBlueTxt.Render("  "+m.toast)
+		sb.WriteString(toastLine + "\n")
+	}
 
 	return padToHeight(sb.String(), h)
 }
 
-// --- Detail screen ---
+// renderInstanceCard renders one instance card. cardW is the inner content width.
+func (m DashboardModel) renderInstanceCard(idx, cardW int) string {
+	inst := &m.instances[idx]
+	selected := idx == m.selected
+	expanded := m.expanded[inst.Info.Name]
 
-func (m DashboardModel) viewDetail() string {
-	inst := m.CurrentInstance()
-	if inst == nil {
-		return "\n  " + styles.TNDimText.Render("No instance selected.")
+	// Caret indicates expand state.
+	caretCh := "▸"
+	if expanded {
+		caretCh = "▾"
 	}
-	h := m.contentHeight()
-	w := m.width
+	caret := styles.TNBlueTxt.Render(caretCh)
+	caretW := lipgloss.Width(caret)
+
+	// Status dot + name + port badge.
+	dot := styles.TNStatusDot(inst.Status)
+	name := styles.TNTextBold.Render(inst.Info.Name)
+	portStr := ":" + inst.Info.Config.WebUIPortOrDefault()
+	portBadge := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1e2030")).
+		Foreground(styles.TNFgMid).
+		Padding(0, 1).Render(portStr)
+	identity := caret + "  " + dot + " " + name + "  " + portBadge
+	identityW := lipgloss.Width(identity)
+
+	// Image path (line 2, below name).
+	imgIndent := caretW + 5 // caret + "  " + dot + " "
+	imageStr := styles.TNDimText.Render(tnTruncate(inst.Info.Config.Image, identityW+6))
+	imageLine := safeRepeat(" ", imgIndent) + imageStr
+
+	// CPU sparkline block.
+	cpuVal := dashOr(inst.CPU)
+	cpuLabel := styles.TNFaintText.Render("CPU") + " " + styles.TNBlueTxt.Bold(true).Render(cpuVal)
+	cpuSpark := renderSparkline(inst.CPUHistory, styles.TNBlue, 16)
+	cpuBlock := cpuLabel + "  " + cpuSpark
+
+	// MEM sparkline block.
+	ramVal := dashOr(inst.RAM)
+	memLabel := styles.TNFaintText.Render("MEM") + " " + styles.TNPurpleTxt.Bold(true).Render(ramVal)
+	memSpark := renderSparkline(inst.RAMHistory, styles.TNPurple, 16)
+	memBlock := memLabel + "  " + memSpark
+
+	stats := cpuBlock + "   " + memBlock
+	statsW := lipgloss.Width(stats)
+
+	// 4 action chips.
+	chips := m.renderActionChips(inst, idx)
+	chipsW := lipgloss.Width(chips)
+
+	// contentW is the actual wrap threshold inside Width(cardW) + Padding(0,1):
+	// lipgloss wraps at width - leftPad - rightPad = cardW - 2.
+	contentW := cardW - 2
+
+	// Distribute remaining space as gaps between identity, stats, chips.
+	used := identityW + statsW + chipsW
+	gapTotal := contentW - used
+	if gapTotal < 4 {
+		gapTotal = 4
+	}
+	gap1 := gapTotal / 3
+	gap2 := gapTotal - gap1 - gap1
+
+	line1 := identity + safeRepeat(" ", gap1) + stats + safeRepeat(" ", gap2) + chips
+
+	content := line1 + "\n" + imageLine
+
+	// Accordion section when expanded.
+	if expanded {
+		sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
+		accordion := m.renderCardAccordion(inst, contentW)
+		content = content + "\n" + sep + "\n" + accordion
+	}
+
+	borderColor := styles.TNBorder
+	if selected {
+		borderColor = styles.TNBlue
+	}
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Background(styles.TNBgAlt).
+		Padding(0, 1).
+		Width(cardW).
+		Render(content)
+}
+
+// renderActionChips renders 4 action chips for a card. Focused chip is highlighted.
+func (m DashboardModel) renderActionChips(inst *InstanceState, cardIdx int) string {
+	isSelected := cardIdx == m.selected
+	chipBase := lipgloss.NewStyle().
+		Background(lipgloss.Color("#1e2030")).
+		Foreground(styles.TNFgMid).
+		Padding(0, 1)
+	chipFocused := lipgloss.NewStyle().
+		Background(styles.TNBlue).
+		Foreground(lipgloss.Color("#16161e")).
+		Bold(true).
+		Padding(0, 1)
+
+	chip := func(label string, focusIdx int) string {
+		if isSelected && m.chipFocus == focusIdx {
+			return chipFocused.Render(label)
+		}
+		return chipBase.Render(label)
+	}
+
+	// Open UI chip.
+	openChip := chip("↗ Open UI", 0)
+
+	// Logs chip.
+	logsChip := chip("≣ Logs", 1)
+
+	// Update chip.
+	updateChip := chip("⚙ Update", 2)
+
+	// Stop/Start chip — color-coded by run state.
+	var toggleChip string
+	if inst.Status == "running" {
+		label := "■ Stop"
+		if isSelected && m.chipFocus == 3 {
+			toggleChip = lipgloss.NewStyle().
+				Background(styles.TNRed).
+				Foreground(lipgloss.Color("#16161e")).
+				Bold(true).Padding(0, 1).Render(label)
+		} else {
+			toggleChip = lipgloss.NewStyle().
+				Background(lipgloss.Color("#3d1a25")).
+				Foreground(styles.TNRed).
+				Padding(0, 1).Render(label)
+		}
+	} else {
+		label := "▶ Start"
+		if isSelected && m.chipFocus == 3 {
+			toggleChip = lipgloss.NewStyle().
+				Background(styles.TNGreen).
+				Foreground(lipgloss.Color("#16161e")).
+				Bold(true).Padding(0, 1).Render(label)
+		} else {
+			toggleChip = lipgloss.NewStyle().
+				Background(lipgloss.Color("#1a3020")).
+				Foreground(styles.TNGreen).
+				Padding(0, 1).Render(label)
+		}
+	}
+
+	return openChip + " " + logsChip + " " + updateChip + " " + toggleChip
+}
+
+// renderCardAccordion renders the expanded accordion (metadata + resources + log tail).
+// Uses plain text columns — no nested Lipgloss panels — to avoid ANSI rendering issues
+// that arise when bordered/background-filled sub-panels are placed inside a styled card.
+func (m DashboardModel) renderCardAccordion(inst *InstanceState, innerW int) string {
+	cfg := inst.Info.Config
+	colW := (innerW - 4) / 2 // two columns with 4-space gap
+	if colW < 12 {
+		colW = 12
+	}
+
+	colSep := styles.TNFaintText.Render(safeRepeat("─", colW))
+
+	// --- Metadata column rows ---
+	mkv := func(k, v string, vstyle lipgloss.Style) string {
+		key := styles.TNDimText.Render(padRight(k, 9))
+		val := vstyle.Render(tnTruncate(v, colW-10))
+		return key + val
+	}
+	metaRows := []string{
+		styles.TNDimText.Bold(true).Render("METADATA"),
+		colSep,
+		mkv("image", cfg.Image, styles.TNCyanTxt),
+		mkv("uptime", dashOr(inst.Uptime), styles.TNTextSub),
+		mkv("restarts", dashOr(inst.Restarts), styles.TNTextSub),
+		mkv("created", dashOr(inst.Created), styles.TNTextSub),
+		mkv("health", dashOr(inst.Health), healthStyle(inst.Health)),
+	}
+
+	// --- Resources column rows ---
+	barW := colW - 14
+	if barW < 4 {
+		barW = 4
+	}
+	cpuBar := styles.TNGradientBar(inst.CPUPct, barW, lipgloss.Color("#2b4fa0"), styles.TNBlue)
+	ramBar := styles.TNGradientBar(inst.RAMPct, barW, lipgloss.Color("#6b3aaf"), styles.TNPurple)
+	resRows := []string{
+		styles.TNDimText.Bold(true).Render("RESOURCES"),
+		colSep,
+		styles.TNTextMid.Render(padRight("CPU", 10)) + styles.TNBlueTxt.Bold(true).Render(dashOr(inst.CPU)) + "  " + styles.TNFaintText.Render("/ 100%"),
+		cpuBar,
+		"",
+		styles.TNTextMid.Render(padRight("Memory", 10)) + styles.TNPurpleTxt.Bold(true).Render(dashOr(inst.RAM)) + "  " + styles.TNFaintText.Render("/ "+dashOr(inst.RAMTotal)),
+		ramBar,
+		"",
+		styles.TNTextMid.Render("network") + "  " + styles.TNTextSub.Render("↑ "+dashOr(inst.NetUp)+"  ↓ "+dashOr(inst.NetDown)),
+	}
+
+	// Pad columns to same height.
+	nRows := max(len(metaRows), len(resRows))
+	for len(metaRows) < nRows {
+		metaRows = append(metaRows, "")
+	}
+	for len(resRows) < nRows {
+		resRows = append(resRows, "")
+	}
 
 	var sb strings.Builder
-
-	// Instance title row.
-	dot := styles.TNStatusDot(inst.Status)
-	statusLabel := lipgloss.NewStyle().Foreground(styles.TNStatusColor(inst.Status)).Render(inst.Status)
-	imgShort := tnTruncate(inst.Info.Config.Image, 50)
-	sb.WriteString("\n  " + styles.TNTextBold.Render("▸ "+inst.Info.Name) + "  " + dot + " " + statusLabel + "  " + styles.TNFaintText.Render(imgShort) + "\n\n")
-
-	// Two-panel row: metadata + resources.
-	panelH := 10
-	halfW := (w - 6) / 2 // -6 for margins + gap
-
-	meta := m.renderMetaPanel(inst, halfW, panelH)
-	res := m.renderResourcePanel(inst, halfW, panelH)
-
-	// Render side by side.
-	metaLines := strings.Split(meta, "\n")
-	resLines := strings.Split(res, "\n")
-	for len(metaLines) < panelH+2 {
-		metaLines = append(metaLines, safeRepeat(" ", halfW+2))
-	}
-	for len(resLines) < panelH+2 {
-		resLines = append(resLines, safeRepeat(" ", halfW+2))
-	}
-	maxL := len(metaLines)
-	if len(resLines) > maxL {
-		maxL = len(resLines)
-	}
-	for i := range maxL {
-		ml := ""
-		if i < len(metaLines) {
-			ml = metaLines[i]
+	for i := 0; i < nRows; i++ {
+		ml := metaRows[i]
+		rl := resRows[i]
+		pad := colW - lipgloss.Width(ml)
+		if pad < 0 {
+			pad = 0
 		}
-		rl := ""
-		if i < len(resLines) {
-			rl = resLines[i]
+		sb.WriteString(ml + safeRepeat(" ", pad) + "    " + rl + "\n")
+	}
+
+	// Full-width separator before log tail.
+	sb.WriteString(styles.TNFaintText.Render(safeRepeat("─", innerW)) + "\n")
+
+	// Log tail — raw text, no nested panel.
+	logTitle := styles.TNDimText.Render("LOGS · TAIL")
+	logHint := styles.TNFaintText.Render("open full logs →")
+	logGap := innerW - lipgloss.Width(logTitle) - lipgloss.Width(logHint)
+	if logGap < 1 {
+		logGap = 1
+	}
+	sb.WriteString(logTitle + safeRepeat(" ", logGap) + logHint + "\n")
+
+	// logPrefixW: "  "(2) + ts(19) + " "(1) + lvl(5) + "  "(2) = 29
+	const logPrefixW = 29
+	msgAreaW := innerW - logPrefixW
+	if msgAreaW < 10 {
+		msgAreaW = 10
+	}
+	contAreaW := msgAreaW - 2
+	if contAreaW < 4 {
+		contAreaW = 4
+	}
+	// Continuation lines align one stop past the prefix.
+	contIndent := safeRepeat(" ", logPrefixW+2)
+
+	nLogLines := 4
+	if len(inst.Logs) == 0 {
+		sb.WriteString("  " + styles.TNFaintText.Render("no logs yet") + "\n")
+	} else {
+		start := len(inst.Logs) - nLogLines
+		if start < 0 {
+			start = 0
 		}
-		sb.WriteString("  " + ml + "  " + rl + "\n")
+		for i, ll := range inst.Logs[start:] {
+			if ll.Level != "" && i > 0 {
+				sb.WriteString("\n")
+			}
+			ts := styles.TNFaintText.Render(padRight(ll.Time, 19))
+			lvl := styles.TNLogLevel(ll.Level)
+			prefix := "  " + ts + " " + lvl + "  "
+			parts := wrapWords(ll.Msg, msgAreaW, contAreaW)
+			for j, part := range parts {
+				if j == 0 {
+					sb.WriteString(prefix + styles.TNTextMid.Render(part) + "\n")
+				} else {
+					sb.WriteString(contIndent + styles.TNTextMid.Render(part) + "\n")
+				}
+			}
+		}
 	}
 
-	// Actions menu panel.
-	menuH := h - panelH - 5 // remaining space
-	if menuH < 4 {
-		menuH = 4
-	}
-	sb.WriteString(prefixLines(m.renderDetailMenu(inst, w-4, menuH), "  "))
-
-	return padToHeight(sb.String(), h)
+	return strings.TrimSuffix(sb.String(), "\n")
 }
+
+// renderSparkline renders bars Unicode block characters scaled to absolute [0,1] values.
+func renderSparkline(history []float64, color lipgloss.Color, bars int) string {
+	blocks := []rune{'▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'}
+
+	padded := make([]float64, bars)
+	if len(history) > 0 {
+		copy(padded[bars-len(history):], history)
+	}
+
+	activeStyle := lipgloss.NewStyle().Foreground(color)
+	dimStyle := lipgloss.NewStyle().Foreground(styles.TNFaint)
+
+	var sb strings.Builder
+	dataStart := bars - len(history)
+	for i, v := range padded {
+		// Absolute scale: v is [0,1], floor at 6% so idle shows a baseline bar.
+		if v < 0.06 {
+			v = 0.06
+		}
+		if v > 1.0 {
+			v = 1.0
+		}
+		idx := int(v * float64(len(blocks)-1) + 0.5)
+		if idx >= len(blocks) {
+			idx = len(blocks) - 1
+		}
+		ch := string(blocks[idx])
+		if i < dataStart {
+			sb.WriteString(dimStyle.Render(ch))
+		} else {
+			sb.WriteString(activeStyle.Render(ch))
+		}
+	}
+	return sb.String()
+}
+
+// --- Metadata and resource panels (shared by accordion and detail views) ---
 
 func (m DashboardModel) renderMetaPanel(inst *InstanceState, w, h int) string {
 	cfg := inst.Info.Config
-	innerW := w - 2 // -2 for borders
+	innerW := w - 2
 
 	kv := func(k, v string, vstyle lipgloss.Style) string {
 		key := styles.TNTextMid.Render(padRight(k, 10))
@@ -373,7 +597,6 @@ func (m DashboardModel) renderMetaPanel(inst *InstanceState, w, h int) string {
 	}
 
 	rows := []string{
-		kv("port", ":"+cfg.WebUIPortOrDefault(), styles.TNTextSub),
 		kv("image", cfg.Image, styles.TNCyanTxt),
 		kv("uptime", dashOr(inst.Uptime), styles.TNTextSub),
 		kv("restarts", dashOr(inst.Restarts), styles.TNTextSub),
@@ -382,16 +605,12 @@ func (m DashboardModel) renderMetaPanel(inst *InstanceState, w, h int) string {
 	}
 
 	content := strings.Join(rows, "\n")
-	label := styles.TNTextBold.Render("METADATA")
-	panel := styles.TNPanel.
-		Width(w).
-		Height(h).
-		Render(label + "\n\n" + content)
-	return panel
+	label := styles.TNDimText.Bold(true).Render("METADATA")
+	return styles.TNPanel.Width(w).Height(h).Render(label + "\n\n" + content)
 }
 
 func (m DashboardModel) renderResourcePanel(inst *InstanceState, w, h int) string {
-	barW := w - 22 // space for label + value
+	barW := w - 22
 	if barW < 4 {
 		barW = 4
 	}
@@ -417,174 +636,128 @@ func (m DashboardModel) renderResourcePanel(inst *InstanceState, w, h int) strin
 	}
 
 	content := strings.Join(rows, "\n")
-	label := styles.TNTextBold.Render("RESOURCES")
-	panel := styles.TNPanel.
-		Width(w).
-		Height(h).
-		Render(label + "\n\n" + content)
-	return panel
-}
-
-func (m DashboardModel) renderDetailMenu(inst *InstanceState, w, h int) string {
-	toggleLabel := "Stop container"
-	if inst.Status != "running" {
-		toggleLabel = "Start container"
-	}
-	items := []string{"Open UI", "Logs", "Update", toggleLabel}
-
-	if m.detailBusy {
-		statusLine := m.detailSpinner.View() + "  " + styles.TNDimText.Render(m.detailBusyAction+"…")
-		rows := []string{statusLine}
-		for _, item := range items {
-			rows = append(rows, "")
-			rows = append(rows, styles.TNFaintText.Render("      "+item))
-		}
-		inner := strings.Join(rows, "\n")
-		return styles.TNPanelAccent.Width(w).Height(h).Render(inner) + "\n"
-	}
-
-	title := styles.TNTextBold.Render("ACTIONS")
-	hint := styles.TNFaintText.Render("press ") + styles.TNKeyChip.Render("enter") + styles.TNFaintText.Render(" to select")
-	gap := max(1, w-lipgloss.Width(title)-lipgloss.Width(hint)-4)
-	titleRow := title + safeRepeat(" ", gap) + hint
-
-	// Each item is preceded by a blank line for visual breathing room.
-	var rows []string
-	for i, item := range items {
-		rows = append(rows, "") // blank spacer before each item
-		if i == m.detailMenuIdx {
-			rows = append(rows, styles.TNBlueTxt.Render("   ▸  ")+styles.TNTextBold.Render(item))
-		} else {
-			rows = append(rows, styles.TNDimText.Render("      ")+styles.TNTextMid.Render(item))
-		}
-	}
-
-	inner := strings.Join(rows, "\n")
-	return styles.TNPanelAccent.Width(w).Height(h).Render(titleRow+"\n"+inner) + "\n"
+	label := styles.TNDimText.Bold(true).Render("RESOURCES")
+	return styles.TNPanel.Width(w).Height(h).Render(label + "\n\n" + content)
 }
 
 func (m DashboardModel) renderLogsPreview(inst *InstanceState, w, h int) string {
 	title := styles.TNDimText.Render("LOGS · TAIL")
-	hint := styles.TNFaintText.Render("press ") + styles.TNKeyChip.Render("l") + styles.TNFaintText.Render(" for full logs")
-	titleRow := title + safeRepeat(" ", max(1, w-lipgloss.Width(title)-lipgloss.Width(hint)-4)) + hint
+	hint := styles.TNFaintText.Render("open full logs →")
+	titleRow := title + safeRepeat(" ", max(1, w-lipgloss.Width(title)-lipgloss.Width(hint)-2)) + hint
 
 	var lines []string
 	if len(inst.Logs) == 0 {
-		lines = append(lines, styles.TNFaintText.Render("  no logs yet — container may be starting"))
+		lines = append(lines, styles.TNFaintText.Render("  no logs yet"))
 	} else {
 		start := len(inst.Logs) - (h - 2)
 		if start < 0 {
 			start = 0
 		}
 		for _, ll := range inst.Logs[start:] {
-			ts := styles.TNFaintText.Render(padRight(ll.Time, 9))
+			ts := styles.TNFaintText.Render(padRight(ll.Time, 19))
 			lvl := styles.TNLogLevel(ll.Level)
-			msg := styles.TNTextMid.Render(tnTruncate(ll.Msg, w-30))
+			msg := styles.TNTextMid.Render(tnTruncate(ll.Msg, w-28))
 			lines = append(lines, "  "+ts+" "+lvl+"  "+msg)
 		}
 	}
 
 	inner := strings.Join(lines, "\n")
-	return styles.TNPanel.Width(w).Height(h).Render(titleRow + "\n" + inner) + "\n"
+	return styles.TNPanel.Width(w).Height(h).Render(titleRow + "\n" + inner)
 }
 
-// --- Full logs screen (embedded in the Detail layout) ---
+// --- Full logs screen (modal overlay) ---
 
 func (m DashboardModel) viewLogs() string {
 	inst := m.CurrentInstance()
-	if inst == nil {
-		return "\n  " + styles.TNDimText.Render("No instance selected.")
-	}
 	h := m.contentHeight()
 	w := m.width
 
-	var sb strings.Builder
-
-	// Instance title row — same as viewDetail.
-	dot := styles.TNStatusDot(inst.Status)
-	statusLabel := lipgloss.NewStyle().Foreground(styles.TNStatusColor(inst.Status)).Render(inst.Status)
-	imgShort := tnTruncate(inst.Info.Config.Image, 50)
-	sb.WriteString("\n  " + styles.TNTextBold.Render("▸ "+inst.Info.Name) + "  " + dot + " " + statusLabel + "  " + styles.TNFaintText.Render(imgShort) + "\n\n")
-
-	// Metadata + resources panels — same as viewDetail.
-	panelH := 10
-	halfW := (w - 6) / 2
-	meta := m.renderMetaPanel(inst, halfW, panelH)
-	res := m.renderResourcePanel(inst, halfW, panelH)
-	metaLines := strings.Split(meta, "\n")
-	resLines := strings.Split(res, "\n")
-	for len(metaLines) < panelH+2 {
-		metaLines = append(metaLines, safeRepeat(" ", halfW+2))
+	// Modal dimensions: span nearly the full terminal width.
+	contentW := w - 4
+	if contentW < 40 {
+		contentW = 40
 	}
-	for len(resLines) < panelH+2 {
-		resLines = append(resLines, safeRepeat(" ", halfW+2))
-	}
-	maxPanelL := len(metaLines)
-	if len(resLines) > maxPanelL {
-		maxPanelL = len(resLines)
-	}
-	for i := range maxPanelL {
-		ml, rl := "", ""
-		if i < len(metaLines) {
-			ml = metaLines[i]
-		}
-		if i < len(resLines) {
-			rl = resLines[i]
-		}
-		sb.WriteString("  " + ml + "  " + rl + "\n")
+	modalH := h - 6
+	if modalH < 8 {
+		modalH = 8
 	}
 
-	// Log panel — replaces the actions menu, fills remaining height.
-	showSearch := m.logSearchMode || m.logSearchQuery != ""
-	logH := h - panelH - 5 // mirrors the logsH/menuH formula in viewDetail
-	if showSearch {
-		logH -= 3 // search bar panel = 3 terminal lines
+	// Header row.
+	instName := ""
+	if inst != nil {
+		instName = inst.Info.Name
 	}
-	if logH < 4 {
-		logH = 4
-	}
-	panelW := w - 4
-
 	filtered := m.filteredLogs()
-	totalLines := len(inst.Logs)
+	var totalLines int
+	if inst != nil {
+		totalLines = len(inst.Logs)
+	}
 
-	// Panel title row.
-	logTitle := styles.TNDimText.Render("LOGS")
-	var logRight string
+	hdrLeft := styles.TNTextBold.Render(instName) + " " + styles.TNFaintText.Render("stdout + stderr")
+	var hdrRight string
 	switch {
 	case m.logCopied:
-		logRight = styles.TNGreenTxt.Render("✓ copied!")
+		hdrRight = styles.TNGreenTxt.Render("✓ copied!")
 	case m.logSearchQuery != "":
-		logRight = styles.TNBlueTxt.Render(fmt.Sprintf("%d", len(filtered))) +
+		hdrRight = styles.TNBlueTxt.Render(fmt.Sprintf("%d", len(filtered))) +
 			styles.TNFaintText.Render(fmt.Sprintf(" of %d", totalLines))
 	default:
-		logRight = styles.TNFaintText.Render(fmt.Sprintf("%d lines", totalLines))
+		hdrRight = styles.TNFaintText.Render(fmt.Sprintf("%d lines", totalLines))
 	}
-	titleGap := max(1, panelW-lipgloss.Width(logTitle)-lipgloss.Width(logRight)-6)
-	logTitleRow := logTitle + safeRepeat(" ", titleGap) + logRight
+	hdrRight += "  " + styles.TNFaintText.Render("following")
 
-	// Log content — logH inner height, minus 1 line for the title row.
-	contentLines := logH - 1
-	if contentLines < 1 {
-		contentLines = 1
+	hdrGap := max(1, contentW-lipgloss.Width(hdrLeft)-lipgloss.Width(hdrRight)-2)
+	hdrLine := hdrLeft + safeRepeat(" ", hdrGap) + hdrRight
+	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
+
+	// Log lines with word-wrap. prefix = "  " + num(4) + "  " + ts(9) + "  " + lvl(5) + "  " = 26
+	// logViewPrefixW: "  "(2) + num(4) + "  "(2) + ts(19) + "  "(2) + lvl(5) + "  "(2) = 36
+	const logViewPrefixW = 36
+	msgW := contentW - logViewPrefixW
+	if msgW < 10 {
+		msgW = 10
 	}
+	msgContW := msgW - 2
+	if msgContW < 4 {
+		msgContW = 4
+	}
+	logContIndent := safeRepeat(" ", logViewPrefixW+2)
+
+	visibleH := m.logModalVisibleLines()
 	start := m.logScroll
 	if start < 0 {
 		start = 0
 	}
-	end := start + contentLines
-	if end > len(filtered) {
-		end = len(filtered)
-	}
 
 	var logSb strings.Builder
-	logSb.WriteString(logTitleRow + "\n")
-	for lineNum, ll := range filtered[start:end] {
-		num := styles.TNFaintText.Render(fmt.Sprintf("%4d", start+lineNum+1))
-		ts := styles.TNFaintText.Render(padRight(ll.Time, 9))
+	rendered := 0
+	for entryNum, ll := range filtered[start:] {
+		if rendered >= visibleH {
+			break
+		}
+		// Blank line before labeled entries to visually group them — skip for the first visible line.
+		if ll.Level != "" && entryNum > 0 && rendered < visibleH {
+			logSb.WriteString("\n")
+			rendered++
+		}
+		if rendered >= visibleH {
+			break
+		}
+		num := styles.TNFaintText.Render(fmt.Sprintf("%4d", start+entryNum+1))
+		ts := styles.TNFaintText.Render(padRight(ll.Time, 19))
 		lvl := styles.TNLogLevel(ll.Level)
-		msg := styles.TNTextMid.Render(tnTruncate(ll.Msg, panelW-32))
-		logSb.WriteString("  " + num + "  " + ts + "  " + lvl + "  " + msg + "\n")
+		prefix := "  " + num + "  " + ts + "  " + lvl + "  "
+		for i, part := range wrapWords(ll.Msg, msgW, msgContW) {
+			if rendered >= visibleH {
+				break
+			}
+			if i == 0 {
+				logSb.WriteString(prefix + styles.TNTextMid.Render(part) + "\n")
+			} else {
+				logSb.WriteString(logContIndent + styles.TNTextMid.Render(part) + "\n")
+			}
+			rendered++
+		}
 	}
 	if start >= len(filtered) {
 		if m.logSearchQuery != "" {
@@ -594,28 +767,29 @@ func (m DashboardModel) viewLogs() string {
 		}
 	}
 
-	sb.WriteString(prefixLines(styles.TNPanel.Width(panelW).Height(logH).Render(logSb.String()), "  "))
+	body := hdrLine + "\n" + sep + "\n" + logSb.String()
 
-	// Search bar below the log panel.
-	if showSearch {
+	// Search bar below log content.
+	if m.logSearchMode || m.logSearchQuery != "" {
 		prefix := styles.TNBlueTxt.Render("/  ")
 		queryStr := m.logSearchQuery
 		if m.logSearchMode {
 			queryStr += "█"
 		}
-		queryRender := styles.TNTextSub.Render(queryStr)
 		var searchRight string
 		if m.logSearchQuery != "" {
 			searchRight = styles.TNFaintText.Render(fmt.Sprintf("%d of %d", len(filtered), totalLines))
 		} else {
 			searchRight = styles.TNFaintText.Render("type to filter…")
 		}
-		searchGap := max(1, panelW-8-lipgloss.Width(prefix)-lipgloss.Width(queryRender)-lipgloss.Width(searchRight))
-		searchLine := prefix + queryRender + safeRepeat(" ", searchGap) + searchRight
-		sb.WriteString(prefixLines(styles.TNPanel.Width(panelW).Height(1).Render(searchLine), "  "))
+		queryRender := styles.TNTextSub.Render(queryStr)
+		searchGap := max(1, contentW-lipgloss.Width(prefix)-lipgloss.Width(queryRender)-lipgloss.Width(searchRight)-2)
+		searchLine := sep + "\n" + prefix + queryRender + safeRepeat(" ", searchGap) + searchRight
+		body += searchLine
 	}
 
-	return padToHeight(sb.String(), h)
+	modal := styles.TNModal.Width(contentW).Height(modalH).Render(body)
+	return m.viewModalOverlay(modal)
 }
 
 // --- Config modal ---
@@ -625,12 +799,12 @@ func (m DashboardModel) viewConfig() string {
 	h := m.contentHeight()
 	w := m.width
 
-	modalW := w - 20
-	if modalW > 700 {
-		modalW = 70 // in chars, not px
+	contentW := w - 22
+	if contentW > 68 {
+		contentW = 68
 	}
-	if modalW < 40 {
-		modalW = 40
+	if contentW < 40 {
+		contentW = 40
 	}
 
 	var hdrRight string
@@ -638,12 +812,12 @@ func (m DashboardModel) viewConfig() string {
 		hdrRight = styles.TNFaintText.Render(inst.Info.Name + ".yaml")
 	}
 	hdrLeft := styles.TNPurpleTxt.Render("⚙") + "  " + styles.TNTextBold.Render("Edit config")
-	hdrGap := modalW - lipgloss.Width(hdrLeft) - lipgloss.Width(hdrRight) - 4
+	hdrGap := contentW - lipgloss.Width(hdrLeft) - lipgloss.Width(hdrRight) - 2
 	if hdrGap < 1 {
 		hdrGap = 1
 	}
 	header := hdrLeft + safeRepeat(" ", hdrGap) + hdrRight
-	sep := styles.TNFaintText.Render(safeRepeat("─", modalW-2))
+	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
 
 	var rows []string
 	for i, f := range m.cfgFields {
@@ -662,7 +836,7 @@ func (m DashboardModel) viewConfig() string {
 			if f.Changed {
 				valS = styles.TNGreenTxt
 			}
-			valStr = valS.Render(tnTruncate(f.Value, modalW-30))
+			valStr = valS.Render(tnTruncate(f.Value, contentW-30))
 			if f.Changed {
 				valStr += "  " + styles.TNGreenTxt.Render("●")
 			}
@@ -676,35 +850,19 @@ func (m DashboardModel) viewConfig() string {
 		rows = append(rows, row)
 	}
 
-	footer := styles.TNGreenTxt.Render("●") + styles.TNFaintText.Render(" changed since last save")
+	legend := styles.TNGreenTxt.Render("●") + styles.TNFaintText.Render(" changed since last save")
+	keyhints := styles.TNFaintText.Render("ctrl+s") + styles.TNDimText.Render("  save    ") +
+		styles.TNFaintText.Render("esc") + styles.TNDimText.Render("  close")
+	body := header + "\n" + sep + "\n" + strings.Join(rows, "\n") + "\n" + sep + "\n" + legend + "\n" + keyhints
+	modal := styles.TNModal.Width(contentW).Padding(1, 2).Render(body)
 
-	body := header + "\n" + sep + "\n" + strings.Join(rows, "\n") + "\n" + sep + "\n" + footer
-	modal := styles.TNModal.Width(modalW).Render(body)
-
-	// Center the modal.
-	topPad := (h - strings.Count(modal, "\n") - 2) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-	var sb strings.Builder
-	for range topPad {
-		sb.WriteString("\n")
-	}
-	leftPad := (w - lipgloss.Width(modal)) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-	pad := safeRepeat(" ", leftPad)
-	for _, line := range strings.Split(modal, "\n") {
-		sb.WriteString(pad + line + "\n")
-	}
-	return sb.String()
+	_ = h // height used implicitly by Place
+	return m.viewModalOverlay(modal)
 }
 
 // --- Doctor modal ---
 
 func (m DashboardModel) viewDoctor() string {
-	h := m.contentHeight()
 	w := m.width
 
 	header := styles.TNCyanTxt.Render("✚") + "  " + styles.TNTextBold.Render("Doctor") + "  " + styles.TNFaintText.Render("system diagnostics")
@@ -743,114 +901,75 @@ func (m DashboardModel) viewDoctor() string {
 	inner := header + "\n" + sep + "\n" + strings.Join(bodyLines, "\n")
 	modal := styles.TNModal.Width(innerW).Padding(1, 2).Render(inner)
 
-	topPad := (h - strings.Count(modal, "\n") - 2) / 2
-	if topPad < 0 {
-		topPad = 0
-	}
-	leftPad := (w - lipgloss.Width(modal)) / 2
-	if leftPad < 0 {
-		leftPad = 0
-	}
-
-	var sb strings.Builder
-	for range topPad {
-		sb.WriteString("\n")
-	}
-	pad := safeRepeat(" ", leftPad)
-	for _, line := range strings.Split(modal, "\n") {
-		sb.WriteString(pad + line + "\n")
-	}
-	return sb.String()
+	return m.viewModalOverlay(modal)
 }
 
-// --- Install screen ---
+// --- Install screen (modal) ---
 
 func (m DashboardModel) viewInstall() string {
 	h := m.contentHeight()
 	w := m.width
 
-	panelW := w - 4
+	contentW := w - 10
+	if contentW > 88 {
+		contentW = 88
+	}
+	if contentW < 40 {
+		contentW = 40
+	}
+	modalH := h - 4
+	if modalH < 8 {
+		modalH = 8
+	}
+
 	title := styles.TNBoldBlue.Render("◆") + "  " + styles.TNTextBold.Render("Install new instance")
 	hint := styles.TNFaintText.Render("preflight → configure → install")
-	gap := panelW - lipgloss.Width(title) - lipgloss.Width(hint) - 6
+	gap := contentW - lipgloss.Width(title) - lipgloss.Width(hint) - 2
 	titleRow := title + safeRepeat(" ", max(1, gap)) + hint
-	sep := styles.TNFaintText.Render(safeRepeat("─", panelW-4))
+	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
 
-	innerW := panelW - 4
-	content := titleRow + "\n" + sep + "\n" + m.installModel.TNView(innerW, h-4)
-	return prefixLines(styles.TNPanel.Width(panelW).Height(h).Render(content), "  ")
+	innerW := contentW - 4
+	content := titleRow + "\n" + sep + "\n" + m.installModel.TNView(innerW, modalH-4)
+	modal := styles.TNModal.Width(contentW).Height(modalH).Render(content)
+	return m.viewModalOverlay(modal)
 }
 
-// --- Update screen (Detail layout with log panel replaced) ---
+// --- Update screen (modal) ---
 
 func (m DashboardModel) viewUpdate() string {
 	inst := m.CurrentInstance()
-	if inst == nil {
-		return "\n  " + styles.TNDimText.Render("No instance selected.")
-	}
 	h := m.contentHeight()
 	w := m.width
 
-	var sb strings.Builder
-
-	// Instance title row (same as viewDetail).
-	dot := styles.TNStatusDot(inst.Status)
-	statusLabel := lipgloss.NewStyle().Foreground(styles.TNStatusColor(inst.Status)).Render(inst.Status)
-	imgShort := tnTruncate(inst.Info.Config.Image, 50)
-	sb.WriteString("\n  " + styles.TNTextBold.Render("▸ "+inst.Info.Name) + "  " + dot + " " + statusLabel + "  " + styles.TNFaintText.Render(imgShort) + "\n\n")
-
-	// Two-panel row: metadata + resources (same as viewDetail).
-	panelH := 10
-	halfW := (w - 6) / 2
-	meta := m.renderMetaPanel(inst, halfW, panelH)
-	res := m.renderResourcePanel(inst, halfW, panelH)
-
-	metaLines := strings.Split(meta, "\n")
-	resLines := strings.Split(res, "\n")
-	for len(metaLines) < panelH+2 {
-		metaLines = append(metaLines, safeRepeat(" ", halfW+2))
+	contentW := w - 14
+	if contentW > 78 {
+		contentW = 78
 	}
-	for len(resLines) < panelH+2 {
-		resLines = append(resLines, safeRepeat(" ", halfW+2))
+	if contentW < 40 {
+		contentW = 40
 	}
-	maxL := len(metaLines)
-	if len(resLines) > maxL {
-		maxL = len(resLines)
-	}
-	for i := range maxL {
-		ml, rl := "", ""
-		if i < len(metaLines) {
-			ml = metaLines[i]
-		}
-		if i < len(resLines) {
-			rl = resLines[i]
-		}
-		sb.WriteString("  " + ml + "  " + rl + "\n")
+	modalH := h - 6
+	if modalH < 8 {
+		modalH = 8
 	}
 
-	// Update progress panel replaces the log panel.
-	updateH := h - panelH - 5
-	if updateH < 4 {
-		updateH = 4
+	instName := ""
+	if inst != nil {
+		instName = inst.Info.Name
 	}
-	panelW := w - 4
-
-	title := styles.TNBlueTxt.Render("◆") + "  " + styles.TNTextBold.Render("Update  ") + styles.TNFaintText.Render(inst.Info.Name)
+	title := styles.TNBlueTxt.Render("◆") + "  " + styles.TNTextBold.Render("Update") + "  " + styles.TNFaintText.Render(instName)
 	hint := styles.TNFaintText.Render("press ") + styles.TNKeyChip.Render("any key") + styles.TNFaintText.Render(" when done")
-	gap := panelW - lipgloss.Width(title) - lipgloss.Width(hint) - 6
+	gap := contentW - lipgloss.Width(title) - lipgloss.Width(hint) - 2
 	titleRow := title + safeRepeat(" ", max(1, gap)) + hint
 
-	updateContent := titleRow + "\n" + m.updateModel.TNView(panelW-4)
-	updatePanel := styles.TNPanel.Width(panelW).Height(updateH).Render(updateContent)
-	sb.WriteString(prefixLines(updatePanel, "  "))
-
-	return padToHeight(sb.String(), h)
+	updateContent := titleRow + "\n" + m.updateModel.TNView(contentW-4)
+	modal := styles.TNModal.Width(contentW).Height(modalH).Render(updateContent)
+	return m.viewModalOverlay(modal)
 }
 
 // --- Helpers ---
 
 // prefixLines adds prefix to every line of a rendered multi-line block.
-// This is necessary because "prefix + panel" only indents the first line.
 func prefixLines(block, prefix string) string {
 	block = strings.TrimSuffix(block, "\n")
 	lines := strings.Split(block, "\n")
@@ -858,6 +977,50 @@ func prefixLines(block, prefix string) string {
 		lines[i] = prefix + line
 	}
 	return strings.Join(lines, "\n") + "\n"
+}
+
+// wrapWords word-wraps text into lines, preserving original spacing.
+// It scans rune-by-rune, breaking at the last space within the width limit.
+// Long runs with no spaces are hard-broken at the limit.
+// firstW is the max rune-width for the first line; contW for subsequent ones.
+func wrapWords(text string, firstW, contW int) []string {
+	if firstW <= 0 {
+		return []string{text}
+	}
+	runes := []rune(text)
+	if len(runes) == 0 {
+		return []string{""}
+	}
+
+	var lines []string
+	limit := firstW
+	pos := 0
+
+	for pos < len(runes) {
+		end := pos + limit
+		if end >= len(runes) {
+			lines = append(lines, string(runes[pos:]))
+			break
+		}
+		// Scan backwards from end-1 for a space to break on.
+		breakAt := -1
+		for i := end - 1; i > pos; i-- {
+			if runes[i] == ' ' {
+				breakAt = i
+				break
+			}
+		}
+		if breakAt < 0 {
+			// No space found — hard break at limit.
+			lines = append(lines, string(runes[pos:end]))
+			pos = end
+		} else {
+			lines = append(lines, string(runes[pos:breakAt]))
+			pos = breakAt + 1 // skip the break-point space
+		}
+		limit = contW
+	}
+	return lines
 }
 
 // safeRepeat is strings.Repeat guarded against negative counts.
@@ -892,12 +1055,6 @@ func dashOr(s string) string {
 	return s
 }
 
-func parsePct(s string) float64 {
-	s = strings.TrimSuffix(s, "%")
-	f, _ := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	return f / 100.0
-}
-
 func healthStyle(health string) lipgloss.Style {
 	switch health {
 	case "healthy":
@@ -908,4 +1065,3 @@ func healthStyle(health string) lipgloss.Style {
 		return styles.TNDimText
 	}
 }
-

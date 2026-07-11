@@ -11,8 +11,8 @@ import (
 func TestParseLogLineWithTimestamp(t *testing.T) {
 	line := "2024-01-15T14:32:01.123456789Z INFO some message here"
 	ll := parseLogLine(line)
-	if ll.Time != "14:32:01" {
-		t.Errorf("Time: got %q, want '14:32:01'", ll.Time)
+	if ll.Time != "01-15-24 2:32 PM" {
+		t.Errorf("Time: got %q, want '01-15-24 2:32 PM'", ll.Time)
 	}
 	if ll.Level != "INFO" {
 		t.Errorf("Level: got %q, want 'INFO'", ll.Level)

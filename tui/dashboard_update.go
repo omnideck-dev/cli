@@ -24,7 +24,6 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		// Forward size to any active sub-model.
 		if m.screen == ScreenInstall {
 			m.installModel.HandleWindowSize(msg)
 		}
@@ -67,6 +66,8 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.health != "" {
 				inst.Health = msg.health
 			}
+			inst.CPUHistory = pushHistory(inst.CPUHistory, msg.cpuPct)
+			inst.RAMHistory = pushHistory(inst.RAMHistory, msg.ramPct)
 		}
 		return m, nil
 
@@ -75,12 +76,11 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.instances[msg.idx].Logs = msg.lines
 		}
 		if m.screen == ScreenLogs {
-			m.logScroll = 0 // reset scroll on fresh fetch
+			m.logScroll = 0
 		}
 		return m, nil
 
 	case instancesRefreshedMsg:
-		// Rebuild instance list, preserving existing runtime state where possible.
 		existing := map[string]InstanceState{}
 		for _, inst := range m.instances {
 			if inst.Info.Config == nil {
@@ -126,6 +126,23 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.logCopied = false
 		return m, nil
 
+	case toastClearMsg:
+		m.toast = ""
+		return m, nil
+
+	case cfgApplyDoneMsg:
+		m.screen = ScreenDashboard
+		m.cfgFields = nil
+		if msg.err != nil {
+			m.toast = "Apply failed: " + msg.err.Error()
+			return m, clearToastCmd()
+		}
+		m.toast = "Config applied — " + msg.newName + " restarted"
+		// Poll the specific instance with its new container name (already updated
+		// in memory by saveCfgFields). A full reloadInstancesCmd is not needed
+		// and can cause duplicate entries when instance metadata is in flux.
+		return m, tea.Batch(m.pollStats(msg.idx), clearToastCmd())
+
 	case containerToggleDoneMsg:
 		if msg.idx >= 0 && msg.idx < len(m.instances) {
 			inst := &m.instances[msg.idx]
@@ -147,17 +164,20 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if msg.health != "" {
 				inst.Health = msg.health
 			}
+			inst.CPUHistory = pushHistory(inst.CPUHistory, msg.cpuPct)
+			inst.RAMHistory = pushHistory(inst.RAMHistory, msg.ramPct)
+			action := "Stopped"
+			if msg.status == "running" {
+				action = "Started"
+			}
+			m.toast = action + " " + inst.Info.Name
 		}
-		m.detailBusy = false
-		return m, nil
+		return m, clearToastCmd()
 
 	case spinner.TickMsg:
-		var cmd1, cmd2 tea.Cmd
-		m.doctorSpinner, cmd1 = m.doctorSpinner.Update(msg)
-		if m.detailBusy {
-			m.detailSpinner, cmd2 = m.detailSpinner.Update(msg)
-		}
-		return m, tea.Batch(cmd1, cmd2)
+		var cmd tea.Cmd
+		m.doctorSpinner, cmd = m.doctorSpinner.Update(msg)
+		return m, cmd
 	}
 
 	// Per-screen handlers.
@@ -172,8 +192,6 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case ScreenDashboard:
 		return m.updateDashboard(msg)
-	case ScreenDetail:
-		return m.updateDetail(msg)
 	case ScreenLogs:
 		return m.updateLogs(msg)
 	case ScreenConfig:
@@ -189,26 +207,102 @@ func (m DashboardModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !ok {
 		return m, nil
 	}
+
+	chipFocused := m.chipFocus >= 0
+
 	switch key.String() {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 
-	case "down", "tab":
+	case "down", "j":
 		if m.selected < len(m.instances)-1 {
 			m.selected++
+			m.chipFocus = -1
 		}
-
-	case "up", "shift+tab":
+	case "up", "k":
 		if m.selected > 0 {
 			m.selected--
+			m.chipFocus = -1
 		}
 
 	case "enter":
+		if len(m.instances) == 0 {
+			break
+		}
+		if chipFocused {
+			return m.execChip()
+		}
+		name := m.instances[m.selected].Info.Name
+		m.expanded[name] = !m.expanded[name]
+		if m.expanded[name] {
+			return m, m.pollLogs(m.selected)
+		}
+		m.chipFocus = -1
+
+	case "tab":
+		if len(m.instances) > 0 && m.isExpanded() {
+			if m.chipFocus < 0 {
+				m.chipFocus = 0
+			} else {
+				m.chipFocus = (m.chipFocus + 1) % 4
+			}
+		} else if len(m.instances) > 0 {
+			if m.selected < len(m.instances)-1 {
+				m.selected++
+			}
+		}
+
+	case "shift+tab":
+		if len(m.instances) > 0 && m.isExpanded() {
+			if m.chipFocus <= 0 {
+				m.chipFocus = 3
+			} else {
+				m.chipFocus--
+			}
+		} else if len(m.instances) > 0 {
+			if m.selected > 0 {
+				m.selected--
+			}
+		}
+
+	case "right":
+		if len(m.instances) > 0 && m.isExpanded() {
+			if m.chipFocus < 0 {
+				m.chipFocus = 0
+			} else {
+				m.chipFocus = (m.chipFocus + 1) % 4
+			}
+		}
+	case "left":
+		if len(m.instances) > 0 && m.isExpanded() {
+			if m.chipFocus < 0 {
+				m.chipFocus = 3
+			} else {
+				m.chipFocus = (m.chipFocus + 3) % 4
+			}
+		}
+
+	case "esc":
+		if chipFocused {
+			m.chipFocus = -1
+		} else if m.isExpanded() {
+			m.expanded[m.instances[m.selected].Info.Name] = false
+		}
+
+	case "s":
+		return m.doToggleContainer()
+
+	case "l":
 		if len(m.instances) > 0 {
-			m.screen = ScreenDetail
-			m.prevScreen = ScreenDashboard
-			m.detailMenuIdx = 0
-			return m, m.pollStats(m.selected)
+			m.screen = ScreenLogs
+			m.logScroll = 0
+			return m, m.pollLogs(m.selected)
+		}
+
+	case "c":
+		if len(m.instances) > 0 {
+			m.screen = ScreenConfig
+			m.buildCfgFields()
 		}
 
 	case "n":
@@ -216,13 +310,11 @@ func (m DashboardModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case "d":
 		m.screen = ScreenDoctor
-		m.prevScreen = ScreenDashboard
 		m.doctorDone = false
 		m.doctorResults = nil
 		return m, tea.Batch(m.doctorSpinner.Tick, m.runDoctorCmd())
 
 	case "r":
-		// Refresh stats immediately.
 		var cmds []tea.Cmd
 		for i := range m.instances {
 			cmds = append(cmds, m.pollStats(i))
@@ -232,113 +324,50 @@ func (m DashboardModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-const detailMenuCount = 4 // Open UI, Logs, Update, Start/Stop
-
-func (m DashboardModel) updateDetail(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if m.detailBusy {
-		return m, nil // block all input while start/stop is in flight
+// isExpanded returns true if the currently selected card is expanded.
+func (m DashboardModel) isExpanded() bool {
+	if m.selected < 0 || m.selected >= len(m.instances) {
+		return false
 	}
-
-	// Mouse click on an action item.
-	if mouse, ok := msg.(tea.MouseMsg); ok {
-		if mouse.Button == tea.MouseButtonLeft && mouse.Action == tea.MouseActionPress {
-			if idx := m.menuItemAt(mouse.Y); idx >= 0 {
-				m.detailMenuIdx = idx
-				return m.execDetailMenu()
-			}
-		}
-		return m, nil
-	}
-
-	key, ok := msg.(tea.KeyMsg)
-	if !ok {
-		return m, nil
-	}
-	switch key.String() {
-	case "esc", "backspace":
-		m.screen = ScreenDashboard
-
-	case "down", "tab":
-		if m.detailMenuIdx < detailMenuCount-1 {
-			m.detailMenuIdx++
-		}
-
-	case "up", "shift+tab":
-		if m.detailMenuIdx > 0 {
-			m.detailMenuIdx--
-		}
-
-	case "enter":
-		return m.execDetailMenu()
-
-	case "c":
-		m.screen = ScreenConfig
-		m.buildCfgFields()
-
-	case "d":
-		m.screen = ScreenDoctor
-		m.prevScreen = ScreenDetail
-		m.doctorDone = false
-		m.doctorResults = nil
-		return m, tea.Batch(m.doctorSpinner.Tick, m.runDoctorCmd())
-	}
-	return m, nil
+	return m.expanded[m.instances[m.selected].Info.Name]
 }
 
-// menuItemAt returns the 0-based index of the action item at terminal row y,
-// or -1 if y does not land on an item.
-//
-// Layout (0-indexed terminal rows):
-//   0           : header bar
-//   1           : blank
-//   2           : instance title
-//   3           : blank
-//   4–15        : side-by-side panels (panelH=10, +2 borders = 12 rows)
-//   16          : actions panel top border
-//   17          : titleRow  (inner line 0)
-//   18          : blank     (inner line 1 — spacer before item 0)  ← zone for item 0 starts here
-//   19          : item 0    (inner line 2)
-//   20          : blank     (inner line 3 — spacer before item 1)  ← zone for item 1 starts here
-//   21          : item 1    (inner line 4)
-//   ...
-//   itemZone(i) starts at 18 + i*2
-func (m DashboardModel) menuItemAt(y int) int {
-	// itemsStart points to the blank spacer before item 0, so each (blank+item)
-	// pair maps cleanly to one idx via integer division.
-	const itemsStart = headerLines + 1 + 1 + 1 + (10 + 2) + 1 + 1 // = 18
-	rel := y - itemsStart
-	if rel < 0 {
-		return -1
+// doToggleContainer initiates a stop/start for the selected instance with a toast.
+func (m DashboardModel) doToggleContainer() (DashboardModel, tea.Cmd) {
+	inst := m.CurrentInstance()
+	if inst == nil {
+		return m, nil
 	}
-	idx := rel / 2
-	if idx < detailMenuCount {
-		return idx
+	action := "Stopping"
+	if inst.Status != "running" {
+		action = "Starting"
 	}
-	return -1
+	m.toast = action + " " + inst.Info.Name + "…"
+	return m, m.toggleContainer()
 }
 
-// execDetailMenu runs the currently highlighted menu item on the Detail screen.
-func (m DashboardModel) execDetailMenu() (DashboardModel, tea.Cmd) {
-	switch m.detailMenuIdx {
+// execChip activates the currently focused action chip.
+func (m DashboardModel) execChip() (DashboardModel, tea.Cmd) {
+	inst := m.CurrentInstance()
+	if inst == nil {
+		return m, nil
+	}
+	switch m.chipFocus {
 	case 0: // Open UI
-		if inst := m.CurrentInstance(); inst != nil {
-			port := inst.Info.Config.WebUIPortOrDefault()
-			return m, openBrowserCmd("http://localhost:" + port)
-		}
+		port := inst.Info.Config.WebUIPortOrDefault()
+		m.toast = "Opened " + inst.Info.Name + " in browser ↗"
+		return m, tea.Batch(openBrowserCmd("http://localhost:"+port), clearToastCmd())
 	case 1: // Logs
 		m.screen = ScreenLogs
 		m.logScroll = 0
+		m.chipFocus = -1
 		return m, m.pollLogs(m.selected)
 	case 2: // Update
+		m.chipFocus = -1
 		return m.startEmbeddedUpdate()
-	case 3: // Start/Stop
-		m.detailBusy = true
-		if inst := m.CurrentInstance(); inst != nil && inst.Status == "running" {
-			m.detailBusyAction = "Stopping"
-		} else {
-			m.detailBusyAction = "Starting"
-		}
-		return m, tea.Batch(m.toggleContainer(), m.detailSpinner.Tick)
+	case 3: // Stop/Start
+		m.chipFocus = -1
+		return m.doToggleContainer()
 	}
 	return m, nil
 }
@@ -376,19 +405,7 @@ func (m DashboardModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// Normal mode.
 	filtered := m.filteredLogs()
 	totalLines := len(filtered)
-	// Match viewLogs: h = contentHeight(); logH = h - panelH(10) - 5; contentLines = logH - 1.
-	h := m.contentHeight()
-	logH := h - 10 - 5
-	if m.logSearchQuery != "" || m.logSearchMode {
-		logH -= 3
-	}
-	if logH < 4 {
-		logH = 4
-	}
-	visibleLines := logH - 1
-	if visibleLines < 1 {
-		visibleLines = 1
-	}
+	visibleLines := m.logModalVisibleLines()
 
 	switch key.String() {
 	case "esc", "backspace":
@@ -396,11 +413,11 @@ func (m DashboardModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logSearchQuery = ""
 			m.logScroll = 0
 		} else {
-			m.screen = ScreenDetail
+			m.screen = ScreenDashboard
 		}
 	case "q":
 		if m.logSearchQuery == "" {
-			m.screen = ScreenDetail
+			m.screen = ScreenDashboard
 		}
 
 	case "down":
@@ -436,26 +453,22 @@ func (m DashboardModel) updateLogs(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// copyToClipboard writes text to the system clipboard via pbcopy (macOS),
-// clip (Windows), or xclip/xsel (Linux).
-func copyToClipboard(text string) error {
-	var cmd *exec.Cmd
-	switch runtime.GOOS {
-	case "darwin":
-		cmd = exec.Command("pbcopy")
-	case "windows":
-		cmd = exec.Command("clip")
-	default:
-		if _, err := exec.LookPath("xclip"); err == nil {
-			cmd = exec.Command("xclip", "-selection", "clipboard")
-		} else if _, err := exec.LookPath("xsel"); err == nil {
-			cmd = exec.Command("xsel", "--clipboard", "--input")
-		} else {
-			return fmt.Errorf("clipboard tool not found — install xclip or xsel")
-		}
+// logModalVisibleLines calculates visible log lines in the logs modal.
+// Must stay in sync with viewLogs() layout.
+func (m DashboardModel) logModalVisibleLines() int {
+	modalH := m.contentHeight() - 6
+	if modalH < 4 {
+		modalH = 4
 	}
-	cmd.Stdin = strings.NewReader(text)
-	return cmd.Run()
+	// subtract header line + separator
+	visible := modalH - 2
+	if m.logSearchMode || m.logSearchQuery != "" {
+		visible -= 2 // separator + search bar
+	}
+	if visible < 1 {
+		visible = 1
+	}
+	return visible
 }
 
 func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -467,13 +480,11 @@ func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if m.cfgEditing {
 		switch key.Type {
 		case tea.KeyEnter: //nolint:exhaustive
-			// Commit the edit.
 			m.cfgFields[m.cfgFocus].Value = m.cfgBuf
 			m.cfgFields[m.cfgFocus].Changed = (m.cfgBuf != m.cfgFields[m.cfgFocus].Orig)
 			m.cfgEditing = false
 			m.cfgBuf = ""
 		case tea.KeyEsc:
-			// Cancel the edit.
 			m.cfgEditing = false
 			m.cfgBuf = ""
 		case tea.KeyBackspace:
@@ -490,35 +501,40 @@ func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch key.String() {
 	case "esc", "q", "backspace":
-		m.screen = ScreenDetail
+		m.screen = ScreenDashboard
 		m.cfgFields = nil
 
 	case "ctrl+s":
-		if err := m.saveCfgFields(); err == nil {
-			// Reload instance data.
-			if inst := m.CurrentInstance(); inst != nil {
-				cfg := inst.Info.Config
-				// Update local state to reflect saved values.
-				for _, f := range m.cfgFields {
-					switch f.Key {
-					case "container_name":
-						cfg.ContainerName = f.Value
-					case "memory":
-						cfg.Memory = f.Value
-					case "shm_size":
-						cfg.ShmSize = f.Value
-					case "web_ui_port":
-						cfg.WebUIPort = f.Value
-					case "image":
-						cfg.Image = f.Value
-					}
-				}
-				for i := range m.cfgFields {
-					m.cfgFields[i].Orig = m.cfgFields[i].Value
-					m.cfgFields[i].Changed = false
-				}
+		inst := m.CurrentInstance()
+		if inst == nil {
+			break
+		}
+		// Capture old name before saveCfgFields mutates the in-memory config.
+		oldName := inst.Info.Config.ContainerName
+		needsRestart := false
+		for _, f := range m.cfgFields {
+			if !f.Changed {
+				continue
+			}
+			switch f.Key {
+			case "container_name", "memory", "shm_size", "web_ui_port", "image":
+				needsRestart = true
 			}
 		}
+		if err := m.saveCfgFields(); err != nil {
+			m.toast = "Save failed: " + err.Error()
+			return m, clearToastCmd()
+		}
+		for i := range m.cfgFields {
+			m.cfgFields[i].Orig = m.cfgFields[i].Value
+			m.cfgFields[i].Changed = false
+		}
+		if needsRestart {
+			m.toast = "Applying config…"
+			return m, applyConfigCmd(oldName, inst.Info.Config, m.eng, m.selected)
+		}
+		m.toast = "Config saved"
+		return m, clearToastCmd()
 
 	case "down", "tab":
 		if m.cfgFocus < len(m.cfgFields)-1 {
@@ -546,16 +562,12 @@ func (m DashboardModel) updateDoctor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	}
 	switch key.String() {
 	case "esc", "q", "backspace":
-		m.screen = m.prevScreen
-		if m.screen == ScreenDoctor {
-			m.screen = ScreenDashboard
-		}
+		m.screen = ScreenDashboard
 	}
 	return m, nil
 }
 
 // toggleContainer starts or stops the selected instance, then re-polls stats.
-// Returns containerToggleDoneMsg so the handler can clear the busy flag.
 func (m DashboardModel) toggleContainer() tea.Cmd {
 	inst := m.CurrentInstance()
 	if inst == nil || m.eng == nil {
@@ -583,7 +595,6 @@ func openBrowserCmd(url string) tea.Cmd {
 		case "darwin":
 			cmd = exec.Command("open", url)
 		case "windows":
-			// rundll32 opens the URL in the default browser.
 			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 		default:
 			cmd = exec.Command("xdg-open", url)
@@ -593,3 +604,24 @@ func openBrowserCmd(url string) tea.Cmd {
 	}
 }
 
+// copyToClipboard writes text to the system clipboard via pbcopy (macOS),
+// clip (Windows), or xclip/xsel (Linux).
+func copyToClipboard(text string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	case "windows":
+		cmd = exec.Command("clip")
+	default:
+		if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("xsel"); err == nil {
+			cmd = exec.Command("xsel", "--clipboard", "--input")
+		} else {
+			return fmt.Errorf("clipboard tool not found — install xclip or xsel")
+		}
+	}
+	cmd.Stdin = strings.NewReader(text)
+	return cmd.Run()
+}
