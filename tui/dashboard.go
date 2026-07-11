@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
@@ -19,12 +21,11 @@ type Screen int
 
 const (
 	ScreenDashboard Screen = iota
-	ScreenDetail
 	ScreenLogs
-	ScreenConfig  // modal overlay over Detail
-	ScreenDoctor  // modal overlay over Dashboard/Detail
-	ScreenInstall // embedded install wizard
-	ScreenUpdate  // embedded update wizard
+	ScreenConfig  // modal overlay over Dashboard
+	ScreenDoctor  // modal overlay over Dashboard
+	ScreenInstall // install wizard modal
+	ScreenUpdate  // update wizard modal
 )
 
 // LogLine is one parsed container log entry.
@@ -45,27 +46,30 @@ type cfgField struct {
 
 // InstanceState holds live runtime data for one managed instance.
 type InstanceState struct {
-	Info     config.InstanceInfo
-	Status   string // "running" | "stopped" | "paused" | "unknown"
-	CPU      string // e.g. "12.3%"
-	CPUPct   float64
-	RAM      string // e.g. "1.24 GiB" (used)
-	RAMTotal string // e.g. "15.6 GiB" (limit)
-	RAMPct   float64
-	Uptime   string // e.g. "2d 3h"
-	Restarts string
-	Created  string
-	Health   string
-	NetUp    string    // e.g. "1.2 KB"
-	NetDown  string    // e.g. "3.4 KB"
-	Disk     string    // e.g. "2.1 GB"
-	Logs     []LogLine // last N lines cached for detail/logs screens
+	Info       config.InstanceInfo
+	Status     string // "running" | "stopped" | "paused" | "unknown"
+	CPU        string // e.g. "12.3%"
+	CPUPct     float64
+	RAM        string // e.g. "1.24 GiB" (used)
+	RAMTotal   string // e.g. "15.6 GiB" (limit)
+	RAMPct     float64
+	Uptime     string
+	Restarts   string
+	Created    string
+	Health     string
+	NetUp      string
+	NetDown    string
+	Disk       string
+	Logs       []LogLine
+	CPUHistory []float64 // last 16 samples (0.0–1.0)
+	RAMHistory []float64 // last 16 samples (0.0–1.0)
 }
 
 // --- internal messages ---
 
 type clockTickMsg time.Time
 type statsTickMsg time.Time
+type toastClearMsg struct{}
 
 type instanceStatsMsg struct {
 	idx      int
@@ -87,8 +91,7 @@ type instanceLogsMsg struct {
 }
 type doctorResultsMsg []CheckResult
 
-// containerToggleDoneMsg is returned by toggleContainer so the handler can
-// clear the busy flag separately from a normal stats poll.
+// containerToggleDoneMsg is returned by toggleContainer after the stop/start completes.
 type containerToggleDoneMsg instanceStatsMsg
 
 // logCopyResultMsg is returned after a clipboard copy attempt.
@@ -100,21 +103,33 @@ type logCopyClearMsg struct{}
 // WizardExitMsg is emitted by an embedded install/update wizard when done.
 type WizardExitMsg struct{}
 
+// cfgApplyDoneMsg is returned after a container recreate triggered by a config save.
+type cfgApplyDoneMsg struct {
+	err     error
+	newName string // new container name (may differ from old)
+	idx     int
+}
+
 // instancesRefreshedMsg carries a fresh list of instances (e.g. after install).
 type instancesRefreshedMsg []config.InstanceInfo
 
 // DashboardModel is the top-level Bubble Tea model for the v2 dashboard TUI.
-// It manages all screens and embeds sub-models for install/update/doctor.
 type DashboardModel struct {
 	width, height int
 	screen        Screen
-	prevScreen    Screen
 
 	eng       engine.Engine
 	instances []InstanceState
 	selected  int // index into instances
 
 	clock string
+
+	// Card state
+	expanded  map[string]bool // per-card expand flag keyed by instance name
+	chipFocus int             // -1 = none focused, 0–3 = focused chip index
+
+	// Toast notification
+	toast string
 
 	// Doctor modal
 	doctorResults []CheckResult
@@ -126,12 +141,6 @@ type DashboardModel struct {
 	logSearchMode  bool
 	logSearchQuery string
 	logCopied      bool
-
-	// Detail screen menu
-	detailMenuIdx    int
-	detailBusy       bool   // true while start/stop is in flight
-	detailBusyAction string // "Stopping" or "Starting", set at trigger time
-	detailSpinner    spinner.Model
 
 	// Config modal
 	cfgFields  []cfgField
@@ -164,15 +173,13 @@ func NewDashboardModel(eng engine.Engine, instances []config.InstanceInfo) Dashb
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(styles.TNBlue)
-	dsp := spinner.New()
-	dsp.Spinner = spinner.Dot
-	dsp.Style = lipgloss.NewStyle().Foreground(styles.TNBlue)
 	return DashboardModel{
 		eng:           eng,
 		instances:     states,
 		clock:         time.Now().Format("15:04:05"),
 		doctorSpinner: sp,
-		detailSpinner: dsp,
+		expanded:      make(map[string]bool),
+		chipFocus:     -1,
 	}
 }
 
@@ -218,7 +225,6 @@ func (m DashboardModel) Init() tea.Cmd {
 }
 
 // fetchStats calls the engine synchronously and returns an instanceStatsMsg.
-// Used by both pollStats and toggleContainer to avoid duplicating logic.
 func fetchStats(eng engine.Engine, name string, idx int) tea.Msg {
 	status, _ := eng.ContainerStatus(name)
 	if status == "" {
@@ -410,6 +416,43 @@ func reloadInstancesCmd() tea.Cmd {
 	}
 }
 
+// clearToastCmd fires toastClearMsg after ~1.7 seconds.
+func clearToastCmd() tea.Cmd {
+	return tea.Tick(1700*time.Millisecond, func(time.Time) tea.Msg { return toastClearMsg{} })
+}
+
+// applyConfigCmd stops and removes the old container, then recreates it with the new config.
+// oldName is the container name before any rename so we can stop/remove the right container.
+func applyConfigCmd(oldName string, cfg *config.Config, eng engine.Engine, idx int) tea.Cmd {
+	return func() tea.Msg {
+		_ = eng.StopContainer(oldName)
+		_ = eng.RemoveContainer(oldName)
+		opts := engine.RunOptions{
+			Name:        cfg.ContainerName,
+			Image:       cfg.Image,
+			Memory:      cfg.Memory,
+			ShmSize:     cfg.ShmSize,
+			HomeVolume:  cfg.HomeVolumeName(),
+			StateVolume: cfg.StateVolumeName(),
+			Restart:     "always",
+			OllamaHost:  checks.OllamaHost(),
+			WebUIPort:   cfg.WebUIPortOrDefault(),
+			Platform:    runtime.GOOS,
+		}
+		err := eng.RunContainer(opts)
+		return cfgApplyDoneMsg{err: err, newName: cfg.ContainerName, idx: idx}
+	}
+}
+
+// pushHistory appends val to hist and trims to the last 16 samples.
+func pushHistory(hist []float64, val float64) []float64 {
+	hist = append(hist, val)
+	if len(hist) > 16 {
+		hist = hist[len(hist)-16:]
+	}
+	return hist
+}
+
 // suggestInstallDefaults builds a Config pre-filled with a unique name and port.
 func suggestInstallDefaults() *config.Config {
 	instances, _ := config.ListInstances()
@@ -469,25 +512,26 @@ func parseLogLine(line string) LogLine {
 	ts := ""
 	rest := line
 
-	// Docker/Podman --timestamps prefix: 2024-01-01T14:32:01.123456789Z <rest>
-	if len(line) > 30 && line[10] == 'T' {
-		if idx := strings.IndexByte(line, ' '); idx > 0 && idx < 35 {
-			raw := line[:idx]
-			if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
-				ts = t.Format("15:04:05")
-			} else {
-				ts = raw
+	// Docker/Podman --timestamps prefix: RFC3339Nano timestamp followed by a space.
+	// Podman emits 35-char timestamps like "2026-07-10T18:11:11.207455000-04:00 <rest>".
+	// We look for the first space within the first 40 chars and attempt a parse.
+	if len(line) > 20 && line[10] == 'T' {
+		if idx := strings.IndexByte(line, ' '); idx > 0 && idx <= 40 {
+			if t, err := time.Parse(time.RFC3339Nano, line[:idx]); err == nil {
+				ts = t.Format("01-02-06 3:04 PM")
+				rest = strings.TrimSpace(line[idx+1:])
 			}
-			rest = strings.TrimSpace(line[idx+1:])
 		}
 	}
 
+	// Level is the first word of the trimmed remainder when it is a known keyword.
+	trimmed := strings.TrimSpace(rest)
 	level := ""
-	msg := rest
+	msg := trimmed
 	for _, lvl := range []string{"ERROR", "WARN", "INFO", "READY", "DEBUG"} {
-		if idx := strings.Index(rest, lvl); idx >= 0 {
+		if strings.HasPrefix(trimmed, lvl) {
 			level = lvl
-			msg = strings.TrimSpace(rest[idx+len(lvl):])
+			msg = strings.TrimSpace(trimmed[len(lvl):])
 			break
 		}
 	}
