@@ -1,0 +1,4 @@
+ - make log screen tailed
+ - add copy/paste of last 100 lines command on log screen
+ - when opening one accordian, close the others
+ - log on accordion should be longer
