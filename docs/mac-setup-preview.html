@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Omnideck macOS setup previews</title>
+  <style>
+    :root {
+      --bg: #0d0e14;
+      --terminal: #16161e;
+      --bar: #1a1c25;
+      --footer: #14151c;
+      --fg: #d6dcf5;
+      --sub: #c0caf5;
+      --muted: #565f89;
+      --faint: #414868;
+      --blue: #7aa2f7;
+      --green: #9ece6a;
+      --yellow: #e0af68;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
+    body {
+      display: grid;
+      place-items: center;
+      background: radial-gradient(circle at top, #242838 0, var(--bg) 52%);
+      color: var(--fg);
+      font-family: Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .screen {
+      display: none;
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 1120px;
+      height: 680px;
+      overflow: hidden;
+      border: 1px solid #2a2e44;
+      border-radius: 12px;
+      background: var(--terminal);
+      box-shadow: 0 24px 70px #000a;
+    }
+    .screen.active { display: grid; grid-template-rows: 42px 1fr 42px; }
+    .header, .footer {
+      display: flex;
+      align-items: center;
+      padding: 0 18px;
+      font-size: 15px;
+      white-space: pre;
+    }
+    .header { justify-content: space-between; background: var(--bar); }
+    .footer { justify-content: space-between; background: var(--footer); color: var(--muted); }
+    .content { padding: 26px 34px; overflow: hidden; }
+    pre {
+      margin: 0;
+      color: var(--fg);
+      font: 16px/1.48 Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      white-space: pre-wrap;
+    }
+    .bold { color: var(--fg); font-weight: 700; }
+    .sub { color: var(--sub); }
+    .muted { color: var(--muted); }
+    .faint { color: var(--faint); }
+    .blue { color: var(--blue); }
+    .green { color: var(--green); }
+    .yellow { color: var(--yellow); }
+    .chip { color: var(--sub); background: #262a3c; padding: 3px 8px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <section class="screen" id="01-choose" data-crumb="Install · Container setup" data-footer="↑↓  choose    enter  review    d  technical details    r  check again    q  cancel">
+    <pre><span class="faint">STEP 1 OF 2</span>
+<span class="bold">Choose Podman or Docker</span>
+<span class="muted">Omnideck runs inside a container. The container keeps the agent and its
+software isolated from the rest of your system. Podman or Docker runs
+the container. You only need one of them.</span>
+
+<span class="sub">What we found on this computer</span>
+    <span class="muted">Podman      Not installed</span>
+    <span class="muted">Docker      Not installed</span>
+
+<span class="sub">Choose how to continue</span>
+  <span class="blue">▸</span> <span class="bold">Install Podman — Recommended</span>
+       <span class="muted">Download Podman's official Mac installer.</span>
+       <span class="green">Podman is a free option with an installer provided by the Podman project.</span>
+    <span class="muted">Install Docker</span></pre>
+  </section>
+
+  <section class="screen" id="02-review-download" data-crumb="Install · Container setup" data-footer="enter  download installer    b  back    d  technical details    q  cancel">
+    <pre><span class="faint">STEP 2 OF 2</span>
+<span class="bold">Review what will happen</span>
+
+<span class="blue">Install Podman</span>
+<span class="muted">Download Podman's official Mac installer.</span>
+
+<span class="sub">After you press Enter, Omnideck will start the official download. Then you will:</span>
+    1. Wait for the official Podman installer download to finish.
+    2. Open podman-installer-macos-arm64.pkg from Downloads and follow the instructions on screen.
+    3. Return to Omnideck and check again.
+
+<span class="yellow">About password requests</span>
+<span class="muted">The Podman installer may ask for your Mac password so macOS can add the app.
+Omnideck does not see or store it.</span>
+
+<span class="green">Nothing will run until you press Enter.</span></pre>
+  </section>
+
+  <section class="screen" id="03-finish-installer" data-crumb="Install · Container setup" data-footer="enter  check again    o  download again    b  back    q  cancel">
+    <pre><span class="bold">Finish this step, then come back here</span>
+
+<span class="muted">The official Podman installer should now be downloading. Open it from Downloads,
+finish the installer, return here, and press Enter so Omnideck can check it.</span>
+
+<span class="sub">When the installer, Podman, or Docker says it is ready:</span>
+    1. Return to this window.
+    2. Press Enter. Omnideck will check everything for you.
+
+<span class="faint">If the download did not start, press o to try again or open this address yourself:</span>
+<span class="blue">https://github.com/containers/podman/releases/latest/download/podman-installer-macos-arm64.pkg</span></pre>
+  </section>
+
+  <section class="screen" id="04-finish-podman" data-crumb="Install · Container setup" data-footer="↑↓  choose    enter  review    d  technical details    r  check again    q  cancel">
+    <pre><span class="faint">STEP 1 OF 2</span>
+<span class="bold">Choose Podman or Docker</span>
+<span class="muted">Omnideck runs inside a container. The container keeps the agent and its
+software isolated from the rest of your system. Podman or Docker runs
+the container. You only need one of them.</span>
+
+<span class="sub">What we found on this computer</span>
+    <span class="muted">Podman      Installed; one-time setup is not finished</span>
+    <span class="muted">Docker      Not installed</span>
+
+<span class="sub">Choose how to continue</span>
+  <span class="blue">▸</span> <span class="bold">Finish setting up Podman — Recommended</span>
+       <span class="muted">Podman is installed, but its one-time setup is not finished.</span>
+       <span class="green">Podman is already installed, so fixing it is the quickest option.</span>
+    <span class="muted">Install Docker</span></pre>
+  </section>
+
+  <section class="screen" id="05-review-podman" data-crumb="Install · Container setup" data-footer="enter  start these steps    b  back    d  technical details    q  cancel">
+    <pre><span class="faint">STEP 2 OF 2</span>
+<span class="bold">Review what will happen</span>
+
+<span class="blue">Finish setting up Podman</span>
+<span class="muted">Podman is installed, but its one-time setup is not finished.</span>
+
+<span class="sub">After you press Enter, Omnideck will ask your computer to do these steps:</span>
+    1. Prepare Podman's private workspace. Podman may download files it needs.
+    2. Start Podman.
+    3. Check that Omnideck can use it.
+
+<span class="green">Nothing will run until you press Enter.</span></pre>
+  </section>
+
+  <section class="screen" id="06-settings" data-crumb="Install · Settings" data-footer="enter  use recommended    c  customize    q  cancel">
+    <pre><span class="bold">Recommended settings are ready</span>
+<span class="muted">Omnideck chose sensible settings for this computer. Most people can continue without changing anything.</span>
+
+<span class="muted">Name              </span><span class="sub">omnideck</span>
+<span class="muted">Open in browser   </span><span class="sub">http://localhost:2337</span>
+<span class="muted">Memory            </span><span class="sub">3g — chosen for this computer</span>
+
+<span class="green">Press Enter to use these settings.</span>
+<span class="faint">Choose Customize only if you need a different name, address, or memory limit.</span></pre>
+  </section>
+
+  <section class="screen" id="07-confirm" data-crumb="Install · Ready" data-footer="enter  install    b  back    d  technical details    q  cancel">
+    <pre><span class="bold">Ready to install Omnideck</span>
+<span class="muted">Here is what Omnideck will do after you press Enter:</span>
+
+    1. Download the Omnideck app.
+    2. Prepare saved space for your files and settings.
+    3. Start Omnideck at http://localhost:2337.
+
+<span class="muted">Runs with      </span><span class="sub">podman</span>
+<span class="muted">Name           </span><span class="sub">omnideck</span>
+<span class="muted">Memory         </span><span class="sub">3g</span>
+
+<span class="yellow">⚠  </span><span class="muted">Optional local AI was not found. That is okay—you can use online AI services now and add Ollama later.</span>
+
+<span class="green">Press Enter to install. Nothing starts before then.</span></pre>
+  </section>
+
+  <section class="screen" id="08-installing" data-crumb="Install · Installing" data-footer="working  please wait">
+    <pre><span class="green">✓</span>  <span class="muted">Prepare space for your files</span>
+<span class="green">✓</span>  <span class="muted">Prepare space for Omnideck data</span>
+<span class="green">✓</span>  <span class="muted">Check for an earlier Omnideck installation</span>
+<span class="blue">⠹  Download Omnideck</span>
+     <span class="blue">━━━━━━╺━━━━━━━━━━━━━━━━━━━━━━</span>
+<span class="faint">○  Start Omnideck</span>
+<span class="faint">○  Remember these settings</span></pre>
+  </section>
+
+  <section class="screen" id="09-done" data-crumb="Install · Done" data-footer="any key  return">
+    <pre><span class="green">✓</span>  <span class="bold">Installed successfully!</span>
+
+<span class="muted">Open Omnideck in your browser:</span>
+<span class="blue">http://localhost:2337</span>
+
+<span class="muted">Your files and settings will be kept when Omnideck updates.</span>
+<span class="muted">Press any key to return to the dashboard.</span></pre>
+  </section>
+
+  <section class="screen" id="intel-01-choose" data-crumb="Install · Container setup" data-footer="↑↓  choose    enter  review    d  technical details    r  check again    q  cancel">
+    <pre><span class="faint">STEP 1 OF 2</span>
+<span class="bold">Choose Podman or Docker</span>
+<span class="muted">Omnideck runs inside a container. The container keeps the agent and its
+software isolated from the rest of your system. Podman or Docker runs
+the container. You only need one of them.</span>
+
+<span class="sub">What we found on this computer</span>
+    <span class="muted">Podman      Not installed</span>
+    <span class="muted">Docker      Not installed</span>
+
+<span class="sub">Choose how to continue</span>
+    <span class="muted">Install Podman</span>
+  <span class="blue">▸</span> <span class="bold">Install Docker — Recommended</span>
+       <span class="muted">Open Docker Desktop's official download page and follow its Mac installer.</span>
+       <span class="green">Docker provides a current installer for Intel Macs.</span></pre>
+  </section>
+
+  <section class="screen" id="intel-02-review" data-crumb="Install · Container setup" data-footer="enter  open official page    b  back    d  technical details    q  cancel">
+    <pre><span class="faint">STEP 2 OF 2</span>
+<span class="bold">Review what will happen</span>
+
+<span class="blue">Install Docker</span>
+<span class="muted">Open Docker Desktop's official download page and follow its Mac installer.</span>
+
+<span class="sub">After you press Enter, Omnideck will open the official page. Then you will:</span>
+    1. Open Docker's official download page.
+    2. Download the installer for your Mac and follow the instructions on screen.
+    3. Start Docker Desktop, return to Omnideck, and check again.
+
+<span class="yellow">About password requests</span>
+<span class="muted">The Docker installer may ask for your Mac password so macOS can add the app.
+Omnideck does not see or store it.</span>
+
+<span class="yellow">Good to know</span>
+<span class="muted">Docker Desktop can require a paid subscription at larger companies. If this is a work computer,
+ask your company whether it already provides Docker Desktop.</span>
+
+<span class="green">Nothing will run until you press Enter.</span></pre>
+  </section>
+
+  <script>
+    const id = new URLSearchParams(location.search).get("screen") || location.hash.slice(1) || "01-choose";
+    const screen = document.getElementById(id) || document.getElementById("01-choose");
+    const content = screen.innerHTML;
+    screen.innerHTML = `
+      <div class="header">
+        <span><span class="blue bold">◆</span> <span class="bold">omnideck</span><span class="faint"> │ </span><span class="muted">${screen.dataset.crumb}</span></span>
+        <span><span class="green">●</span><span class="muted"> 0 running</span><span class="faint">  0 instances  10:42</span></span>
+      </div>
+      <div class="content">${content}</div>
+      <div class="footer"><span>${screen.dataset.footer}</span><span class="faint">omnideck tui</span></div>`;
+    screen.classList.add("active");
+  </script>
+</body>
+</html>

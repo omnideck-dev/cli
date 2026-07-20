@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -185,6 +186,9 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ScreenInstall:
 		newModel, cmd := m.installModel.Update(msg)
 		m.installModel = newModel.(InstallModel)
+		if m.installModel.eng != nil {
+			m.eng = m.installModel.eng
+		}
 		return m, cmd
 	case ScreenUpdate:
 		newModel, cmd := m.updateModel.Update(msg)
@@ -597,7 +601,11 @@ func openBrowserCmd(url string) tea.Cmd {
 		case "windows":
 			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
 		default:
-			cmd = exec.Command("xdg-open", url)
+			if os.Getenv("WSL_DISTRO_NAME") != "" {
+				cmd = exec.Command("cmd.exe", "/c", "start", "", url)
+			} else {
+				cmd = exec.Command("xdg-open", url)
+			}
 		}
 		_ = cmd.Start()
 		return nil

@@ -22,8 +22,9 @@ var (
 )
 
 var installCmd = &cobra.Command{
-	Use:   "install",
-	Short: "Install Omnideck via interactive TUI wizard",
+	Use:          "install",
+	Short:        "Install Omnideck via interactive TUI wizard",
+	SilenceUsage: true,
 	Long: `Runs a full interactive TUI wizard to install and configure the Omnideck container.
 
 Use --plain for non-interactive / CI-CD installs:
@@ -42,22 +43,15 @@ func init() {
 }
 
 func runInstall(_ *cobra.Command, _ []string) error {
+	if installEngineFlag != "" && installEngineFlag != "docker" && installEngineFlag != "podman" {
+		return fmt.Errorf("--engine must be docker or podman")
+	}
 	if installPlainFlag {
 		return runInstallPlain()
 	}
 
 	instances, _ := config.ListInstances()
-	var eng engine.Engine
-	if installEngineFlag != "" {
-		var err error
-		eng, err = engine.ByName(installEngineFlag)
-		if err != nil {
-			return fmt.Errorf("--engine: %w", err)
-		}
-	} else {
-		eng, _ = engine.Detect()
-	}
-	model := tui.NewDashboardModelForInstall(eng, instances, installImageFlag)
+	model := tui.NewDashboardModelForInstall(nil, instances, installImageFlag, installEngineFlag)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
@@ -66,20 +60,28 @@ func runInstall(_ *cobra.Command, _ []string) error {
 // runInstallPlain performs a non-interactive install suitable for CI/CD and scripts.
 // All settings come from flags or sensible defaults.
 func runInstallPlain() error {
+	probes := engine.ProbeAll()
+	available := engine.ReadyEngines(probes)
 	var eng engine.Engine
-	var err error
-	if installEngineFlag != "" {
-		eng, err = engine.ByName(installEngineFlag)
-		if err != nil {
-			return fmt.Errorf("--engine: %w", err)
-		}
-	} else {
-		eng, err = engine.Detect()
-		if err != nil {
-			return fmt.Errorf("no container engine found: %w", err)
+	for _, candidate := range available {
+		if installEngineFlag == "" || candidate.Name() == installEngineFlag {
+			eng = candidate
+			break
 		}
 	}
+	if eng == nil {
+		printRuntimeSetupGuidanceFromProbes(installEngineFlag, probes)
+		if installEngineFlag != "" {
+			return fmt.Errorf("--engine %s is not ready; complete the setup option above", installEngineFlag)
+		}
+		return fmt.Errorf("neither Podman nor Docker is ready; complete one of the setup options above")
+	}
 	fmt.Printf("Engine: %s\n", eng.Name())
+	for _, probe := range probes {
+		if probe.Name == eng.Name() && probe.Warning != "" {
+			fmt.Printf("Note: %s\n", probe.Warning)
+		}
+	}
 
 	cfg := config.DefaultConfig()
 	if nameFlag != "" {
@@ -104,16 +106,16 @@ func runInstallPlain() error {
 		label string
 		fn    func() error
 	}{
-		{"Create home volume", func() error { return eng.CreateVolume(cfg.HomeVolumeName()) }},
-		{"Create state volume", func() error { return eng.CreateVolume(cfg.StateVolumeName()) }},
-		{"Remove existing container", func() error {
+		{"Prepare space for your files", func() error { return eng.CreateVolume(cfg.HomeVolumeName()) }},
+		{"Prepare space for Omnideck data", func() error { return eng.CreateVolume(cfg.StateVolumeName()) }},
+		{"Check for an earlier Omnideck installation", func() error {
 			exists, err := eng.ContainerExists(cfg.ContainerName)
 			if err != nil || !exists {
 				return nil
 			}
 			return eng.RemoveContainer(cfg.ContainerName)
 		}},
-		{"Pull image", func() error {
+		{"Download Omnideck", func() error {
 			msgs := make(chan string, 32)
 			go func() {
 				for range msgs {
@@ -123,7 +125,7 @@ func runInstallPlain() error {
 			close(msgs)
 			return err
 		}},
-		{"Run container", func() error {
+		{"Start Omnideck", func() error {
 			return eng.RunContainer(engine.RunOptions{
 				Name:        cfg.ContainerName,
 				Image:       cfg.Image,
@@ -136,7 +138,7 @@ func runInstallPlain() error {
 				Platform:    runtime.GOOS,
 			})
 		}},
-		{"Save configuration", func() error { return config.Save(savePath, cfg) }},
+		{"Remember these settings", func() error { return config.Save(savePath, cfg) }},
 	}
 
 	for _, step := range steps {
@@ -150,6 +152,51 @@ func runInstallPlain() error {
 
 	fmt.Printf("\n✓  Omnideck installed: http://localhost:%s\n", cfg.WebUIPortOrDefault())
 	return nil
+}
+
+func printRuntimeSetupGuidanceFromProbes(preferred string, probes []engine.ProbeResult) {
+	plans := engine.BuildSetupPlans(probes, engine.DetectHostPlatform())
+	fmt.Println("Omnideck runs inside a container.")
+	fmt.Println("The container keeps the agent and its software isolated from the rest of your system.")
+	fmt.Println("Podman or Docker is needed to run the container. You only need one of them.")
+	fmt.Println()
+	for _, probe := range probes {
+		if preferred == "" || probe.Name == preferred {
+			fmt.Printf("  %-7s %s\n", probe.Name+":", engine.RuntimeStateLabel(probe.State))
+		}
+	}
+	for _, plan := range plans {
+		if preferred != "" && plan.Runtime != preferred {
+			continue
+		}
+		recommended := ""
+		if plan.Recommended || plan.Runtime == preferred {
+			recommended = " (recommended)"
+		}
+		fmt.Printf("\n%s%s\n", plan.Action, recommended)
+		fmt.Printf("  %s\n", plan.Description)
+		if plan.Recommendation != "" {
+			fmt.Printf("  Why: %s\n", plan.Recommendation)
+		}
+		fmt.Println("  What will happen:")
+		for i, step := range plan.Steps {
+			fmt.Printf("    %d. %s\n", i+1, step)
+		}
+		if plan.PermissionNote != "" {
+			fmt.Printf("  Password information: %s\n", plan.PermissionNote)
+		}
+		for _, command := range plan.Commands {
+			fmt.Printf("  Command: %s\n", command.Display)
+		}
+		if plan.URL != "" {
+			fmt.Printf("  %s\n", plan.URL)
+		}
+		if plan.SafetyNote != "" {
+			fmt.Printf("  %s\n", plan.SafetyNote)
+		}
+	}
+	fmt.Println("\nFor guided setup, run `omnideck install` without --plain.")
+	fmt.Println("After manual setup, run this command again.")
 }
 
 // suggestNewInstanceDefaults inspects existing instances and returns a Config

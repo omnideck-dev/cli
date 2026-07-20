@@ -2,7 +2,7 @@
 
 [![Go](https://img.shields.io/badge/go-1.25-00ADD8?logo=go)](https://go.dev)
 [![License](https://img.shields.io/badge/license-MIT-7C3AED)](LICENSE)
-[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos-6B7280)](#install)
+[![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-6B7280)](#install)
 
 CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/omnideck) — a containerized AI assistant. Wraps Docker or Podman with a Bubble Tea TUI and guided install wizard.
 
@@ -15,7 +15,7 @@ CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnid
 
 ## Features
 
-- **Guided install wizard** — preflight checks, config form, confirm panel, spinner-driven install steps
+- **Guided install wizard** — diagnoses, installs, starts, or repairs Podman or Docker before configuring Omnideck
 - **Smart memory defaults** — suggests container RAM limits based on your system (20% of host RAM, 1–8 GB)
 - **Update in place** — pulls the latest image and recreates the container, preserving config
 - **Multi-instance** — run more than one Omnideck container on different ports from a single binary
@@ -28,12 +28,48 @@ CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnid
 
 ## Requirements
 
-| Engine | Minimum version | Notes |
+| Engine | Version policy | Notes |
 |--------|----------------|-------|
-| Docker | 20.10+ | Required for `host-gateway` host alias on Linux |
-| Podman | 4.0+ | Required for built-in host aliases |
+| Docker | 20.10+ on Linux | Older Linux versions cannot provide Omnideck's connection to apps installed directly on the same computer |
+| Podman | Must pass the built-in readiness check | Version 4 is not required. A version number alone cannot prove whether this computer's network lets Omnideck reach a local Ollama installation. |
 
 Ollama is optional at install time — the wizard warns if it isn't reachable but proceeds anyway.
+
+### Why does Omnideck run in a container?
+
+Omnideck runs inside a container. The container keeps the agent and its software
+isolated from the rest of your system. It also lets Omnideck start, stop, and
+update all of its parts together without installing those parts directly on
+your computer. Podman or Docker runs the container. You only need one of them.
+
+The installer uses Podman or Docker when either is already working. Otherwise it
+recommends the easiest default for the platform:
+
+| Platform | Fresh-install recommendation | Why |
+|---|---|---|
+| Linux | Podman | Free, lightweight, and designed to run without giving a background app full control of the computer |
+| macOS with an Apple chip (M1 or newer) | Podman's official installer | Free, with an installer provided by the Podman project |
+| macOS with an Intel chip | Docker Desktop | Docker still provides a current Intel Mac installer; Podman's newest Mac installer is Apple-chip only |
+| Windows 10/11 | Docker Desktop | The most guided Windows setup; Podman Desktop remains a visible free alternative |
+| Linux running inside Windows (WSL) | Docker Desktop | Reuses Docker managed by Windows instead of installing a second copy inside Linux |
+
+The interactive wizard can ask your computer's built-in tools to install or
+start Podman or Docker, then check the result automatically. Before it does
+anything, it shows a numbered explanation and waits for a second confirmation.
+Technical commands stay hidden unless the user asks to see them. It never runs
+a downloaded setup script or silently changes account security settings. App
+installers open from their official pages, and the wizard waits for you to
+return and press Enter before it checks again.
+
+Run `omnideck` as your normal user. Do not put `sudo` before it or choose
+**Run as administrator**. Omnideck never sees or stores a password.
+
+| Computer | What permission may be requested? |
+|---|---|
+| Linux | The computer's app installer may ask for the user's account password while it installs Podman or starts Docker. The account must be allowed to install software. |
+| macOS | Omnideck runs normally. The official Podman or Docker installer may ask for the user's Mac password while it adds Podman or Docker. |
+| Windows with Docker Desktop | Keep the installer's recommended **Per-user** choice. That normally needs no special permission. Windows may need approval from the person who manages the computer the first time it turns on the built-in Linux feature Docker uses. |
+| Windows with Podman Desktop | The person who manages the computer must approve turning on the built-in Windows feature Podman uses. |
 
 ---
 
@@ -47,7 +83,10 @@ Ollama is optional at install time — the wizard warns if it isn't reachable bu
 
 ### Build from source
 
-Requires Go 1.21+ and Docker or Podman.
+Requires Go 1.25+. A missing Docker/Podman installation can be handled by the
+interactive wizard after the CLI is built. In the example below, the computer
+asks for a password only while copying the finished CLI into a shared apps
+folder. Run `omnideck` itself as the normal user.
 
 ```sh
 git clone https://github.com/omnideck-dev/cli
@@ -77,7 +116,13 @@ omnideck doctor
 #    http://localhost:2337
 ```
 
-The wizard detects your container engine, checks Ollama reachability, suggests memory limits sized for your machine, and starts the container.
+The wizard diagnoses or sets up Podman or Docker, checks Ollama reachability,
+suggests memory limits sized for your machine, and starts the container. In
+`--plain` mode the CLI prints the exact recommended commands or official URL but
+does not change the host, which keeps CI/CD behavior non-interactive.
+
+See the [screen-by-screen macOS walkthrough](docs/mac-setup-walkthrough.md) for
+the exact fresh-install flow and user-facing text.
 
 ---
 
@@ -115,8 +160,6 @@ omnideck <command> [flags]
 ```
 
 ### Install flags
-
-These flags are hidden from `--help` but fully supported:
 
 ```
 --engine string   Container engine to use: docker or podman (default: auto-detect, prefers podman)
@@ -199,6 +242,10 @@ installed_at: 2025-01-15T10:30:00Z
 | Ollama env | CLI sets runtime-specific `OLLAMA_HOST` | CLI sets runtime-specific `OLLAMA_HOST` |
 
 See `CLAUDE.md` for the full platform table and architecture notes.
+
+Preview releases follow `alpha → beta → rc → stable` Semantic Versioning. See
+[RELEASING.md](RELEASING.md) for the tagging, promotion, and GitHub prerelease
+workflow.
 
 ---
 
