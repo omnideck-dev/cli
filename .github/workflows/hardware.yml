@@ -1,0 +1,112 @@
+name: Hardware lifecycle tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: "I confirm the selected self-hosted machine is online and this is trusted code"
+        required: true
+        type: boolean
+        default: false
+      target:
+        description: "Hardware to test"
+        required: true
+        type: choice
+        default: all
+        options:
+          - all
+          - macos
+          - windows
+          - linux
+      engine:
+        description: "Runtime (auto uses the platform recommendation)"
+        required: true
+        type: choice
+        default: auto
+        options:
+          - auto
+          - podman
+          - docker
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-${{ github.ref }}-${{ inputs.target }}
+  cancel-in-progress: false
+
+jobs:
+  macos:
+    if: ${{ inputs.confirm && (inputs.target == 'all' || inputs.target == 'macos') }}
+    runs-on: [self-hosted, omnideck-hardware, macos, arm64]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run lifecycle scenario
+        shell: bash
+        env:
+          OMNIDECK_HARDWARE_ENGINE: ${{ inputs.engine }}
+        run: ./tests/hardware/run.sh
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardware-macos-${{ github.run_id }}
+          path: artifacts/hardware/
+          if-no-files-found: warn
+
+  windows:
+    if: ${{ inputs.confirm && (inputs.target == 'all' || inputs.target == 'windows') }}
+    runs-on: [self-hosted, omnideck-hardware, windows, x64]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run lifecycle scenario
+        shell: pwsh
+        env:
+          OMNIDECK_HARDWARE_ENGINE: ${{ inputs.engine }}
+        run: ./tests/hardware/run.ps1
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardware-windows-${{ github.run_id }}
+          path: artifacts/hardware/
+          if-no-files-found: warn
+
+  linux:
+    if: ${{ inputs.confirm && (inputs.target == 'all' || inputs.target == 'linux') }}
+    runs-on: [self-hosted, omnideck-hardware, linux, x64]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run lifecycle scenario
+        shell: bash
+        env:
+          OMNIDECK_HARDWARE_ENGINE: ${{ inputs.engine }}
+        run: ./tests/hardware/run.sh
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hardware-linux-${{ github.run_id }}
+          path: artifacts/hardware/
+          if-no-files-found: warn

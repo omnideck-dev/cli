@@ -41,8 +41,9 @@ func runUninstall(_ *cobra.Command, _ []string) error {
 	fmt.Printf("\nUninstalling instance %s (container: %s)\n\n",
 		styles.Active.Render(instanceNameFromPath(cfgPath)),
 		styles.Active.Render(cfg.ContainerName))
+	prompts := bufio.NewScanner(os.Stdin)
 
-	if !promptYN("Are you sure? This will stop and remove the container. [y/N]: ") {
+	if !promptYN(prompts, "Are you sure? This will stop and remove the container. [y/N]: ") {
 		fmt.Println("Aborted.")
 		return nil
 	}
@@ -82,8 +83,8 @@ func runUninstall(_ *cobra.Command, _ []string) error {
 	stateVolume := cfg.StateVolumeName()
 
 	// Optionally delete data volumes (with optional backup).
-	if promptYN(fmt.Sprintf("Delete data volumes (%s, %s)? [y/N]: ", homeVolume, stateVolume)) {
-		if promptYN("Back up data volumes before deleting? [y/N]: ") {
+	if promptYN(prompts, fmt.Sprintf("Delete data volumes (%s, %s)? [y/N]: ", homeVolume, stateVolume)) {
+		if promptYN(prompts, "Back up data volumes before deleting? [y/N]: ") {
 			fmt.Printf("Creating backup archive... ")
 			archivePath, err := backupVolumes(eng, homeVolume, stateVolume, cfg.ContainerName)
 			if err != nil {
@@ -164,9 +165,8 @@ func instanceNameFromPath(path string) string {
 	return base
 }
 
-func promptYN(prompt string) bool {
+func promptYN(scanner *bufio.Scanner, prompt string) bool {
 	fmt.Print(prompt)
-	scanner := bufio.NewScanner(os.Stdin)
 	if scanner.Scan() {
 		ans := strings.TrimSpace(scanner.Text())
 		return strings.EqualFold(ans, "y") || strings.EqualFold(ans, "yes")

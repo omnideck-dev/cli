@@ -11,6 +11,9 @@
 # dist folder for local tests
 dist/
 
+# Hardware test diagnostics
+artifacts/
+
 # Test binary, built with `go test -c`
 *.test
 

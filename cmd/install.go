@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"runtime"
 	"strconv"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
@@ -138,7 +139,7 @@ func runInstallPlain() error {
 				Platform:    runtime.GOOS,
 			})
 		}},
-		{"Remember these settings", func() error { return config.Save(savePath, cfg) }},
+		{"Remember these settings", func() error { return saveInstalledConfig(savePath, cfg, eng.Name()) }},
 	}
 
 	for _, step := range steps {
@@ -152,6 +153,14 @@ func runInstallPlain() error {
 
 	fmt.Printf("\n✓  Omnideck installed: http://localhost:%s\n", cfg.WebUIPortOrDefault())
 	return nil
+}
+
+// saveInstalledConfig records which runtime created the container so later
+// commands keep using that runtime, even when both Podman and Docker are ready.
+func saveInstalledConfig(path string, cfg *config.Config, engineName string) error {
+	cfg.Engine = engineName
+	cfg.InstalledAt = time.Now()
+	return config.Save(path, cfg)
 }
 
 func printRuntimeSetupGuidanceFromProbes(preferred string, probes []engine.ProbeResult) {

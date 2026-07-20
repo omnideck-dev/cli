@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 )
 
 // ── Palette ───────────────────────────────────────────────────────────────────
@@ -121,8 +122,8 @@ func Separator(n int) string {
 
 // Header renders the standard two-part page header used across all views:
 //
-//	  ⚡ TITLE  ·  phase
-//	  ──────────────────
+//	⚡ TITLE  ·  phase
+//	──────────────────
 //
 // Pass windowWidth > 0 to render a full-width HeaderBar background.
 // When windowWidth == 0 the header renders without a background fill.
@@ -147,6 +148,6 @@ func Header(title, phase string, windowWidth int) string {
 // NoColor disables lipgloss colour rendering (e.g. for CI / pipe output).
 func NoColor(disabled bool) {
 	if disabled {
-		lipgloss.SetColorProfile(0)
+		lipgloss.SetColorProfile(termenv.Ascii)
 	}
 }
