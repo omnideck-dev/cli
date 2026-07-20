@@ -274,7 +274,7 @@ func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 	}
 }
 
-func TestRuntimeCommandsHiddenUntilDetailsRequested(t *testing.T) {
+func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
 	m := NewInstallModel("/tmp/test.yaml", nil, "")
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
@@ -282,13 +282,22 @@ func TestRuntimeCommandsHiddenUntilDetailsRequested(t *testing.T) {
 	}
 	m.configureRuntimeSetup()
 
-	if view := m.tnRuntimeSetup(100); strings.Contains(view, "apt-get") {
-		t.Fatalf("technical commands should be hidden by default:\n%s", view)
+	plan := m.runtimePlans[m.runtimeChoice]
+	detail := plan.URL
+	if len(plan.Commands) > 0 {
+		detail = plan.Commands[0].Display
+	}
+	if detail == "" {
+		t.Fatalf("selected setup plan has no command or URL: %#v", plan)
+	}
+
+	if view := m.tnRuntimeSetup(100); strings.Contains(view, "Technical details") || strings.Contains(view, detail) {
+		t.Fatalf("technical details should be hidden by default:\n%s", view)
 	}
 	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	nm := newModel.(InstallModel)
-	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "apt-get") {
-		t.Fatalf("technical details should show commands when requested:\n%s", view)
+	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(view, detail) {
+		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
 	}
 }
 
