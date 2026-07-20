@@ -184,11 +184,12 @@ func NewDashboardModel(eng engine.Engine, instances []config.InstanceInfo) Dashb
 }
 
 // NewDashboardModelForInstall creates a dashboard that opens directly on the install wizard screen.
-func NewDashboardModelForInstall(eng engine.Engine, instances []config.InstanceInfo, imageOverride string) DashboardModel {
+func NewDashboardModelForInstall(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string) DashboardModel {
 	m := NewDashboardModel(eng, instances)
 	cfg := suggestInstallDefaults()
 	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, imageOverride)
 	im.Embedded = true
+	im.preferredEngine = preferredEngine
 	m.installModel = im
 	m.screen = ScreenInstall
 	return m

@@ -4,7 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/omnideck-dev/cli/engine"
 )
 
 func TestValidMemSize(t *testing.T) {
@@ -215,7 +219,130 @@ func TestUpdatePreflightEngineError(t *testing.T) {
 	nm.engErr = msg.err
 	nm2, _ := nm.updatePreflight(allPreflightDone{})
 	final := nm2.(InstallModel)
-	if final.Phase != PhaseError {
-		t.Errorf("should enter error phase when engine missing, got %d", final.Phase)
+	if final.Phase != PhaseRuntimeSetup {
+		t.Errorf("should enter runtime setup phase when engine missing, got %d", final.Phase)
+	}
+}
+
+func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	view := m.viewRuntimeSetup()
+	if !strings.Contains(view, "Choose Podman or Docker") || !strings.Contains(view, "isolated from the rest of your system") {
+		t.Fatalf("runtime setup must explain why the dependency exists:\n%s", view)
+	}
+	if len(m.runtimePlans) != 2 {
+		t.Fatalf("runtime plan count = %d, want 2", len(m.runtimePlans))
+	}
+}
+
+func TestMissingContainerRuntimeDoesNotClaimAccountAccessWasChecked(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.preflightDone = 2
+	m.engErr = fmt.Errorf("Podman and Docker are not ready")
+
+	view := m.tnPreflight(100)
+	if strings.Contains(view, "Account access") {
+		t.Fatalf("account access cannot be checked before Podman or Docker is ready:\n%s", view)
+	}
+}
+
+func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := newModel.(InstallModel)
+	if cmd != nil {
+		t.Fatal("the first Enter must only open the review; it must not run setup")
+	}
+	if !nm.runtimeConfirm {
+		t.Fatal("the first Enter should open the setup review")
+	}
+	view := nm.tnRuntimeSetup(100)
+	if !strings.Contains(view, "Review what will happen") || !strings.Contains(view, "About password requests") {
+		t.Fatalf("review must explain steps and password requests:\n%s", view)
+	}
+}
+
+func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	plan := m.runtimePlans[m.runtimeChoice]
+	detail := plan.URL
+	if len(plan.Commands) > 0 {
+		detail = plan.Commands[0].Display
+	}
+	if detail == "" {
+		t.Fatalf("selected setup plan has no command or URL: %#v", plan)
+	}
+
+	if view := m.tnRuntimeSetup(100); strings.Contains(view, "Technical details") || strings.Contains(view, detail) {
+		t.Fatalf("technical details should be hidden by default:\n%s", view)
+	}
+	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	nm := newModel.(InstallModel)
+	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(view, detail) {
+		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
+	}
+}
+
+func TestRecommendedSettingsAreOneStep(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.Phase = PhaseConfig
+
+	view := m.tnConfig(100)
+	if !strings.Contains(view, "Recommended settings are ready") || strings.Contains(view, "Shared memory") {
+		t.Fatalf("simple settings view should hide advanced fields:\n%s", view)
+	}
+	newModel, _ := m.updateConfig(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := newModel.(InstallModel)
+	if nm.Phase != PhaseConfirm {
+		t.Fatalf("Enter should accept recommended settings, phase = %d", nm.Phase)
+	}
+}
+
+func TestSettingsCanBeCustomized(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.Phase = PhaseConfig
+	newModel, _ := m.updateConfig(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	nm := newModel.(InstallModel)
+	if !nm.configAdvanced {
+		t.Fatal("c should open advanced settings")
+	}
+	if view := nm.tnConfig(100); !strings.Contains(view, "Shared memory") {
+		t.Fatalf("advanced settings should explain every field:\n%s", view)
+	}
+}
+
+func TestInstallErrorOffersRetryAndHidesTechnicalDetails(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.Phase = PhaseError
+	m.errorMsg = "Download Omnideck"
+	m.errorDetail = "connection reset by peer"
+
+	view := m.tnError(100)
+	if !strings.Contains(view, "Press r") || strings.Contains(view, m.errorDetail) {
+		t.Fatalf("error screen must offer a retry and hide technical details by default:\n%s", view)
+	}
+
+	newModel, _ := m.updateError(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	nm := newModel.(InstallModel)
+	if view := nm.tnError(100); !strings.Contains(view, m.errorDetail) {
+		t.Fatalf("details should be available when requested:\n%s", view)
 	}
 }

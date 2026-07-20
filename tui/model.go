@@ -7,6 +7,7 @@ type Phase int
 
 const (
 	PhasePreflight Phase = iota
+	PhaseRuntimeSetup
 	PhaseConfig
 	PhaseConfirm
 	PhaseInstall
@@ -16,8 +17,8 @@ const (
 
 // BaseModel holds window dimensions shared across TUI models.
 type BaseModel struct {
-	Phase       Phase
-	WindowWidth int
+	Phase        Phase
+	WindowWidth  int
 	WindowHeight int
 }
 

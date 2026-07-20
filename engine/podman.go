@@ -204,8 +204,9 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 		"-v", opts.StateVolume+":/var/lib/omnideck",
 	)
 
-	// OLLAMA_HOST — always set. On Linux, Podman 4+ automatically resolves
-	// host.containers.internal to the host IP without extra flags.
+	// OLLAMA_HOST — always set. Podman resolves host.containers.internal when
+	// it can determine a route back to the host; this is environment-dependent,
+	// not a reliable major-version boundary.
 	ollamaHost := opts.OllamaHost
 	if ollamaHost == "" {
 		if opts.Platform == "darwin" {

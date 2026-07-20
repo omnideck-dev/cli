@@ -10,7 +10,7 @@ LDFLAGS := -ldflags "\
   -X main.date=$(DATE) \
 "
 
-.PHONY: build test vet lint clean release
+.PHONY: build test vet lint clean release hardware-test
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -39,3 +39,6 @@ release:
 	GOOS=darwin GOARCH=arm64 go build $(LDFLAGS) -o dist/$(BINARY) . && tar -czf dist/$(BINARY)-darwin-arm64.tar.gz -C dist $(BINARY)
 	rm -f dist/$(BINARY)
 	@echo "Archives written to dist/"
+
+hardware-test:
+	./tests/hardware/run.sh

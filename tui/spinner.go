@@ -82,14 +82,14 @@ var progressWaveFrames = []string{
 // SpinnerModel is a reusable Bubble Tea component for displaying a list of
 // sequential steps with a spinner on the active step and faded completed steps.
 type SpinnerModel struct {
-	Steps         []Step
-	CurrentStep   int
+	Steps          []Step
+	CurrentStep    int
 	FlavorMessages []string
-	FlavorIndex   int
-	progressIndex int
-	spinner       spinner.Model
-	done          bool
-	err           error
+	FlavorIndex    int
+	progressIndex  int
+	spinner        spinner.Model
+	done           bool
+	err            error
 }
 
 // NewSpinnerModel creates a SpinnerModel with the given step labels and optional flavor messages.
@@ -257,11 +257,11 @@ func StepCmd(index int, fn func() (string, error)) tea.Cmd {
 
 // defaultFlavorMessages are the cycling messages shown during image pulls.
 var defaultFlavorMessages = []string{
-	"Pulling from the mothership...",
-	"Downloading the good stuff...",
-	"This might take a minute...",
+	"Getting things ready...",
+	"Downloading what Omnideck needs...",
+	"This may take a minute...",
 	"Almost there...",
-	"Unpacking intelligence...",
+	"Finishing up...",
 }
 
 func padRight(s string, n int) string {

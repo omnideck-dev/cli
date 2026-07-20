@@ -80,16 +80,44 @@ and using that as a literal IP address instead of `host-gateway`.
 
 ## 6. Podman Version Requirements
 
-**`host.containers.internal`** is automatically injected into container
-`/etc/hosts` starting in Podman 4.0.
+**Policy:** Do not reject or warn about Podman based only on its major version.
+Podman 3.4 already documents `host.containers.internal`, while current Podman
+documentation says the address can still be skipped when Podman cannot determine
+the route back to the host. Version alone is not a reliable connectivity test.
 
 **Risk:** RHEL 8 ships Podman 3.x. Ubuntu 20.04 LTS ships an older version.
 On these systems, Ollama may be silently unreachable.
 
 **To test:**
-- `podman --version` — confirm ≥ 4.0
-- On a Podman 3.x system (VM / container), verify what actually happens
-- Consider adding a preflight version check in the doctor command
+- On a Podman 3.x system (VM / container), verify installation and cloud AI use
+- Verify local Ollama connectivity from inside the installed Omnideck container
+- Confirm the wizard neither blocks nor warns based only on Podman's version
+
+---
+
+## 6a. Guided Runtime Bootstrap
+
+Validate the new no-runtime and repair paths before promoting the preview:
+
+| Host | Initial state | Expected default/action |
+|---|---|---|
+| Ubuntu/Debian | Neither installed | Recommend Podman; run `apt-get update` then `apt-get install -y podman` with narrow `sudo` |
+| Fedora/RHEL | Neither installed | Recommend Podman via `dnf` |
+| Linux | Docker socket permission denied | Explain that Docker access can give apps full control of the computer; do not change account groups |
+| macOS | Podman installed, no machine | Run `podman machine init --now --update-connection=true`, then continue without a technical connection prompt |
+| macOS | Docker Desktop stopped | Launch app, wait, then recheck |
+| Windows | Neither installed | Recommend Docker Desktop/WSL 2; show Podman Desktop alternative |
+| Windows | Podman machine stopped | Run `podman machine start`, then continue |
+| WSL 2 | Neither usable | Recommend Windows Docker Desktop and WSL integration |
+| Any | Runtime already healthy | Skip runtime setup entirely |
+
+For every case, verify:
+
+- The reason Omnideck needs a runtime is visible before any setup action.
+- Every command is available under **technical details** before execution and uses direct arguments, not a shell pipeline.
+- Omnideck itself runs as the current user. Only the computer's built-in software or background-app tool may ask for the user's account password.
+- `--plain` prints guidance and exits non-zero without modifying the host.
+- `--engine docker` and `--engine podman` honor the requested runtime even when the other is healthy.
 
 ---
 

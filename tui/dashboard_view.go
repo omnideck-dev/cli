@@ -77,13 +77,15 @@ func (m DashboardModel) breadcrumb() string {
 	case ScreenInstall:
 		switch m.installModel.Phase {
 		case PhasePreflight:
-			return "Install · Preflight"
+			return "Install · Quick check"
+		case PhaseRuntimeSetup:
+			return "Install · Container setup"
 		case PhaseConfig:
-			return "Install · Configure"
+			return "Install · Settings"
 		case PhaseConfirm:
-			return "Install · Confirm"
+			return "Install · Ready"
 		case PhaseInstall:
-			return "Install · Running"
+			return "Install · Installing"
 		case PhaseDone:
 			return "Install · Done"
 		case PhaseError:
@@ -151,12 +153,47 @@ func (m DashboardModel) footerHints() string {
 		return keyHints([][2]string{{"esc", "close"}})
 	case ScreenInstall:
 		switch m.installModel.Phase {
+		case PhasePreflight:
+			if m.installModel.preflightReady && len(m.installModel.availableEngines) > 1 {
+				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"q", "cancel"}})
+			}
+		case PhaseRuntimeSetup:
+			if m.installModel.runtimeBusy {
+				return keyHints([][2]string{{"working", "please wait"}})
+			}
+			if m.installModel.runtimeWaiting {
+				hints := [][2]string{{"enter", "check again"}}
+				if len(m.installModel.runtimePlans) > 0 && m.installModel.runtimePlans[m.installModel.runtimeChoice].URL != "" {
+					label := "open page again"
+					if m.installModel.runtimePlans[m.installModel.runtimeChoice].DirectDownload {
+						label = "download again"
+					}
+					hints = append(hints, [2]string{"o", label})
+				}
+				return keyHints(append(hints, [2]string{"b", "back"}, [2]string{"q", "cancel"}))
+			}
+			if m.installModel.runtimeConfirm {
+				action := "start these steps"
+				if len(m.installModel.runtimePlans) > 0 && len(m.installModel.runtimePlans[m.installModel.runtimeChoice].Commands) == 0 {
+					action = "open official page"
+					if m.installModel.runtimePlans[m.installModel.runtimeChoice].DirectDownload {
+						action = "download installer"
+					}
+				}
+				return keyHints([][2]string{{"enter", action}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
+			}
+			return keyHints([][2]string{{"↑↓", "choose"}, {"enter", "review"}, {"d", "technical details"}, {"r", "check again"}, {"q", "cancel"}})
 		case PhaseConfig:
-			return keyHints([][2]string{{"tab", "next"}, {"shift+tab", "back"}, {"esc", "cancel"}})
+			if !m.installModel.configAdvanced {
+				return keyHints([][2]string{{"enter", "use recommended"}, {"c", "customize"}, {"q", "cancel"}})
+			}
+			return keyHints([][2]string{{"tab", "next"}, {"shift+tab", "back"}, {"esc", "recommended settings"}})
 		case PhaseConfirm:
-			return keyHints([][2]string{{"i", "install"}, {"b", "back"}, {"q", "cancel"}})
-		case PhaseDone, PhaseError:
+			return keyHints([][2]string{{"enter", "install"}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
+		case PhaseDone:
 			return keyHints([][2]string{{"any key", "return"}})
+		case PhaseError:
+			return keyHints([][2]string{{"r", "try again"}, {"d", "details for support"}, {"b", "return"}})
 		}
 		return ""
 	case ScreenUpdate:
@@ -570,7 +607,7 @@ func renderSparkline(history []float64, color lipgloss.Color, bars int) string {
 		if v > 1.0 {
 			v = 1.0
 		}
-		idx := int(v * float64(len(blocks)-1) + 0.5)
+		idx := int(v*float64(len(blocks)-1) + 0.5)
 		if idx >= len(blocks) {
 			idx = len(blocks) - 1
 		}
