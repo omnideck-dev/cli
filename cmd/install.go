@@ -49,21 +49,18 @@ func runInstall(_ *cobra.Command, _ []string) error {
 	if installEngineFlag != "" && installEngineFlag != "docker" && installEngineFlag != "podman" {
 		return fmt.Errorf("--engine must be docker or podman")
 	}
-	if RuntimeName != "" && installEngineFlag != "" && installEngineFlag != RuntimeName {
-		return fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --engine %s", RuntimeName, installEngineFlag)
+	instances, _ := config.ListInstances()
+	preferredEngine, err := setupRuntimePreference(RuntimeName, installEngineFlag, len(instances))
+	if err != nil {
+		return err
 	}
 	if installPlainFlag {
-		return runInstallPlain()
+		return runInstallPlain(preferredEngine)
 	}
 
-	instances, _ := config.ListInstances()
-	preferredEngine := RuntimeName
-	if preferredEngine == "" {
-		preferredEngine = installEngineFlag
-	}
 	model := tui.NewDashboardModelForInstall(nil, instances, installImageFlag, preferredEngine)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err := p.Run()
+	_, err = p.Run()
 	return err
 }
 
@@ -79,14 +76,10 @@ func runRuntimeSetup(instances []config.InstanceInfo) error {
 
 // runInstallPlain performs a non-interactive install suitable for CI/CD and scripts.
 // All settings come from flags or sensible defaults.
-func runInstallPlain() error {
+func runInstallPlain(preferredEngine string) error {
 	probes := engine.ProbeAll()
 	available := engine.ReadyEngines(probes)
 	var eng engine.Engine
-	preferredEngine := RuntimeName
-	if preferredEngine == "" {
-		preferredEngine = installEngineFlag
-	}
 	for _, candidate := range available {
 		if preferredEngine == "" || candidate.Name() == preferredEngine {
 			eng = candidate
@@ -192,6 +185,24 @@ func runInstallPlain() error {
 
 	fmt.Printf("\n✓  Omnideck is ready: http://localhost:%s\n", cfg.WebUIPortOrDefault())
 	return nil
+}
+
+// setupRuntimePreference keeps one runtime shared by existing instances while
+// allowing a genuinely fresh setup to choose again. A settings file can remain
+// after the final instance is removed, so it must not hide the other option.
+func setupRuntimePreference(saved, requested string, instanceCount int) (string, error) {
+	if instanceCount > 0 {
+		if saved != "" && requested != "" && requested != saved {
+			return "", fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --engine %s", saved, requested)
+		}
+		if saved != "" {
+			return saved, nil
+		}
+	}
+	if requested != "" {
+		return requested, nil
+	}
+	return "", nil
 }
 
 // saveInstalledConfig records the machine-wide runtime and the new instance.

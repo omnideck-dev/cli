@@ -167,7 +167,7 @@ omnideck <command> [flags]
 --image string    Override the container image (for testing alternate builds)
 ```
 
-`--engine` can select the runtime during the first setup. After that, Omnideck uses the saved shared runtime for every instance and will not silently switch existing installations.
+`--engine` can select the runtime during the first setup. Interactive first setup keeps both choices visible even when Docker or Podman is already installed. After an instance exists, Omnideck uses its saved shared runtime for every instance and will not silently switch existing installations or disconnect their saved container data.
 
 ### Examples
 

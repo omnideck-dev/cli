@@ -71,6 +71,48 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 	}
 }
 
+func TestHeaderUsesPlainInstanceStatusWithoutClock(t *testing.T) {
+	tests := []struct {
+		name      string
+		statuses  []string
+		wantLabel string
+		wantTone  headerStatusTone
+	}{
+		{name: "none", wantLabel: "No instances yet", wantTone: headerNeutral},
+		{name: "one running", statuses: []string{"running"}, wantLabel: "Omnideck is running", wantTone: headerHealthy},
+		{name: "one stopped", statuses: []string{"exited"}, wantLabel: "Omnideck is stopped", wantTone: headerAttention},
+		{name: "one unknown", statuses: []string{"unknown"}, wantLabel: "Checking Omnideck…", wantTone: headerNeutral},
+		{name: "some running", statuses: []string{"running", "exited", "running"}, wantLabel: "2 of 3 running", wantTone: headerAttention},
+		{name: "all running", statuses: []string{"running", "running"}, wantLabel: "2 of 2 running", wantTone: headerHealthy},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			instances := make([]InstanceState, len(tt.statuses))
+			for i, status := range tt.statuses {
+				instances[i].Status = status
+			}
+			label, tone := summarizeInstances(instances)
+			if label != tt.wantLabel || tone != tt.wantTone {
+				t.Fatalf("summarizeInstances() = %q, %d; want %q, %d", label, tone, tt.wantLabel, tt.wantTone)
+			}
+		})
+	}
+
+	m := NewDashboardModel(nil, nil)
+	m.width = 100
+	header := m.renderHeader()
+	if !strings.Contains(header, "No instances yet") || strings.Contains(header, "13:15:22") {
+		t.Fatalf("dashboard header should show useful status without a clock:\n%s", header)
+	}
+
+	m.screen = ScreenInstall
+	header = m.renderHeader()
+	if strings.Contains(header, "No instances yet") || strings.Contains(header, "running") {
+		t.Fatalf("setup header should stay focused on setup:\n%s", header)
+	}
+}
+
 // --- parseLogLine ---
 
 func TestParseLogLineWithTimestamp(t *testing.T) {

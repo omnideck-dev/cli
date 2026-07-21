@@ -56,30 +56,32 @@ type InstallModel struct {
 	setupOnly bool // repair the container runtime, then return to the dashboard
 
 	// Preflight state.
-	eng              engine.Engine
-	engErr           error
-	availableEngines []engine.Engine // all detected engines (for switching)
-	preflightReady   bool            // true when checks pass and user must confirm engine
-	permChecking     bool            // true while re-checking permission after engine switch
-	permErr          error
-	ollamaOK         bool
-	ollamaHost       string
-	memMB            int64
-	memWarning       string
-	preflightDone    int // count of completed checks
+	eng                  engine.Engine
+	engErr               error
+	availableEngines     []engine.Engine // all detected engines (for switching)
+	preflightReady       bool            // true when checks pass and user must confirm engine
+	preflightAlternative string          // missing runtime explicitly selected during first setup
+	permChecking         bool            // true while re-checking permission after engine switch
+	permErr              error
+	ollamaOK             bool
+	ollamaHost           string
+	memMB                int64
+	memWarning           string
+	preflightDone        int // count of completed checks
 
 	// Runtime setup state.
-	runtimeProbes       []engine.ProbeResult
-	runtimePlans        []engine.SetupPlan
-	runtimeChoice       int
-	runtimeCommandIndex int
-	runtimeBusy         bool
-	runtimeConfirm      bool
-	runtimeWaiting      bool
-	runtimeShowDetails  bool
-	runtimeMessage      string
-	runtimeLastError    string
-	preferredEngine     string
+	runtimeProbes        []engine.ProbeResult
+	runtimePlans         []engine.SetupPlan
+	runtimeChoice        int
+	runtimeCommandIndex  int
+	runtimeBusy          bool
+	runtimeConfirm       bool
+	runtimeWaiting       bool
+	runtimeShowDetails   bool
+	runtimeMessage       string
+	runtimeLastError     string
+	preferredEngine      string
+	runtimeFromPreflight bool
 
 	// Config inputs.
 	inputs         []textinput.Model
@@ -246,11 +248,25 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc", "q":
 			return m, tea.Quit
 		case "enter", " ":
+			if m.preflightAlternative != "" {
+				m.preferredEngine = m.preflightAlternative
+				m.runtimeFromPreflight = true
+				m.configureRuntimeSetup()
+				return m, nil
+			}
 			if m.permErr != nil {
 				return m, nil // block advance if new engine has no permission
 			}
 			return m.afterRuntimeReady()
 		case "tab", "s":
+			if alternative := m.setupAlternativeRuntime(); alternative != "" {
+				if m.preflightAlternative == alternative {
+					m.preflightAlternative = ""
+				} else {
+					m.preflightAlternative = alternative
+				}
+				return m, nil
+			}
 			if m.preferredEngine != "" || len(m.availableEngines) < 2 {
 				return m, nil
 			}
@@ -271,6 +287,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.engErr = msg.err
 		m.availableEngines = msg.all
 		m.runtimeProbes = msg.probes
+		m.preflightAlternative = ""
 		// Run permission check only after engine is known.
 		if msg.eng != nil {
 			return m, runPermissionCheck(msg.eng)
@@ -318,14 +335,30 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.configureRuntimeSetup()
 			return m, nil
 		}
-		// Multiple engines available — pause so user can choose before continuing.
-		if m.preferredEngine == "" && len(m.availableEngines) > 1 {
+		// On a fresh setup, pause whenever there is a meaningful runtime
+		// choice—even if one option is ready and the other still needs setup.
+		if m.preferredEngine == "" && (len(m.availableEngines) > 1 || m.setupAlternativeRuntime() != "") {
 			m.preflightReady = true
 			return m, nil
 		}
 		return m.afterRuntimeReady()
 	}
 	return m, nil
+}
+
+// setupAlternativeRuntime returns a runtime that is not ready yet but can be
+// explicitly chosen during a fresh setup. Existing instances stay on their one
+// shared runtime so their containers and volumes are never silently stranded.
+func (m InstallModel) setupAlternativeRuntime() string {
+	if m.setupOnly || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
+		return ""
+	}
+	for _, probe := range m.runtimeProbes {
+		if probe.Name != m.eng.Name() && !probe.Ready() {
+			return probe.Name
+		}
+	}
+	return ""
 }
 
 func (m *InstallModel) configureRuntimeSetup() {
@@ -441,6 +474,16 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runtimeLastError = ""
 		case "d":
 			m.runtimeShowDetails = !m.runtimeShowDetails
+		case "b":
+			if m.runtimeFromPreflight {
+				m.runtimeFromPreflight = false
+				m.preferredEngine = ""
+				m.preflightAlternative = ""
+				m.Phase = PhasePreflight
+				m.preflightReady = true
+				m.runtimeMessage = ""
+				m.runtimeLastError = ""
+			}
 		case "r":
 			m.runtimeBusy = true
 			m.runtimeMessage = "Checking whether Podman or Docker is ready…"
@@ -1052,6 +1095,16 @@ func (m InstallModel) viewPreflight() string {
 			}
 			out += "\n   " + styles.Accent.Render("[tab]") + styles.Dim.Render(" switch to "+other.Name()+"    ") +
 				styles.Accent.Render("[enter]") + styles.Dim.Render(" continue with "+m.eng.Name()) + "\n"
+		} else if alternative := m.setupAlternativeRuntime(); alternative != "" {
+			currentName := runtimeNameForPeople(m.eng.Name())
+			alternativeName := runtimeNameForPeople(alternative)
+			selected := "Use " + currentName + " — Ready"
+			if m.preflightAlternative != "" {
+				selected = "Set up " + alternativeName + " instead"
+			}
+			out += "\n   " + styles.Active.Render(selected) + "\n"
+			out += "   " + styles.Accent.Render("[tab]") + styles.Dim.Render(" choose ") +
+				styles.Accent.Render("[enter]") + styles.Dim.Render(" continue") + "\n"
 		} else {
 			out += "\n   " + styles.Accent.Render("[enter]") + styles.Dim.Render(" continue") + "\n"
 		}
@@ -1263,7 +1316,11 @@ func (m InstallModel) viewRuntimeSetup() string {
 	if m.runtimeMessage != "" {
 		out += "\n  " + styles.Dim.Render(m.runtimeMessage) + "\n"
 	}
-	out += "\n  " + styles.Dim.Render("↑/↓ — choose    Enter — review    d — technical details    r — check again") + "\n"
+	hints := "↑/↓ — choose    Enter — review    d — technical details    r — check again"
+	if m.runtimeFromPreflight {
+		hints += "    b — back"
+	}
+	out += "\n  " + styles.Dim.Render(hints) + "\n"
 	return out
 }
 

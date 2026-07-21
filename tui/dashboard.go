@@ -67,7 +67,6 @@ type InstanceState struct {
 
 // --- internal messages ---
 
-type clockTickMsg time.Time
 type statsTickMsg time.Time
 type toastClearMsg struct{}
 
@@ -122,8 +121,6 @@ type DashboardModel struct {
 	instances []InstanceState
 	selected  int // index into instances
 
-	clock string
-
 	// Card state
 	expanded  map[string]bool // per-card expand flag keyed by instance name
 	chipFocus int             // -1 = none focused, 0–3 = focused chip index
@@ -176,7 +173,6 @@ func NewDashboardModel(eng engine.Engine, instances []config.InstanceInfo) Dashb
 	return DashboardModel{
 		eng:           eng,
 		instances:     states,
-		clock:         time.Now().Format("15:04:05"),
 		doctorSpinner: sp,
 		expanded:      make(map[string]bool),
 		chipFocus:     -1,
@@ -225,10 +221,9 @@ func NewDashboardModelForUpdate(eng engine.Engine, instances []config.InstanceIn
 	return m
 }
 
-// Init starts the clock ticker and immediately polls all instance stats.
+// Init starts live polling for all instance stats.
 func (m DashboardModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		tea.Tick(time.Second, func(t time.Time) tea.Msg { return clockTickMsg(t) }),
 		tea.Tick(time.Second, func(t time.Time) tea.Msg { return statsTickMsg(t) }),
 		m.doctorSpinner.Tick,
 	}

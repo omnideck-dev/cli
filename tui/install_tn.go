@@ -244,8 +244,37 @@ func (m InstallModel) tnPreflight(_ int) string {
 	if m.preflightReady && m.preferredEngine == "" && len(m.availableEngines) > 1 {
 		sb.WriteString("\n  " + styles.TNTextSub.Render("Both Podman and Docker are ready.") + "\n")
 		sb.WriteString("  " + styles.TNDimText.Render("Press Tab to switch, or Enter to continue with "+m.eng.Name()+".") + "\n")
+	} else if m.preflightReady && m.preferredEngine == "" {
+		if alternative := m.setupAlternativeRuntime(); alternative != "" {
+			currentName := runtimeNameForPeople(m.eng.Name())
+			alternativeName := runtimeNameForPeople(alternative)
+			sb.WriteString("\n  " + styles.TNTextSub.Render("Choose Podman or Docker") + "\n")
+			currentPrefix := "  " + styles.TNBlueTxt.Render("▸ ")
+			alternativePrefix := "    "
+			currentStyle := styles.TNTextBold
+			alternativeStyle := styles.TNDimText
+			if m.preflightAlternative != "" {
+				currentPrefix = "    "
+				alternativePrefix = "  " + styles.TNBlueTxt.Render("▸ ")
+				currentStyle = styles.TNDimText
+				alternativeStyle = styles.TNTextBold
+			}
+			sb.WriteString(currentPrefix + currentStyle.Render("Use "+currentName+" — Ready") + "\n")
+			sb.WriteString(alternativePrefix + alternativeStyle.Render("Set up "+alternativeName+" instead") + "\n")
+			sb.WriteString("\n  " + styles.TNFaintText.Render("Press Tab to choose, then Enter to continue.") + "\n")
+		}
 	}
 	return sb.String()
+}
+
+func runtimeNameForPeople(name string) string {
+	if name == "podman" {
+		return "Podman"
+	}
+	if name == "docker" {
+		return "Docker"
+	}
+	return name
 }
 
 func (m InstallModel) tnConfig(w int) string {

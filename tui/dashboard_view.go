@@ -32,23 +32,28 @@ func (m DashboardModel) contentHeight() int {
 // --- Header ---
 
 func (m DashboardModel) renderHeader() string {
-	running := 0
-	for _, inst := range m.instances {
-		if inst.Status == "running" {
-			running++
-		}
-	}
-
 	logo := styles.TNBoldBlue.Render("◆") + " " + styles.TNTextBold.Render("omnideck")
 	sep := styles.TNFaintText.Render(" │ ")
 	breadcrumb := styles.TNDimText.Render(m.breadcrumb())
 	left := logo + sep + breadcrumb
 
-	daemonDot := styles.TNGreenTxt.Render("●")
-	daemonLabel := styles.TNDimText.Render(fmt.Sprintf(" %d running", running))
-	countLabel := styles.TNFaintText.Render(fmt.Sprintf("  %d instances", len(m.instances)))
-	clock := styles.TNFaintText.Render("  " + m.clock)
-	right := daemonDot + daemonLabel + countLabel + clock
+	// Setup already explains the current task in its breadcrumb and modal. A
+	// live instance summary here would remain unknown while setup owns runtime
+	// detection, so leave the right side quiet on that screen.
+	right := ""
+	if m.screen != ScreenInstall {
+		label, tone := summarizeInstances(m.instances)
+		dot := styles.TNFaintText.Render("●")
+		switch tone {
+		case headerHealthy:
+			dot = styles.TNGreenTxt.Render("●")
+		case headerAttention:
+			dot = styles.TNYellowTxt.Render("●")
+		case headerError:
+			dot = styles.TNRedTxt.Render("●")
+		}
+		right = dot + styles.TNDimText.Render(" "+label)
+	}
 
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
 	if gap < 1 {
@@ -56,6 +61,56 @@ func (m DashboardModel) renderHeader() string {
 	}
 	line := left + safeRepeat(" ", gap) + right
 	return styles.TNHeaderBar.Width(m.width).Render(line) + "\n"
+}
+
+type headerStatusTone int
+
+const (
+	headerNeutral headerStatusTone = iota
+	headerHealthy
+	headerAttention
+	headerError
+)
+
+func summarizeInstances(instances []InstanceState) (string, headerStatusTone) {
+	if len(instances) == 0 {
+		return "No instances yet", headerNeutral
+	}
+	if len(instances) == 1 {
+		switch instances[0].Status {
+		case "running":
+			return "Omnideck is running", headerHealthy
+		case "paused":
+			return "Omnideck is paused", headerAttention
+		case "restarting":
+			return "Omnideck is restarting", headerAttention
+		case "dead":
+			return "Omnideck needs attention", headerError
+		case "", "unknown":
+			return "Checking Omnideck…", headerNeutral
+		default:
+			return "Omnideck is stopped", headerAttention
+		}
+	}
+
+	running := 0
+	unknown := 0
+	for _, inst := range instances {
+		switch inst.Status {
+		case "running":
+			running++
+		case "", "unknown":
+			unknown++
+		}
+	}
+	label := fmt.Sprintf("%d of %d running", running, len(instances))
+	if unknown == len(instances) {
+		return "Checking instances…", headerNeutral
+	}
+	if running == len(instances) {
+		return label, headerHealthy
+	}
+	return label, headerAttention
 }
 
 func (m DashboardModel) breadcrumb() string {
@@ -154,7 +209,7 @@ func (m DashboardModel) footerHints() string {
 	case ScreenInstall:
 		switch m.installModel.Phase {
 		case PhasePreflight:
-			if m.installModel.preflightReady && m.installModel.preferredEngine == "" && len(m.installModel.availableEngines) > 1 {
+			if m.installModel.preflightReady && m.installModel.preferredEngine == "" && (len(m.installModel.availableEngines) > 1 || m.installModel.setupAlternativeRuntime() != "") {
 				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"q", "cancel"}})
 			}
 		case PhaseRuntimeSetup:
@@ -182,7 +237,11 @@ func (m DashboardModel) footerHints() string {
 				}
 				return keyHints([][2]string{{"enter", action}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
 			}
-			return keyHints([][2]string{{"↑↓", "choose"}, {"enter", "review"}, {"d", "technical details"}, {"r", "check again"}, {"q", "cancel"}})
+			hints := [][2]string{{"↑↓", "choose"}, {"enter", "review"}, {"d", "technical details"}, {"r", "check again"}}
+			if m.installModel.runtimeFromPreflight {
+				hints = append(hints, [2]string{"b", "back"})
+			}
+			return keyHints(append(hints, [2]string{"q", "cancel"}))
 		case PhaseConfig:
 			if !m.installModel.configAdvanced {
 				return keyHints([][2]string{{"enter", "use recommended"}, {"c", "customize"}, {"q", "cancel"}})

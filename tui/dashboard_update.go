@@ -33,10 +33,6 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
-	case clockTickMsg:
-		m.clock = time.Time(msg).Format("15:04:05")
-		return m, tea.Tick(time.Second, func(t time.Time) tea.Msg { return clockTickMsg(t) })
-
 	case statsTickMsg:
 		var cmds []tea.Cmd
 		for i := range m.instances {

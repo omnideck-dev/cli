@@ -276,6 +276,7 @@ func TestExistingBrowserPortIsRejected(t *testing.T) {
 }
 
 func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewInstallModel("/tmp/test.yaml", nil, "")
 	docker := &mockEngine{name: "docker"}
 	podman := &mockEngine{name: "podman"}
@@ -288,6 +289,47 @@ func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
 	nm := newModel.(InstallModel)
 	if cmd != nil || nm.eng.Name() != "docker" {
 		t.Fatalf("per-instance switch changed runtime to %s", nm.eng.Name())
+	}
+}
+
+func TestFreshSetupCanChooseMissingPodmanWhenDockerIsReady(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	docker := &mockEngine{name: "docker"}
+	m.preflightReady = true
+	m.eng = docker
+	m.availableEngines = []engine.Engine{docker}
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeReady},
+	}
+
+	if view := m.tnPreflight(100); !strings.Contains(view, "Set up Podman instead") {
+		t.Fatalf("fresh setup does not show the Podman choice:\n%s", view)
+	}
+
+	newModel, cmd := m.updatePreflight(tea.KeyMsg{Type: tea.KeyTab})
+	if cmd != nil {
+		t.Fatal("choosing the alternative should not run anything")
+	}
+	nm := newModel.(InstallModel)
+	if nm.preflightAlternative != "podman" {
+		t.Fatalf("preflight alternative = %q, want podman", nm.preflightAlternative)
+	}
+
+	newModel, cmd = nm.updatePreflight(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("opening Podman setup should not install anything immediately")
+	}
+	nm = newModel.(InstallModel)
+	if nm.Phase != PhaseRuntimeSetup || nm.preferredEngine != "podman" || len(nm.runtimePlans) != 1 || nm.runtimePlans[0].Runtime != "podman" {
+		t.Fatalf("Podman setup was not selected safely: phase=%d preferred=%q plans=%#v", nm.Phase, nm.preferredEngine, nm.runtimePlans)
+	}
+
+	newModel, _ = nm.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	nm = newModel.(InstallModel)
+	if nm.Phase != PhasePreflight || nm.preferredEngine != "" {
+		t.Fatalf("back did not return to the runtime choice: phase=%d preferred=%q", nm.Phase, nm.preferredEngine)
 	}
 }
 
