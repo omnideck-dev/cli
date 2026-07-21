@@ -34,7 +34,7 @@ func PortAvailable(value string) bool {
 	if !ValidPort(value) {
 		return false
 	}
-	listener, err := net.Listen("tcp4", "0.0.0.0:"+value)
+	listener, err := net.Listen("tcp4", "127.0.0.1:"+value)
 	if err != nil {
 		return false
 	}
