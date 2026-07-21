@@ -17,6 +17,7 @@ const (
 	StepPending StepStatus = iota
 	StepActive
 	StepDone
+	StepWarning
 	StepFailed
 )
 
@@ -33,6 +34,12 @@ type StepStartedMsg struct{ Index int }
 
 // StepDoneMsg signals that a step completed successfully.
 type StepDoneMsg struct {
+	Index  int
+	Detail string
+}
+
+// StepWarningMsg signals that an optional check completed but needs attention.
+type StepWarningMsg struct {
 	Index  int
 	Detail string
 }
@@ -150,6 +157,18 @@ func (m SpinnerModel) Update(msg tea.Msg) (SpinnerModel, tea.Cmd) {
 		}
 		return m, nil
 
+	case StepWarningMsg:
+		if msg.Index < len(m.Steps) {
+			m.Steps[msg.Index].Status = StepWarning
+			m.Steps[msg.Index].Detail = msg.Detail
+		}
+		if msg.Index+1 < len(m.Steps) {
+			m.CurrentStep = msg.Index + 1
+		} else {
+			m.done = true
+		}
+		return m, nil
+
 	case StepFailedMsg:
 		if msg.Index < len(m.Steps) {
 			m.Steps[msg.Index].Status = StepFailed
@@ -173,6 +192,14 @@ func (m SpinnerModel) View() string {
 			line := "   " + styles.CheckMark + "  " + styles.Dim.Render(label)
 			if step.Detail != "" {
 				line += styles.Dim.Render(step.Detail)
+			}
+			sb.WriteString(line + "\n")
+
+		case StepWarning:
+			label := padRight(step.Label, stepLabelWidth)
+			line := "   " + styles.Warning.Render("!") + "  " + styles.Warning.Render(label)
+			if step.Detail != "" {
+				line += styles.Warning.Render(step.Detail)
 			}
 			sb.WriteString(line + "\n")
 
@@ -215,6 +242,13 @@ func renderTNStep(step Step, sm SpinnerModel) string {
 			detail = "  " + styles.TNFaintText.Render(step.Detail)
 		}
 		return styles.TNGreenTxt.Render("✓") + "  " + label + detail
+	case StepWarning:
+		label := styles.TNYellowTxt.Render(step.Label)
+		detail := ""
+		if step.Detail != "" {
+			detail = "  " + styles.TNYellowTxt.Render(step.Detail)
+		}
+		return styles.TNYellowTxt.Render("!") + "  " + label + detail
 	case StepFailed:
 		errStr := ""
 		if step.Err != nil {

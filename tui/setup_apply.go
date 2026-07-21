@@ -22,10 +22,7 @@ func (m SetupModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "b", "esc":
 			m.Stage = SetupStageSettings
 			m.settingsAdvanced = false
-			m.reviewShowDetails = false
 			return m, nil
-		case "d":
-			m.reviewShowDetails = !m.reviewShowDetails
 		case "i", "enter", " ":
 			if !m.validateAllInputs() {
 				m.Stage = SetupStageSettings
@@ -54,8 +51,25 @@ var setupStepLabels = []string{
 	"Prepare space for Omnideck data",
 	"Download Omnideck",
 	"Start Omnideck",
+	"Check optional local AI connection",
 	"Remember these settings",
 }
+
+const (
+	setupStepAvailability = iota
+	setupStepHomeVolume
+	setupStepStateVolume
+	setupStepImage
+	setupStepContainer
+	setupStepOllama
+	setupStepSave
+)
+
+const (
+	ollamaCheckConnected    = "connected"
+	ollamaCheckNotConnected = "not connected (optional)"
+	ollamaCheckNotInstalled = "not installed (optional)"
+)
 
 func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -63,16 +77,18 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.HandleWindowSize(msg)
 
 	case StepDoneMsg:
-		m.lastCompletedStep = msg.Index
-		var cmd tea.Cmd
-		m.spinnerModel, cmd = m.spinnerModel.Update(msg)
-		next := msg.Index + 1
-		if next < len(setupStepLabels) {
-			return m, tea.Batch(cmd, m.startSetupStep(next))
+		if msg.Index == setupStepOllama {
+			m.ollamaContainerChecked = m.ollamaOK
+			m.ollamaContainerOK = msg.Detail == ollamaCheckConnected
 		}
-		// All steps done.
-		m.Stage = SetupStageComplete
-		return m, cmd
+		return m.finishSetupStep(msg.Index, msg)
+
+	case StepWarningMsg:
+		if msg.Index == setupStepOllama {
+			m.ollamaContainerChecked = true
+			m.ollamaContainerOK = false
+		}
+		return m.finishSetupStep(msg.Index, msg)
 
 	case StepFailedMsg:
 		var cmd tea.Cmd
@@ -81,7 +97,7 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorMsg = setupStepLabels[msg.Index]
 		m.errorDetail = msg.Err.Error()
 		m.errorShowDetails = false
-		if msg.Index == 0 {
+		if msg.Index == setupStepAvailability {
 			m.Stage = SetupStageSettings
 			m.settingsAdvanced = true
 			_ = m.validateAllInputs()
@@ -91,9 +107,9 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[m.inputFocus].Focus()
 			return m, cmd
 		}
-		// Attempt rollback: if the container was run (step 4 completed) but
-		// settings were not saved (step 5 failed), remove the orphaned container.
-		if m.lastCompletedStep >= 4 {
+		// Attempt rollback if the container was started but settings were not
+		// saved, so setup never leaves an untracked Omnideck container behind.
+		if m.lastCompletedStep >= setupStepContainer {
 			cfg := m.buildConfig()
 			eng := m.eng
 			rollbackCmd := func() tea.Msg {
@@ -112,6 +128,18 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m SetupModel) finishSetupStep(index int, msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.lastCompletedStep = index
+	var cmd tea.Cmd
+	m.spinnerModel, cmd = m.spinnerModel.Update(msg)
+	next := index + 1
+	if next < len(setupStepLabels) {
+		return m, tea.Batch(cmd, m.startSetupStep(next))
+	}
+	m.Stage = SetupStageComplete
+	return m, cmd
+}
+
 func (m SetupModel) updateFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -122,7 +150,6 @@ func (m SetupModel) updateFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorShowDetails = !m.errorShowDetails
 		case "r":
 			m.Stage = SetupStageReview
-			m.reviewShowDetails = false
 		case "b", "enter", "esc", "q", "ctrl+c":
 			return m.exit(WorkflowCanceled)
 		}
@@ -141,7 +168,7 @@ func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 
 	var workCmd tea.Cmd
 	switch i {
-	case 0: // Recheck name and port immediately before making changes.
+	case setupStepAvailability: // Recheck name and port immediately before making changes.
 		workCmd = StepCmd(i, func() (string, error) {
 			exists, err := eng.ContainerExists(cfg.ContainerName)
 			if err != nil {
@@ -155,15 +182,15 @@ func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 			}
 			return "available", nil
 		})
-	case 1: // Create home volume.
+	case setupStepHomeVolume: // Create home volume.
 		workCmd = StepCmd(i, func() (string, error) {
 			return "", eng.CreateVolume(cfg.HomeVolumeName())
 		})
-	case 2: // Create state volume.
+	case setupStepStateVolume: // Create state volume.
 		workCmd = StepCmd(i, func() (string, error) {
 			return "", eng.CreateVolume(cfg.StateVolumeName())
 		})
-	case 3: // Pull image.
+	case setupStepImage: // Pull image.
 		workCmd = StepCmd(i, func() (string, error) {
 			msgs := make(chan string, 32)
 			go func() {
@@ -174,11 +201,21 @@ func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 			close(msgs)
 			return "", err
 		})
-	case 4: // Run container.
+	case setupStepContainer: // Run container.
 		workCmd = StepCmd(i, func() (string, error) {
 			return "", eng.RunContainer(workflow.RunOptions(cfg))
 		})
-	case 5: // Save settings.
+	case setupStepOllama: // Verify the optional service from the real container network.
+		workCmd = func() tea.Msg {
+			if !m.ollamaOK {
+				return StepDoneMsg{Index: i, Detail: ollamaCheckNotInstalled}
+			}
+			if err := eng.CheckOllamaConnection(cfg.ContainerName); err != nil {
+				return StepWarningMsg{Index: i, Detail: ollamaCheckNotConnected}
+			}
+			return StepDoneMsg{Index: i, Detail: ollamaCheckConnected}
+		}
+	case setupStepSave: // Save settings.
 		workCmd = StepCmd(i, func() (string, error) {
 			cfg.InstalledAt = time.Now()
 			cfg.Engine = ""

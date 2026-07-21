@@ -20,12 +20,26 @@ func (m *SetupModel) configureRuntimeSetup() {
 		host = engine.DetectHostPlatform()
 	}
 	m.runtimePlans = engine.BuildSetupPlans(m.runtimeProbes, host)
-	if m.preferredEngine != "" {
+	selectedRuntime := m.preferredEngine
+	automaticSelection := selectedRuntime == ""
+	installed := engine.InstalledRuntimeNames(m.runtimeProbes)
+	if automaticSelection {
+		selectedRuntime = engine.DefaultRuntimeForSetup(m.runtimeProbes, host)
+		m.preferredEngine = selectedRuntime
+	}
+	if selectedRuntime != "" {
 		filtered := m.runtimePlans[:0]
 		for _, plan := range m.runtimePlans {
-			if plan.Runtime == m.preferredEngine {
+			if plan.Runtime == selectedRuntime {
 				plan.Recommended = true
-				plan.Recommendation = "Omnideck will use " + plan.Title + " for all your installations on this computer."
+				switch {
+				case automaticSelection && len(installed) == 0:
+					plan.Recommendation = plan.Title + " is the easiest option for this computer."
+				case automaticSelection:
+					plan.Recommendation = plan.Title + " is already installed, so Omnideck will use it."
+				default:
+					plan.Recommendation = "Omnideck will use " + plan.Title + " for all your installations on this computer."
+				}
 				filtered = append(filtered, plan)
 			}
 		}
@@ -119,7 +133,9 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.runtimeSetupStage = runtimeSetupChoose
 				m.runtimeShowDetails = false
 			case "d":
-				m.runtimeShowDetails = !m.runtimeShowDetails
+				if m.runtimeDetailsAvailable() {
+					m.runtimeShowDetails = !m.runtimeShowDetails
+				}
 			case "enter", " ":
 				plan := m.runtimePlans[m.runtimeChoice]
 				if len(plan.Commands) > 0 {
@@ -146,7 +162,9 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.runtimeShowDetails = false
 			m.runtimeLastError = ""
 		case "d":
-			m.runtimeShowDetails = !m.runtimeShowDetails
+			if m.runtimeDetailsAvailable() {
+				m.runtimeShowDetails = !m.runtimeShowDetails
+			}
 		case "b", "esc":
 			if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 				m.runtimeSetupEntry = runtimeSetupFromCheck
@@ -205,6 +223,20 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runtimeMessage = runtimeNotReadyMessage(m.runtimePlans, m.preferredEngine)
 	}
 	return m, nil
+}
+
+func (m SetupModel) runtimeDetailsAvailable() bool {
+	if m.runtimeChoice < 0 || m.runtimeChoice >= len(m.runtimePlans) {
+		return false
+	}
+	return len(m.runtimePlans[m.runtimeChoice].Commands) > 0 || m.runtimeLastError != ""
+}
+
+func (m SetupModel) runtimeDetailsLabel() string {
+	if m.runtimeLastError != "" {
+		return "error details"
+	}
+	return "commands"
 }
 
 func runtimeWaitingMessage(plan engine.SetupPlan) string {

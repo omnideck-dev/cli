@@ -200,7 +200,7 @@ if [[ -z "${fixture_image}" ]]; then
 fi
 
 current_step="setup"
-run_cli setup --plain --engine "${engine}" --image "${fixture_image}" \
+run_cli setup --plain --runtime "${engine}" --image "${fixture_image}" \
   --port "${port}" --memory 512m --shm-size 64m
 
 settings_path="${OMNIDECK_CONFIG_DIR}/settings.yaml"

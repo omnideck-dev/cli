@@ -272,7 +272,12 @@ func (m AppModel) footerHints() string {
 						action = "download installer"
 					}
 				}
-				return keyHints([][2]string{{"enter", action}, {"esc", "back"}, {"d", "technical details"}, {"q", "cancel"}})
+				hints := [][2]string{{"enter", action}, {"esc", "back"}}
+				if m.setupModel.runtimeDetailsAvailable() {
+					hints = append(hints, [2]string{"d", m.setupModel.runtimeDetailsLabel()})
+				}
+				hints = append(hints, [2]string{"q", "cancel"})
+				return keyHints(hints)
 			}
 			hints := [][2]string{{"enter", "review"}}
 			if len(m.setupModel.runtimePlans) > 1 {
@@ -283,7 +288,10 @@ func (m AppModel) footerHints() string {
 			} else {
 				hints = append(hints, [2]string{"esc / q", "cancel"})
 			}
-			hints = append(hints, [2]string{"d", "technical details"}, [2]string{"r", "check again"})
+			if m.setupModel.runtimeDetailsAvailable() {
+				hints = append(hints, [2]string{"d", m.setupModel.runtimeDetailsLabel()})
+			}
+			hints = append(hints, [2]string{"r", "check again"})
 			return keyHints(hints)
 		case SetupStageSettings:
 			if !m.setupModel.settingsAdvanced {
@@ -291,7 +299,7 @@ func (m AppModel) footerHints() string {
 			}
 			return keyHints([][2]string{{"tab", "next"}, {"shift+tab", "back"}, {"esc", "recommended settings"}})
 		case SetupStageReview:
-			return keyHints([][2]string{{"enter", "start setup"}, {"esc", "back"}, {"q", "cancel"}, {"d", "technical details"}})
+			return keyHints([][2]string{{"enter", "start setup"}, {"esc", "back"}, {"q", "cancel"}})
 		case SetupStageComplete:
 			return keyHints([][2]string{{"any key", "return"}})
 		case SetupStageFailed:

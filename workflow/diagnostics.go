@@ -78,7 +78,7 @@ func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.P
 			CheckResult{Label: "Browser", Status: CheckInfo, Detail: "Not checked until the container runtime is ready"},
 			CheckResult{Label: "Saved data", Status: CheckInfo, Detail: "Not checked until the container runtime is ready"},
 			doctorMemoryCheck(),
-			doctorOllamaCheck(),
+			doctorOllamaCheck(nil, "", false),
 			CheckResult{Label: "This computer", Status: CheckInfo, Detail: friendlyOS(runtime.GOOS) + " · " + runtime.GOARCH},
 		)
 		return results, nil
@@ -92,7 +92,7 @@ func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.P
 		CheckVolume("Saved app data", cfg.StateVolumeName(), usableEngine),
 		doctorImageCheck(cfg, usableEngine),
 		doctorMemoryCheck(),
-		doctorOllamaCheck(),
+		doctorOllamaCheck(usableEngine, cfg.ContainerName, running),
 		CheckResult{Label: "This computer", Status: CheckInfo, Detail: friendlyOS(runtime.GOOS) + " · " + runtime.GOARCH},
 	)
 	return results, usableEngine
@@ -297,12 +297,27 @@ func doctorMemoryCheck() CheckResult {
 	return CheckResult{Label: "Available memory", Status: CheckPass, Detail: fmt.Sprintf("%d MB available", mb)}
 }
 
-func doctorOllamaCheck() CheckResult {
-	ok, host := checks.CheckOllama()
-	if !ok {
+func doctorOllamaCheck(eng engine.Engine, containerName string, containerRunning bool) CheckResult {
+	status := checks.CheckOllamaStatus()
+	if !status.Running {
 		return CheckResult{Label: "Local AI (optional)", Status: CheckInfo, Detail: "Not connected · online AI still works", Hint: "You can add Ollama later if you want local AI."}
 	}
-	return CheckResult{Label: "Local AI (optional)", Status: CheckPass, Detail: "Ollama is reachable at " + host}
+	if eng == nil || !containerRunning {
+		return CheckResult{Label: "Local AI (optional)", Status: CheckInfo, Detail: "Ollama is running on this computer", Hint: "Container access will be checked after Omnideck is running."}
+	}
+	if err := eng.CheckOllamaConnection(containerName); err != nil {
+		hint := "Ollama is optional, so online AI still works. Check Ollama and the container runtime's host networking."
+		if runtime.GOOS == "windows" && eng.Name() == "podman" {
+			hint = "Quit Ollama. In Windows user environment variables, set OLLAMA_HOST to 0.0.0.0:11434, then open Ollama again. Do not allow public-network access."
+		}
+		return CheckResult{
+			Label:  "Local AI (optional)",
+			Status: CheckWarn,
+			Detail: "Ollama is running, but Omnideck cannot connect to it",
+			Hint:   hint,
+		}
+	}
+	return CheckResult{Label: "Local AI (optional)", Status: CheckPass, Detail: "Omnideck can connect to Ollama"}
 }
 
 func runtimeNameForPeople(name string) string {

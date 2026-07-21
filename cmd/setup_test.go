@@ -2,10 +2,50 @@ package cmd
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/omnideck-dev/cli/config"
 )
+
+func TestSetupUsesRuntimeFlagAndHidesLegacyEngineAlias(t *testing.T) {
+	if setupCmd.Flags().Lookup("runtime") == nil {
+		t.Fatal("setup is missing --runtime")
+	}
+	legacy := setupCmd.Flags().Lookup("engine")
+	if legacy == nil || !legacy.Hidden {
+		t.Fatal("the legacy --engine alias must remain available but hidden")
+	}
+
+	tests := []struct {
+		name          string
+		runtimeFlag   string
+		legacyFlag    string
+		want          string
+		wantErrSubstr string
+	}{
+		{name: "automatic", want: ""},
+		{name: "runtime", runtimeFlag: "podman", want: "podman"},
+		{name: "legacy alias", legacyFlag: "docker", want: "docker"},
+		{name: "matching flags", runtimeFlag: "docker", legacyFlag: "docker", want: "docker"},
+		{name: "conflicting flags", runtimeFlag: "docker", legacyFlag: "podman", wantErrSubstr: "use only --runtime"},
+		{name: "invalid runtime", runtimeFlag: "containerd", wantErrSubstr: "--runtime must be docker or podman"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := setupRuntimeOverride(tt.runtimeFlag, tt.legacyFlag)
+			if tt.wantErrSubstr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
+					t.Fatalf("error = %v, want text %q", err, tt.wantErrSubstr)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("setupRuntimeOverride = %q, %v; want %q", got, err, tt.want)
+			}
+		})
+	}
+}
 
 func TestSaveInstalledConfigRecordsMachineWideRuntime(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

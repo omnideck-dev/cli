@@ -51,7 +51,6 @@ func (m SetupModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter", " ":
 				if m.validateAllInputs() {
 					m.Stage = SetupStageReview
-					m.reviewShowDetails = false
 					m.buildReviewWarnings()
 				} else {
 					m.settingsAdvanced = true

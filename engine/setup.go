@@ -93,6 +93,34 @@ func RecommendedRuntime(host HostPlatform) string {
 	return "podman"
 }
 
+// InstalledRuntimeNames returns runtimes whose executable or desktop app was
+// found, even when that runtime still needs to be started or repaired.
+func InstalledRuntimeNames(probes []ProbeResult) []string {
+	names := make([]string, 0, len(probes))
+	for _, probe := range probes {
+		if probe.State != RuntimeMissing {
+			names = append(names, probe.Name)
+		}
+	}
+	return names
+}
+
+// DefaultRuntimeForSetup returns the one runtime setup can choose without
+// asking a question. One installed runtime wins. With none installed, the
+// easiest platform default wins. Two installed runtimes return an empty value
+// so the interactive setup can let the user choose.
+func DefaultRuntimeForSetup(probes []ProbeResult, host HostPlatform) string {
+	installed := InstalledRuntimeNames(probes)
+	switch len(installed) {
+	case 0:
+		return RecommendedRuntime(host)
+	case 1:
+		return installed[0]
+	default:
+		return ""
+	}
+}
+
 // BuildSetupPlans creates an ordered set of recovery/install choices. The
 // recommendation prefers an already-installed runtime, then the platform default.
 func BuildSetupPlans(probes []ProbeResult, host HostPlatform) []SetupPlan {
@@ -145,9 +173,15 @@ func explainSetupPlan(plan SetupPlan, probe ProbeResult, host HostPlatform) Setu
 		plan.Action = "Finish setting up Podman"
 		plan.Description = "Podman is installed, but its one-time setup is not finished."
 		plan.Steps = []string{
-			"Prepare Podman's private workspace. Podman may download files it needs.",
+			"Prepare Podman's small Linux environment. Podman may download files it needs.",
 			"Start Podman.",
 			"Check that Omnideck can use it.",
+		}
+		if host.OS == "windows" {
+			plan.Description = "Podman is installed. Omnideck can finish its one-time Windows setup."
+			plan.Steps[0] = "Create Podman's small Linux environment using WSL 2, the recommended Windows option."
+			plan.PermissionNote = "If Windows says WSL 2 must be turned on, it will ask for permission from an administrator and may need to restart the computer. Omnideck cannot see or store an administrator password."
+			plan.SafetyNote = "WSL 2 is the easiest choice for most people and is Podman's default. Hyper-V is an advanced alternative for managed work computers; it requires Windows Pro or Enterprise and an administrator."
 		}
 	case RuntimeMachineStopped:
 		plan.Action = "Start Podman"
@@ -220,15 +254,15 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 		return
 	}
 	if plan.Runtime == "podman" && host.OS == "windows" {
-		plan.Description = "Download Podman's official Windows installer."
+		plan.Description = "Download Podman's official Windows installer. WSL 2 is recommended for most people."
 		plan.Steps = []string{
 			"Wait for the official Podman installer download to finish.",
 			"Open the .msi installer from Downloads and keep the recommended Just for me choice.",
-			"Return to Omnideck and check again. Omnideck will finish Podman's one-time setup.",
+			"Return to Omnideck and check again. Omnideck will finish setup using WSL 2, Podman's default Windows option.",
 		}
 		plan.DirectDownload = true
-		plan.PermissionNote = "Installing Podman just for your account does not require an administrator. Podman also needs Windows 11 and either WSL 2 or Hyper-V. Turning on either Windows feature requires an administrator and may require a restart."
-		plan.SafetyNote = "The Podman installer does not turn on WSL 2 or Hyper-V. If neither feature is already available, ask the person who manages this computer to enable one before Omnideck finishes Podman setup."
+		plan.PermissionNote = "Installing Podman just for your account does not require an administrator. If Windows needs to turn on WSL 2, it will ask for permission from an administrator and may need to restart the computer."
+		plan.SafetyNote = "Use WSL 2 unless the person who manages this computer specifically asks for Hyper-V. Hyper-V is an advanced option that requires Windows Pro or Enterprise and an administrator."
 		return
 	}
 	if plan.Runtime == "docker" && (host.OS == "windows" || host.WSL) {

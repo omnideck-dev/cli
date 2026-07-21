@@ -15,12 +15,13 @@ import (
 )
 
 var (
-	setupImageFlag  string
-	setupPlainFlag  bool
-	setupPortFlag   string
-	setupMemoryFlag string
-	setupShmFlag    string
-	setupEngineFlag string
+	setupImageFlag   string
+	setupPlainFlag   bool
+	setupPortFlag    string
+	setupMemoryFlag  string
+	setupShmFlag     string
+	setupRuntimeFlag string
+	setupEngineFlag  string // hidden compatibility alias for --runtime
 )
 
 var setupCmd = &cobra.Command{
@@ -42,18 +43,21 @@ func init() {
 	setupCmd.Flags().StringVar(&setupPortFlag, "port", "", "web UI host port (default: 2337)")
 	setupCmd.Flags().StringVar(&setupMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
 	setupCmd.Flags().StringVar(&setupShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
-	setupCmd.Flags().StringVar(&setupEngineFlag, "engine", "", "choose Docker or Podman during first setup (later instances reuse it)")
+	setupCmd.Flags().StringVar(&setupRuntimeFlag, "runtime", "", "override automatic container runtime selection: docker or podman (first setup only)")
+	setupCmd.Flags().StringVar(&setupEngineFlag, "engine", "", "deprecated alias for --runtime")
+	_ = setupCmd.Flags().MarkHidden("engine")
 }
 
 func runSetup(_ *cobra.Command, _ []string) error {
-	if setupEngineFlag != "" && setupEngineFlag != "docker" && setupEngineFlag != "podman" {
-		return fmt.Errorf("--engine must be docker or podman")
+	requestedRuntime, err := setupRuntimeOverride(setupRuntimeFlag, setupEngineFlag)
+	if err != nil {
+		return err
 	}
 	instances, err := config.ListInstances()
 	if err != nil {
 		return fmt.Errorf("reading saved Omnideck installations: %w", err)
 	}
-	preferredEngine, err := setupRuntimePreference(RuntimeName, setupEngineFlag, len(instances))
+	preferredEngine, err := setupRuntimePreference(RuntimeName, requestedRuntime, len(instances))
 	if err != nil {
 		return err
 	}
@@ -65,6 +69,20 @@ func runSetup(_ *cobra.Command, _ []string) error {
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
+}
+
+func setupRuntimeOverride(runtimeFlag, legacyEngineFlag string) (string, error) {
+	if runtimeFlag != "" && legacyEngineFlag != "" && runtimeFlag != legacyEngineFlag {
+		return "", fmt.Errorf("--runtime and the older --engine option disagree; use only --runtime")
+	}
+	requested := runtimeFlag
+	if requested == "" {
+		requested = legacyEngineFlag
+	}
+	if requested != "" && requested != "docker" && requested != "podman" {
+		return "", fmt.Errorf("--runtime must be docker or podman")
+	}
+	return requested, nil
 }
 
 // runRuntimeSetup repairs container support for existing installations without
@@ -81,18 +99,22 @@ func runRuntimeSetup(instances []config.InstanceInfo) error {
 // All settings come from flags or sensible defaults.
 func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) error {
 	probes := engine.ProbeAll()
+	selectedRuntime := preferredEngine
+	if selectedRuntime == "" {
+		selectedRuntime = engine.DefaultRuntimeForSetup(probes, engine.DetectHostPlatform())
+	}
 	available := engine.ReadyEngines(probes)
 	var eng engine.Engine
 	for _, candidate := range available {
-		if preferredEngine == "" || candidate.Name() == preferredEngine {
+		if selectedRuntime == "" || candidate.Name() == selectedRuntime {
 			eng = candidate
 			break
 		}
 	}
 	if eng == nil {
-		printRuntimeSetupGuidanceFromProbes(preferredEngine, probes)
-		if preferredEngine != "" {
-			return fmt.Errorf("%s is not ready; complete the setup option above", preferredEngine)
+		printRuntimeSetupGuidanceFromProbes(selectedRuntime, probes)
+		if selectedRuntime != "" {
+			return fmt.Errorf("%s is not ready; complete the setup option above", selectedRuntime)
 		}
 		return fmt.Errorf("neither Podman nor Docker is ready; complete one of the setup options above")
 	}
@@ -184,7 +206,7 @@ func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) erro
 func setupRuntimePreference(saved, requested string, instanceCount int) (string, error) {
 	if instanceCount > 0 {
 		if saved != "" && requested != "" && requested != saved {
-			return "", fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --engine %s", saved, requested)
+			return "", fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --runtime %s", saved, requested)
 		}
 		if saved != "" {
 			return saved, nil

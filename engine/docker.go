@@ -117,6 +117,10 @@ func (e *DockerEngine) RunContainer(opts RunOptions) error {
 	return nil
 }
 
+func (e *DockerEngine) CheckOllamaConnection(name string) error {
+	return checkContainerOllama("docker", name)
+}
+
 func (e *DockerEngine) StopContainer(name string) error {
 	cmd := buildCmd("docker", "stop", name)
 	out, err := cmd.CombinedOutput()
@@ -203,20 +207,9 @@ func buildRunArgs(binary string, opts RunOptions) []string {
 	)
 
 	// OLLAMA_HOST — always set so the container can find Ollama on the host.
-	ollamaHost := opts.OllamaHost
-	if ollamaHost == "" {
-		// Docker Desktop (macOS + Windows) resolves host.docker.internal to the
-		// host automatically. On Linux there is no such name, so we point at
-		// host-gateway, which is mapped via --add-host above.
-		if opts.Platform == "linux" {
-			ollamaHost = "host-gateway:11434"
-		} else {
-			ollamaHost = "host.docker.internal:11434"
-		}
-	}
-	if !strings.HasPrefix(ollamaHost, "http") {
-		ollamaHost = "http://" + ollamaHost
-	}
+	// Docker Desktop resolves host.docker.internal automatically. Linux uses
+	// the host-gateway alias added above.
+	ollamaHost := normalizeOllamaURL(opts.OllamaHost, "docker", opts.Platform)
 	args = append(args, "-e", "OLLAMA_HOST="+ollamaHost)
 
 	// PORT tells the container app which internal port to bind on.

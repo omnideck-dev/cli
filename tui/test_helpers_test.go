@@ -17,6 +17,7 @@ type mockEngine struct {
 	removeErr       error
 	runErr          error
 	runErrors       []error
+	ollamaErr       error
 	fetchLines      []string
 	fetchErr        error
 	volumes         map[string]bool
@@ -52,6 +53,7 @@ func (m *mockEngine) RunContainer(opts engine.RunOptions) error {
 	}
 	return m.runErr
 }
+func (m *mockEngine) CheckOllamaConnection(string) error { return m.ollamaErr }
 func (m *mockEngine) RemoveContainer(string) error {
 	if m.removeErr == nil {
 		m.containerExists = false
