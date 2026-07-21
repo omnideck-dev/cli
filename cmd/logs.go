@@ -15,7 +15,7 @@ var (
 
 var logsCmd = &cobra.Command{
 	Use:   "logs",
-	Short: "Tail container logs",
+	Short: "Show Omnideck logs",
 	RunE:  runLogs,
 }
 

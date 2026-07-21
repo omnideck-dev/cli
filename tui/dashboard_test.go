@@ -6,10 +6,11 @@ import (
 	"time"
 
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 func TestSuggestInstallDefaultsForFirstInstance(t *testing.T) {
-	cfg := suggestInstallDefaultsFor(nil)
+	cfg := workflow.NewInstanceDefaults(nil)
 	if cfg.ContainerName != "omnideck" || cfg.WebUIPort != "2337" {
 		t.Fatalf("first instance defaults = %s:%s, want omnideck:2337", cfg.ContainerName, cfg.WebUIPort)
 	}
@@ -20,25 +21,25 @@ func TestSuggestInstallDefaultsForAdditionalInstance(t *testing.T) {
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
 		{Name: "omnideck2", Config: &config.Config{ContainerName: "omnideck2", WebUIPort: "2338"}},
 	}
-	cfg := suggestInstallDefaultsFor(instances)
+	cfg := workflow.NewInstanceDefaults(instances)
 	if cfg.ContainerName != "omnideck3" || cfg.WebUIPort != "2339" {
 		t.Fatalf("additional instance defaults = %s:%s, want omnideck3:2339", cfg.ContainerName, cfg.WebUIPort)
 	}
 }
 
 func TestInstallScreenUsesFirstRunLanguage(t *testing.T) {
-	m := NewDashboardModelForInstall(nil, nil, "", "")
-	if m.installModel.setupMode != SetupFirstRun {
-		t.Fatalf("setup mode = %d, want first run", m.installModel.setupMode)
+	m := NewDashboardModelForSetup(nil, nil, "", "")
+	if m.setupModel.setupMode != SetupFirstRun {
+		t.Fatalf("setup mode = %d, want first run", m.setupModel.setupMode)
 	}
 	m.width, m.height = 100, 36
-	view := m.viewInstall()
+	view := m.viewSetup()
 
 	if !strings.Contains(view, "Setup") {
 		t.Fatalf("first-run title missing:\n%s", view)
 	}
 	if strings.Contains(view, "preflight") || strings.Contains(view, "configure → install") {
-		t.Fatalf("install screen exposes internal phase names:\n%s", view)
+		t.Fatalf("setup screen exposes internal stage names:\n%s", view)
 	}
 	if got := m.breadcrumb(); got != "Setup · Quick check" {
 		t.Fatalf("first-run breadcrumb = %q, want Setup · Quick check", got)
@@ -49,12 +50,12 @@ func TestInstallScreenUsesAdditionalInstanceLanguage(t *testing.T) {
 	instances := []config.InstanceInfo{
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
 	}
-	m := NewDashboardModelForInstall(nil, instances, "", "")
-	if m.installModel.setupMode != SetupAdditionalInstance {
-		t.Fatalf("setup mode = %d, want additional instance", m.installModel.setupMode)
+	m := NewDashboardModelForSetup(nil, instances, "", "")
+	if m.setupModel.setupMode != SetupAdditionalInstance {
+		t.Fatalf("setup mode = %d, want additional instance", m.setupModel.setupMode)
 	}
 	m.width, m.height = 100, 36
-	view := m.viewInstall()
+	view := m.viewSetup()
 
 	if !strings.Contains(view, "Setup") {
 		t.Fatalf("additional-instance title missing:\n%s", view)
@@ -69,11 +70,11 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", Engine: "podman", WebUIPort: "2337"}},
 	}
 	m := NewDashboardModelForRuntimeSetup(instances, "podman")
-	if m.installModel.setupMode != SetupRuntimeRepair {
-		t.Fatalf("setup mode = %d, want runtime repair", m.installModel.setupMode)
+	if m.setupModel.setupMode != SetupRuntimeRepair {
+		t.Fatalf("setup mode = %d, want runtime repair", m.setupModel.setupMode)
 	}
 	m.width, m.height = 100, 36
-	view := m.viewInstall()
+	view := m.viewSetup()
 
 	if !strings.Contains(view, "Setup") || strings.Contains(view, "Install new instance") {
 		t.Fatalf("runtime repair screen has the wrong header:\n%s", view)
@@ -115,7 +116,7 @@ func TestHeaderUsesPlainInstanceStatusWithoutClock(t *testing.T) {
 		t.Fatalf("dashboard header should show useful status without a clock:\n%s", header)
 	}
 
-	m.screen = ScreenInstall
+	m.screen = ScreenSetup
 	header = m.renderHeader()
 	if strings.Contains(header, "No instances yet") || strings.Contains(header, "running") {
 		t.Fatalf("setup header should stay focused on setup:\n%s", header)

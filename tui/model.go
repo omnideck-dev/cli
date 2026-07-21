@@ -2,22 +2,21 @@ package tui
 
 import tea "github.com/charmbracelet/bubbletea"
 
-// Phase represents the current wizard phase.
-type Phase int
+// SetupStage represents one valid stage of the setup workflow.
+type SetupStage int
 
 const (
-	PhasePreflight Phase = iota
-	PhaseRuntimeSetup
-	PhaseConfig
-	PhaseConfirm
-	PhaseInstall
-	PhaseDone
-	PhaseError
+	SetupStageQuickCheck SetupStage = iota
+	SetupStageRuntime
+	SetupStageSettings
+	SetupStageReview
+	SetupStageApplying
+	SetupStageComplete
+	SetupStageFailed
 )
 
 // BaseModel holds window dimensions shared across TUI models.
 type BaseModel struct {
-	Phase        Phase
 	WindowWidth  int
 	WindowHeight int
 }

@@ -1,6 +1,6 @@
 # Setup flow matrix
 
-The interactive CLI has four user journeys. They share runtime diagnosis, but
+The interactive CLI has five user journeys. They share runtime diagnosis, but
 they do not share the same destination.
 
 | Journey | Starts when | Runtime is ready | Runtime needs attention |
@@ -8,10 +8,13 @@ they do not share the same destination.
 | First setup | No Omnideck instances exist | Continue to recommended instance settings | Let the user choose Docker or Podman, guide setup, then continue |
 | Returning, working | One or more instances exist and their saved runtime is ready | Open the dashboard | Not applicable |
 | Returning, runtime broken | Instances exist but their saved runtime is not ready | Return to the dashboard | Repair only the saved shared runtime; never create an instance or switch runtimes |
+| Returning, instance broken | A saved instance exists but its container is missing | Open Doctor on the affected instance, then offer a review-first Repair that reconnects its existing volumes | Repair the shared runtime first, then recheck the instance |
 | Add instance | The user chooses **Setup** from the dashboard | Continue to a unique name, port, and saved space | Repair the saved shared runtime first, then continue |
 
 Doctor is a separate diagnostic journey. It must use the same runtime probe
 states and setup plans as Setup so it cannot give conflicting instructions.
+Update and instance Repair share the Maintenance workflow so recreate, rollback,
+retry, and data-preservation behavior cannot drift.
 
 ## Runtime setup stages
 

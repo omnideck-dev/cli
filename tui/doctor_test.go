@@ -100,7 +100,7 @@ func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
 
 func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results := runDoctorChecksWithProbes(cfg, &mockEngine{name: "docker", containerStatus: "exited"}, []engine.ProbeResult{
+	results := runDoctorChecksWithProbes(cfg, &mockEngine{name: "docker", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
 		{Name: "docker", State: engine.RuntimeReady, Version: "27.0.0"},
 	})
 	if results[0].Status != CheckPass {
@@ -112,6 +112,20 @@ func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 	}
 	if results[2].Status != CheckInfo || !strings.Contains(results[2].Detail, "until Omnideck is running") {
 		t.Fatalf("browser check should explain its dependency: %#v", results[2])
+	}
+}
+
+func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
+	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
+	results := runDoctorChecksWithProbes(cfg, &mockEngine{name: "docker"}, []engine.ProbeResult{
+		{Name: "docker", State: engine.RuntimeReady, Version: "27.0.0"},
+	})
+	instance := results[1]
+	if instance.Status != CheckFail || instance.Action != DoctorActionRepairInstance || instance.ActionLabel != "Repair this installation" {
+		t.Fatalf("missing instance result = %#v", instance)
+	}
+	if !strings.Contains(instance.Hint, "same saved data volumes") {
+		t.Fatalf("repair safety explanation = %q", instance.Hint)
 	}
 }
 
@@ -138,7 +152,7 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 	}}
 	m := NewDashboardModel(&mockEngine{name: "docker"}, instances)
 	m.screen = ScreenDoctor
-	m.doctorDone = true
+	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{{
 		Label:       "Container runtime",
 		Status:      CheckFail,
@@ -151,11 +165,11 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 
 	newModel, cmd := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
 	nm := newModel.(DashboardModel)
-	if cmd == nil || nm.screen != ScreenInstall {
+	if cmd == nil || nm.screen != ScreenSetup {
 		t.Fatal("Doctor action should open guided runtime setup")
 	}
-	if nm.installModel.setupMode != SetupRuntimeRepair || nm.installModel.preferredEngine != "docker" {
-		t.Fatalf("Doctor opened the wrong setup journey: mode=%d preferred=%q", nm.installModel.setupMode, nm.installModel.preferredEngine)
+	if nm.setupModel.setupMode != SetupRuntimeRepair || nm.setupModel.preferredEngine != "docker" {
+		t.Fatalf("Doctor opened the wrong setup journey: mode=%d preferred=%q", nm.setupModel.setupMode, nm.setupModel.preferredEngine)
 	}
 }
 
@@ -163,7 +177,7 @@ func TestDoctorDashboardPresentsActionsWithoutTruncatingTheFix(t *testing.T) {
 	m := NewDashboardModel(nil, nil)
 	m.width, m.height = 100, 36
 	m.screen = ScreenDoctor
-	m.doctorDone = true
+	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{
 		{
 			Label:       "Container runtime",
@@ -182,6 +196,37 @@ func TestDoctorDashboardPresentsActionsWithoutTruncatingTheFix(t *testing.T) {
 		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
 			t.Fatalf("Doctor view is missing %q:\n%s", want, view)
 		}
+	}
+}
+
+func TestDoctorDashboardOpensRepairReviewForMissingContainer(t *testing.T) {
+	instances := []config.InstanceInfo{{
+		Name: "omnideck",
+		Path: "/tmp/omnideck.yaml",
+		Config: &config.Config{
+			ContainerName: "omnideck",
+			WebUIPort:     "2337",
+			Image:         "example:test",
+		},
+	}}
+	m := NewDashboardModel(&mockEngine{name: "docker"}, instances)
+	m.screen = ScreenDoctor
+	m.doctorStage = doctorStageResults
+	m.doctorResults = []CheckResult{{
+		Label:       "Omnideck instance",
+		Status:      CheckFail,
+		Action:      DoctorActionRepairInstance,
+		ActionLabel: "Repair this installation",
+	}}
+	m.doctorFocus = 0
+
+	newModel, cmd := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := newModel.(DashboardModel)
+	if cmd != nil || nm.screen != ScreenMaintenance || nm.maintenanceModel.Mode != MaintenanceRepair || nm.maintenanceModel.Stage != MaintenanceStageReview {
+		t.Fatalf("repair action = screen %d mode %d stage %d cmd %v", nm.screen, nm.maintenanceModel.Mode, nm.maintenanceModel.Stage, cmd)
+	}
+	if !strings.Contains(nm.maintenanceModel.TNView(80), "same saved file and app-data volumes") {
+		t.Fatal("repair review must explain that saved data is reconnected")
 	}
 }
 

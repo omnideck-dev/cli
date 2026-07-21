@@ -31,6 +31,7 @@ const (
 	DoctorActionRuntimeSetup
 	DoctorActionStartInstance
 	DoctorActionSetupInstance
+	DoctorActionRepairInstance
 )
 
 // CheckResult is one plain-language Doctor result. Action fields are used by
@@ -186,13 +187,33 @@ func doctorRuntimeCheck(eng engine.Engine, probes []engine.ProbeResult) (CheckRe
 }
 
 func doctorContainerCheck(cfg *config.Config, eng engine.Engine) (CheckResult, bool) {
+	exists, err := eng.ContainerExists(cfg.ContainerName)
+	if err != nil {
+		return CheckResult{
+			Label:  "Omnideck instance",
+			Status: CheckFail,
+			Detail: "Omnideck could not check whether " + cfg.ContainerName + " exists",
+			Hint:   err.Error(),
+		}, false
+	}
+	if !exists {
+		return CheckResult{
+			Label:       "Omnideck instance",
+			Status:      CheckFail,
+			Detail:      "The saved instance " + cfg.ContainerName + " is missing its container",
+			Hint:        "Repair recreates the container and reconnects the same saved data volumes.",
+			Action:      DoctorActionRepairInstance,
+			ActionLabel: "Repair this installation",
+			ActionValue: cfg.ContainerName,
+		}, false
+	}
 	status, err := eng.ContainerStatus(cfg.ContainerName)
 	if err != nil {
 		return CheckResult{
 			Label:  "Omnideck instance",
 			Status: CheckFail,
-			Detail: "The saved instance " + cfg.ContainerName + " was not found",
-			Hint:   "Your saved files may still exist. No data was changed; use the details when asking for support.",
+			Detail: "The container exists, but Omnideck could not read its status",
+			Hint:   err.Error(),
 		}, false
 	}
 	if status == "running" {
@@ -327,6 +348,8 @@ func doctorActionCommand(result CheckResult) string {
 		return "run `omnideck start --name " + result.ActionValue + "`"
 	case DoctorActionSetupInstance:
 		return "run `omnideck setup`"
+	case DoctorActionRepairInstance:
+		return "run `omnideck` and choose Doctor, then Repair this installation"
 	default:
 		return ""
 	}

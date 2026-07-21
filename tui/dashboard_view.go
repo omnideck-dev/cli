@@ -41,7 +41,7 @@ func (m DashboardModel) renderHeader() string {
 	// live instance summary here would remain unknown while setup owns runtime
 	// detection, so leave the right side quiet on that screen.
 	right := ""
-	if m.screen != ScreenInstall {
+	if m.screen != ScreenSetup {
 		label, tone := summarizeInstances(m.instances)
 		dot := styles.TNFaintText.Render("●")
 		switch tone {
@@ -122,36 +122,37 @@ func (m DashboardModel) breadcrumb() string {
 			return "Instances › " + inst.Info.Name + " › Logs"
 		}
 		return "Logs"
-	case ScreenConfig:
+	case ScreenSettings:
 		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name + " › Config"
+			return "Instances › " + inst.Info.Name + " › Settings"
 		}
-		return "Config"
+		return "Settings"
 	case ScreenDoctor:
 		return "Doctor"
-	case ScreenInstall:
-		switch m.installModel.Phase {
-		case PhasePreflight:
+	case ScreenSetup:
+		switch m.setupModel.Stage {
+		case SetupStageQuickCheck:
 			return "Setup · Quick check"
-		case PhaseRuntimeSetup:
+		case SetupStageRuntime:
 			return "Setup · Container setup"
-		case PhaseConfig:
+		case SetupStageSettings:
 			return "Setup · Settings"
-		case PhaseConfirm:
+		case SetupStageReview:
 			return "Setup · Review"
-		case PhaseInstall:
+		case SetupStageApplying:
 			return "Setup · Working"
-		case PhaseDone:
+		case SetupStageComplete:
 			return "Setup · Ready"
-		case PhaseError:
+		case SetupStageFailed:
 			return "Setup · Needs attention"
 		}
 		return "Setup"
-	case ScreenUpdate:
+	case ScreenMaintenance:
+		title := m.maintenanceModel.title()
 		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name + " › Update"
+			return "Instances › " + inst.Info.Name + " › " + title
 		}
-		return "Update"
+		return title
 	}
 	return ""
 }
@@ -197,81 +198,91 @@ func (m DashboardModel) footerHints() string {
 		return keyHints([][2]string{
 			{"↑↓", "scroll"}, {"pg↑↓", "page"}, {"home/end", "top/bot"}, {"/", "search"}, {"y", "copy"}, {"r", "refresh"}, {"esc", "back"},
 		})
-	case ScreenConfig:
-		if m.cfgEditing {
+	case ScreenSettings:
+		if m.settingsStage == settingsStageApplying {
+			return keyHints([][2]string{{"working", "please wait"}})
+		}
+		if m.settingEditing {
 			return keyHints([][2]string{{"enter", "confirm"}, {"esc", "cancel"}})
 		}
 		return keyHints([][2]string{
-			{"↑↓", "move"}, {"enter", "edit"}, {"ctrl+s", "save"}, {"esc", "close"},
+			{"↑↓", "move"}, {"enter", "edit"}, {"ctrl+s", "apply"}, {"esc", "close"},
 		})
 	case ScreenDoctor:
 		hints := [][2]string{{"r", "check again"}}
-		if m.doctorDone && m.doctorFocus >= 0 && m.doctorFocus < len(m.doctorResults) {
+		if m.doctorStage == doctorStageResults && m.doctorFocus >= 0 && m.doctorFocus < len(m.doctorResults) {
 			hints = append([][2]string{{"↑↓", "choose action"}, {"enter", m.doctorResults[m.doctorFocus].ActionLabel}}, hints...)
 		}
 		return keyHints(append(hints, [2]string{"esc", "close"}))
-	case ScreenInstall:
-		switch m.installModel.Phase {
-		case PhasePreflight:
-			if m.installModel.preflightReady && m.installModel.preferredEngine == "" && (len(m.installModel.availableEngines) > 1 || m.installModel.setupAlternativeRuntime() != "") {
+	case ScreenSetup:
+		switch m.setupModel.Stage {
+		case SetupStageQuickCheck:
+			if m.setupModel.quickCheckReady && m.setupModel.preferredEngine == "" && (len(m.setupModel.availableEngines) > 1 || m.setupModel.setupAlternativeRuntime() != "") {
 				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"q", "cancel"}})
 			}
-		case PhaseRuntimeSetup:
-			if m.installModel.runtimeSetupStage == runtimeSetupWorking {
+		case SetupStageRuntime:
+			if m.setupModel.runtimeSetupStage == runtimeSetupWorking {
 				return keyHints([][2]string{{"working", "please wait"}})
 			}
-			if len(m.installModel.runtimePlans) == 0 {
+			if len(m.setupModel.runtimePlans) == 0 {
 				hints := [][2]string{{"r / enter", "check again"}}
-				if m.installModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
+				if m.setupModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 					hints = append(hints, [2]string{"b", "back"})
 				}
 				return keyHints(append(hints, [2]string{"q", "cancel"}))
 			}
-			if m.installModel.runtimeSetupStage == runtimeSetupWaiting {
+			if m.setupModel.runtimeSetupStage == runtimeSetupWaiting {
 				hints := [][2]string{{"enter", "check again"}}
-				if len(m.installModel.runtimePlans) > 0 && m.installModel.runtimePlans[m.installModel.runtimeChoice].URL != "" {
+				if len(m.setupModel.runtimePlans) > 0 && m.setupModel.runtimePlans[m.setupModel.runtimeChoice].URL != "" {
 					label := "open page again"
-					if m.installModel.runtimePlans[m.installModel.runtimeChoice].DirectDownload {
+					if m.setupModel.runtimePlans[m.setupModel.runtimeChoice].DirectDownload {
 						label = "download again"
 					}
 					hints = append(hints, [2]string{"o", label})
 				}
 				return keyHints(append(hints, [2]string{"b", "back"}, [2]string{"q", "cancel"}))
 			}
-			if m.installModel.runtimeSetupStage == runtimeSetupReview {
+			if m.setupModel.runtimeSetupStage == runtimeSetupReview {
 				action := "start these steps"
-				if len(m.installModel.runtimePlans) > 0 && len(m.installModel.runtimePlans[m.installModel.runtimeChoice].Commands) == 0 {
+				if len(m.setupModel.runtimePlans) > 0 && len(m.setupModel.runtimePlans[m.setupModel.runtimeChoice].Commands) == 0 {
 					action = "open official page"
-					if m.installModel.runtimePlans[m.installModel.runtimeChoice].DirectDownload {
+					if m.setupModel.runtimePlans[m.setupModel.runtimeChoice].DirectDownload {
 						action = "download installer"
 					}
 				}
 				return keyHints([][2]string{{"enter", action}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
 			}
 			hints := [][2]string{{"enter", "review"}, {"d", "technical details"}, {"r", "check again"}}
-			if len(m.installModel.runtimePlans) > 1 {
+			if len(m.setupModel.runtimePlans) > 1 {
 				hints = append([][2]string{{"↑↓", "choose"}}, hints...)
 			}
-			if m.installModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
+			if m.setupModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 				hints = append(hints, [2]string{"b", "back"})
 			}
 			return keyHints(append(hints, [2]string{"q", "cancel"}))
-		case PhaseConfig:
-			if !m.installModel.configAdvanced {
+		case SetupStageSettings:
+			if !m.setupModel.settingsAdvanced {
 				return keyHints([][2]string{{"enter", "use recommended"}, {"c", "customize"}, {"q", "cancel"}})
 			}
 			return keyHints([][2]string{{"tab", "next"}, {"shift+tab", "back"}, {"esc", "recommended settings"}})
-		case PhaseConfirm:
+		case SetupStageReview:
 			return keyHints([][2]string{{"enter", "start setup"}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
-		case PhaseDone:
+		case SetupStageComplete:
 			return keyHints([][2]string{{"any key", "return"}})
-		case PhaseError:
+		case SetupStageFailed:
 			return keyHints([][2]string{{"r", "try again"}, {"d", "details for support"}, {"b", "return"}})
 		}
 		return ""
-	case ScreenUpdate:
-		if m.updateModel.Phase == PhaseDone || m.updateModel.Phase == PhaseError {
+	case ScreenMaintenance:
+		switch m.maintenanceModel.Stage {
+		case MaintenanceStageReview:
+			return keyHints([][2]string{{"enter", m.maintenanceModel.actionVerb()}, {"b", "go back"}})
+		case MaintenanceStageApplying:
+			return keyHints([][2]string{{"working", "please wait"}})
+		case MaintenanceStageComplete:
 			return keyHints([][2]string{{"any key", "return"}})
+		case MaintenanceStageFailed:
+			return keyHints([][2]string{{"r", "try again"}, {"b", "return"}})
 		}
 		return ""
 	}
@@ -299,14 +310,14 @@ func (m DashboardModel) renderBody() string {
 		return m.viewDashboard()
 	case ScreenLogs:
 		return m.viewLogs()
-	case ScreenConfig:
-		return m.viewConfig()
+	case ScreenSettings:
+		return m.viewSettings()
 	case ScreenDoctor:
 		return m.viewDoctor()
-	case ScreenInstall:
-		return m.viewInstall()
-	case ScreenUpdate:
-		return m.viewUpdate()
+	case ScreenSetup:
+		return m.viewSetup()
+	case ScreenMaintenance:
+		return m.viewMaintenance()
 	}
 	return ""
 }
@@ -902,9 +913,9 @@ func (m DashboardModel) viewLogs() string {
 	return m.viewModalOverlay(modal)
 }
 
-// --- Config modal ---
+// --- Settings modal ---
 
-func (m DashboardModel) viewConfig() string {
+func (m DashboardModel) viewSettings() string {
 	inst := m.CurrentInstance()
 	h := m.contentHeight()
 	w := m.width
@@ -921,17 +932,24 @@ func (m DashboardModel) viewConfig() string {
 	if inst != nil {
 		hdrRight = styles.TNFaintText.Render(inst.Info.Name + ".yaml")
 	}
-	hdrLeft := styles.TNPurpleTxt.Render("⚙") + "  " + styles.TNTextBold.Render("Edit config")
+	hdrLeft := styles.TNPurpleTxt.Render("⚙") + "  " + styles.TNTextBold.Render("Settings")
 	hdrGap := contentW - lipgloss.Width(hdrLeft) - lipgloss.Width(hdrRight) - 2
 	if hdrGap < 1 {
 		hdrGap = 1
 	}
 	header := hdrLeft + safeRepeat(" ", hdrGap) + hdrRight
 	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
+	if m.settingsStage == settingsStageApplying {
+		message := styles.TNTextBold.Render("Applying settings") + "\n\n" +
+			styles.TNDimText.Render("Omnideck is restarting this installation with the new settings. If it cannot start, the previous settings will be restored automatically.")
+		body := header + "\n" + sep + "\n\n" + message
+		modal := styles.TNModal.Width(contentW).Padding(1, 2).Render(body)
+		return m.viewModalOverlay(modal)
+	}
 
 	var rows []string
-	for i, f := range m.cfgFields {
-		selected := i == m.cfgFocus
+	for i, f := range m.settingFields {
+		selected := i == m.settingFocus
 		keyS := styles.TNTextSub
 		if selected {
 			keyS = styles.TNBlueTxt
@@ -939,8 +957,8 @@ func (m DashboardModel) viewConfig() string {
 		typeS := styles.TNFaintText.Render(f.Type)
 
 		var valStr string
-		if selected && m.cfgEditing {
-			valStr = styles.TNText.Render(m.cfgBuf) + styles.TNBlueTxt.Render("█")
+		if selected && m.settingEditing {
+			valStr = styles.TNText.Render(m.settingBuffer) + styles.TNBlueTxt.Render("█")
 		} else {
 			valS := styles.TNTextSub
 			if f.Changed {
@@ -956,12 +974,15 @@ func (m DashboardModel) viewConfig() string {
 		if selected {
 			caret = styles.TNBlueTxt.Render("▸")
 		}
-		row := caret + " " + keyS.Render(padRight(f.Key, 16)) + typeS + "  " + valStr
+		row := caret + " " + keyS.Render(padRight(f.Label, 16)) + typeS + "  " + valStr
 		rows = append(rows, row)
 	}
 
 	legend := styles.TNGreenTxt.Render("●") + styles.TNFaintText.Render(" changed since last save")
-	keyhints := styles.TNFaintText.Render("ctrl+s") + styles.TNDimText.Render("  save    ") +
+	if m.settingsMessage != "" {
+		legend = styles.TNRedTxt.Render(m.settingsMessage) + "\n" + legend
+	}
+	keyhints := styles.TNFaintText.Render("ctrl+s") + styles.TNDimText.Render("  apply    ") +
 		styles.TNFaintText.Render("esc") + styles.TNDimText.Render("  close")
 	body := header + "\n" + sep + "\n" + strings.Join(rows, "\n") + "\n" + sep + "\n" + legend + "\n" + keyhints
 	modal := styles.TNModal.Width(contentW).Padding(1, 2).Render(body)
@@ -986,7 +1007,7 @@ func (m DashboardModel) viewDoctor() string {
 	sep := styles.TNFaintText.Render(strings.Repeat("─", innerW))
 
 	var bodyLines []string
-	if !m.doctorDone {
+	if m.doctorStage != doctorStageResults {
 		message := "Checking Omnideck…"
 		if m.doctorMessage != "" {
 			message = m.doctorMessage
@@ -1067,9 +1088,9 @@ func (m DashboardModel) viewDoctor() string {
 	return m.viewModalOverlay(modal)
 }
 
-// --- Install screen (modal) ---
+// --- Setup screen (modal) ---
 
-func (m DashboardModel) viewInstall() string {
+func (m DashboardModel) viewSetup() string {
 	h := m.contentHeight()
 	w := m.width
 
@@ -1089,14 +1110,14 @@ func (m DashboardModel) viewInstall() string {
 	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
 
 	innerW := contentW - 4
-	content := titleRow + "\n" + sep + "\n" + m.installModel.TNView(innerW, modalH-4)
+	content := titleRow + "\n" + sep + "\n" + m.setupModel.TNView(innerW, modalH-4)
 	modal := styles.TNModal.Width(contentW).Height(modalH).Render(content)
 	return m.viewModalOverlay(modal)
 }
 
 // --- Update screen (modal) ---
 
-func (m DashboardModel) viewUpdate() string {
+func (m DashboardModel) viewMaintenance() string {
 	inst := m.CurrentInstance()
 	h := m.contentHeight()
 	w := m.width
@@ -1117,12 +1138,12 @@ func (m DashboardModel) viewUpdate() string {
 	if inst != nil {
 		instName = inst.Info.Name
 	}
-	title := styles.TNBlueTxt.Render("◆") + "  " + styles.TNTextBold.Render("Update") + "  " + styles.TNFaintText.Render(instName)
+	title := styles.TNBlueTxt.Render("◆") + "  " + styles.TNTextBold.Render(m.maintenanceModel.title()) + "  " + styles.TNFaintText.Render(instName)
 	hint := styles.TNFaintText.Render("press ") + styles.TNKeyChip.Render("any key") + styles.TNFaintText.Render(" when done")
 	gap := contentW - lipgloss.Width(title) - lipgloss.Width(hint) - 2
 	titleRow := title + safeRepeat(" ", max(1, gap)) + hint
 
-	updateContent := titleRow + "\n" + m.updateModel.TNView(contentW-4)
+	updateContent := titleRow + "\n" + m.maintenanceModel.TNView(contentW-4)
 	modal := styles.TNModal.Width(contentW).Height(modalH).Render(updateContent)
 	return m.viewModalOverlay(modal)
 }

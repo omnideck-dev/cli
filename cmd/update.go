@@ -11,7 +11,7 @@ import (
 
 var updateCmd = &cobra.Command{
 	Use:   "update",
-	Short: "Pull the latest image and recreate the container",
+	Short: "Update Omnideck while keeping its saved data",
 	RunE:  runUpdate,
 }
 
@@ -25,21 +25,16 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	}
 	cfg := LoadedConfig
 
-	// Migrate configs that still point at a superseded image so update pulls
-	// and recreates with the current default. Persist before recreating so the
-	// stored config matches the container we're about to run.
-	if cfg.MigrateImage() {
-		if err := config.Save(ConfigPath, cfg); err != nil {
-			return fmt.Errorf("saving migrated config: %w", err)
-		}
-	}
-
 	eng, err := engineFromConfig(cfg.Engine)
 	if err != nil {
 		return err
 	}
 
-	instances, _ := config.ListInstances()
+	instances, err := config.ListInstances()
+	if err != nil {
+		return fmt.Errorf("reading saved Omnideck installations: %w", err)
+	}
+	instances = withLoadedInstance(instances, cfg, ConfigPath)
 	selectedIdx := 0
 	for i, inst := range instances {
 		if inst.Config != nil && inst.Config.ContainerName == cfg.ContainerName {

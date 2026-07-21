@@ -8,9 +8,12 @@
 
 See `SPEC.md` for the complete product specification.
 
-## Build Plan
+## Architecture
 
-See `PHASES.md` for the ordered, phase-by-phase build plan. Always check which phase is current before adding new code.
+See `docs/architecture.md` for the current request flow, workflow state
+machines, lifecycle rules, and persistence transaction boundaries. `SPEC.md`
+and `PHASES.md` are historical product/build references; the architecture guide
+and current tests describe how new code should be structured.
 
 ---
 
@@ -21,7 +24,8 @@ omnideck-cli/
 ├── main.go                  # Entry point — calls cmd.Execute()
 ├── cmd/
 │   ├── root.go              # Cobra root, global flags, PersistentPreRun config loader
-│   ├── install.go
+│   ├── setup.go
+│   ├── list.go
 │   ├── update.go
 │   ├── start.go
 │   ├── stop.go
@@ -32,14 +36,20 @@ omnideck-cli/
 │   ├── config.go
 │   └── uninstall.go
 ├── tui/
-│   ├── model.go             # Shared tea.Model, phase enum, Update dispatch
-│   ├── install.go           # Install wizard phases
-│   ├── doctor.go            # Doctor report view
+│   ├── dashboard.go         # Single interactive shell and top-level screens
+│   ├── setup.go             # First-use, additional-instance, and runtime setup
+│   ├── maintenance.go       # Review-first update and repair workflow
+│   ├── doctor.go            # Diagnosis and guided repair actions
 │   └── spinner.go           # Spinner + fading message component
+├── workflow/
+│   ├── container.go         # Idempotent lifecycle and transactional recreate
+│   ├── instances.go         # Unique new-instance defaults
+│   └── settings.go          # Shared settings validation/mutation
 ├── engine/
 │   ├── engine.go            # Engine interface
 │   ├── docker.go            # Docker shell-out implementation
-│   └── podman.go            # Podman shell-out implementation
+│   ├── podman.go            # Podman shell-out implementation
+│   └── setup.go             # Platform-specific runtime detection/setup plans
 ├── checks/
 │   ├── ollama.go            # TCP dial check, OS-aware host
 │   └── memory.go            # Linux: /proc/meminfo  Mac: sysctl
@@ -59,8 +69,7 @@ omnideck-cli/
 - **Config directory:** OS-native user config directory under `omnideck-cli`
 - **Container image:** `ghcr.io/omnideck-dev/omnideck:main`
 - **Default container name:** `omnideck`
-- **Default shared dir:** `~/Omnideck`
-- **Default state dir:** `~/Omnideck/state`
+- **Default data volumes:** `{container-name}-home` and `{container-name}-state`
 
 ---
 
@@ -74,63 +83,65 @@ github.com/charmbracelet/lipgloss
 gopkg.in/yaml.v3
 ```
 
-No Docker SDK — shell out only for Phase 1. Keep external deps minimal.
+No Docker SDK—the engine adapters intentionally shell out to the installed CLI.
+Keep external dependencies minimal.
 
 ---
 
 ## Platform Rules (Critical)
 
-These differences MUST be respected in all generated code:
+Runtime command construction is covered by cross-platform tests in `engine/`.
+Current important differences include:
 
-| Concern              | Linux                        | macOS                                  |
-|----------------------|------------------------------|----------------------------------------|
-| Volume SELinux flag  | Append `:Z` to volume mounts | Omit `:Z` — it breaks on Mac           |
-| Ollama host          | `127.0.0.1:11434`            | `host.docker.internal:11434`           |
-| Network mode         | `--network host`             | `--network host` (warn user — limited) |
-| Memory check         | `/proc/meminfo`              | `sysctl hw.memsize` + `vm_stat`        |
+- Docker on Linux maps `host-gateway`; Docker Desktop uses
+  `host.docker.internal`.
+- Podman uses its runtime-specific host alias, with a macOS override.
+- Runtime installation and recovery plans differ across Linux distributions,
+  macOS architectures, Windows, and WSL.
+- Host memory detection uses an OS-specific implementation.
 
-Use `runtime.GOOS` to branch. Never hardcode Linux-only flags without a platform guard.
+Use the platform passed through `engine.RunOptions` or `HostPlatform`; never
+hardcode a Linux-only command or flag in user-facing workflow code.
 
 ---
 
 ## Engine Interface
 
-All Docker/Podman operations go through the `engine.Engine` interface. No command should call `exec.Command("docker", ...)` directly — always go through the interface. This makes future SDK swaps or testing easier.
+All Docker/Podman operations go through the `engine.Engine` interface. No
+command should call `exec.Command("docker", ...)` directly. User-facing
+commands and screens should normally call `workflow/` operations rather than
+interpreting raw engine errors or rebuilding `engine.RunOptions` themselves.
 
-```go
-type Engine interface {
-    Name() string
-    IsAvailable() bool
-    HasPermission() bool
-    ContainerExists(name string) (bool, error)
-    PullImage(image string, msgs chan<- string) error
-    RunContainer(opts RunOptions) error
-    StopContainer(name string) error
-    StartContainer(name string) error
-    RemoveContainer(name string) error
-    ContainerStatus(name string) (string, error)
-    TailLogs(name string, follow bool) error
-}
-```
+The complete adapter contract lives in `engine/engine.go`. Shared workflows
+define narrower interfaces containing only the engine operations they need,
+which keeps tests small and prevents accidental coupling.
 
 ---
 
-## TUI Conventions
+## TUI and Workflow Conventions
 
 - All TUI programs use `tea.NewProgram(model, tea.WithAltScreen())`
-- The install/update phases use a **spinner + fading messages** pattern (see `tui/spinner.go`)
+- The dashboard is the one interactive shell for returning users; do not add a second launcher with duplicate actions
+- Setup, runtime setup, settings, Doctor, and Maintenance have separate typed states; do not add a shared phase enum
+- Constructors receive `SetupRequest` or `MaintenanceRequest`; callers should not construct a model and mutate it into another journey
+- Setup and Maintenance use a **spinner + fading messages** pattern (see `tui/spinner.go`)
   - Active step: full brightness text
   - Completed steps: dimmed with a `✓` prefix
   - Failed steps: error color with a `✗` prefix
 - Long-running steps (image pull) cycle flavor messages every ~2s via `tea.Tick`
-- `doctor` uses a parallel-check pattern, not a sequential wizard
+- Doctor uses a parallel-check pattern and routes repairs through shared workflows
 - Never block the Bubble Tea event loop — all I/O runs in `tea.Cmd` goroutines
 
 ---
 
 ## Config Load/Save
 
-`config.Config` is loaded in `cmd/root.go`'s `PersistentPreRun`. Commands that require an installed instance (`start`, `stop`, `status`, etc.) should fail fast with a helpful message if config is not found.
+`config.Config` is loaded in `cmd/root.go`'s `PersistentPreRun`. Commands that
+require an installed instance (`start`, `stop`, `status`, etc.) use
+`requireConfigMulti`: one instance is selected automatically, multiple
+instances use an interactive picker, and non-interactive calls require
+`--name`. The shared Docker/Podman choice lives in `settings.yaml`, not in each
+new instance file.
 
 ```go
 type Config struct {
@@ -140,7 +151,7 @@ type Config struct {
     Memory        string    `yaml:"memory"`
     ShmSize       string    `yaml:"shm_size"`
     WebUIPort     string    `yaml:"web_ui_port"`
-    Engine        string    `yaml:"engine"`   // "docker" or "podman"
+    Engine        string    `yaml:"engine"`   // legacy migration field only
     Image         string    `yaml:"image"`
     InstalledAt   time.Time `yaml:"installed_at"`
 }
@@ -155,10 +166,13 @@ and `{ContainerName}-state`.
 ## Error Handling Style
 
 - Surface actionable errors: tell the user *what to do*, not just what went wrong
-- Example: permission denied on Docker → print `sudo usermod -aG docker $USER`
-- Example: Ollama not found → print install URL, don't abort install
+- Use plain language in user-facing copy; do not assume terms such as "elevate"
+- Explain that Omnideck runs as a container and that it keeps the agent and its software isolated
+- Ollama is optional; report it neutrally and do not abort setup
 - In TUI context, errors render in the error style from `styles.go` inside the existing view — don't call `os.Exit` mid-render
 - After TUI exits, non-zero exit codes for actual failures
+- Lifecycle changes must be idempotent and shared through `workflow/`
+- Recreate/save flows must keep runtime and YAML state aligned and attempt rollback on failure
 
 ---
 

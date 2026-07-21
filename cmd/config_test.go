@@ -3,8 +3,8 @@ package cmd
 import "testing"
 
 func TestIsValidConfigKey(t *testing.T) {
-	valid := []string{"home_volume", "state_volume", "shm_size"}
-	invalid := []string{"container_name", "engine", "image", "installed_at", "foo", ""}
+	valid := []string{"home_volume", "state_volume", "memory", "shm_size", "web_ui_port", "image"}
+	invalid := []string{"container_name", "engine", "installed_at", "foo", ""}
 
 	for _, k := range valid {
 		if !isValidConfigKey(k) {

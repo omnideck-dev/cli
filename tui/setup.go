@@ -17,9 +17,10 @@ import (
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
-// --- Preflight result messages ---
+// --- QuickCheck result messages ---
 
 type engineCheckResult struct {
 	eng    engine.Engine
@@ -42,7 +43,7 @@ type memoryCheckResult struct {
 	warning string
 }
 
-type allPreflightDone struct{}
+type allQuickCheckDone struct{}
 
 // SetupMode names the user journey that owns this state machine. Keeping the
 // mode explicit prevents runtime recovery from accidentally continuing into
@@ -71,30 +72,31 @@ const (
 	runtimeSetupWaiting
 )
 
-// --- Install model ---
+// --- Setup model ---
 
-// InstallModel is the top-level Bubble Tea model for the install wizard.
-type InstallModel struct {
+// SetupModel is the top-level Bubble Tea model for setup.
+type SetupModel struct {
 	BaseModel
+	Stage SetupStage
 
 	// Embedded, when true, means this model runs inside DashboardModel.
-	// On done/error it emits WizardExitMsg instead of tea.Quit.
+	// On completion or failure it emits WorkflowExitMsg instead of tea.Quit.
 	Embedded  bool
 	setupMode SetupMode
 
-	// Preflight state.
-	eng                  engine.Engine
-	engErr               error
-	availableEngines     []engine.Engine // all detected engines (for switching)
-	preflightReady       bool            // true when checks pass and user must confirm engine
-	preflightAlternative string          // missing runtime explicitly selected during first setup
-	permChecking         bool            // true while re-checking permission after engine switch
-	permErr              error
-	ollamaOK             bool
-	ollamaHost           string
-	memMB                int64
-	memWarning           string
-	preflightDone        int // count of completed checks
+	// QuickCheck state.
+	eng                   engine.Engine
+	engErr                error
+	availableEngines      []engine.Engine // all detected engines (for switching)
+	quickCheckReady       bool            // true when checks pass and user must confirm engine
+	quickCheckAlternative string          // missing runtime explicitly selected during first setup
+	permChecking          bool            // true while re-checking permission after engine switch
+	permErr               error
+	ollamaOK              bool
+	ollamaHost            string
+	memMB                 int64
+	memWarning            string
+	quickCheckDone        int // count of completed checks
 
 	// Runtime setup state.
 	runtimeProbes       []engine.ProbeResult
@@ -109,19 +111,18 @@ type InstallModel struct {
 	runtimeSetupEntry   runtimeSetupEntry
 	hostPlatform        engine.HostPlatform
 
-	// Config inputs.
-	inputs         []textinput.Model
-	inputFocus     int
-	inputErrs      []string
-	configAdvanced bool
+	// Settings inputs.
+	inputs           []textinput.Model
+	inputFocus       int
+	inputErrs        []string
+	settingsAdvanced bool
 
-	// Confirm.
-	confirmWarnings    []string
-	confirmShowDetails bool
+	// Review.
+	reviewWarnings    []string
+	reviewShowDetails bool
 
-	// Install.
+	// Apply setup.
 	spinnerModel      SpinnerModel
-	installErr        error
 	lastCompletedStep int             // -1 = none; used for rollback on failure
 	existingNames     map[string]bool // container names already in use (cached at init)
 	existingPorts     map[string]bool // browser ports already reserved by Omnideck
@@ -129,16 +130,12 @@ type InstallModel struct {
 	// Image override (from --image flag, not shown in TUI).
 	imageOverride string
 
-	// Done.
-	configPath string
-	savedCfg   *config.Config
-
-	// Error.
+	// Failure.
 	errorMsg         string
 	errorDetail      string
 	errorShowDetails bool
 
-	preflightSpinner spinner.Model
+	quickCheckSpinner spinner.Model
 }
 
 const (
@@ -149,12 +146,24 @@ const (
 	inputCount
 )
 
-// NewInstallModel creates and initialises the install wizard model.
-// If initial is non-nil its values are used instead of DefaultConfig().
-// imageOverride, if non-empty, replaces the default container image (not shown in TUI).
-func NewInstallModel(configPath string, initial *config.Config, imageOverride string) InstallModel {
+// SetupRequest contains every input needed to create a setup workflow. Keeping
+// mode and runtime selection here prevents callers from constructing the model
+// and then mutating it into a different journey.
+type SetupRequest struct {
+	Initial           *config.Config
+	ImageOverride     string
+	ExistingInstances []config.InstanceInfo
+	Mode              SetupMode
+	PreferredEngine   string
+	Embedded          bool
+	WindowWidth       int
+	WindowHeight      int
+}
+
+// NewSetupModel creates and initializes the requested setup workflow.
+func NewSetupModel(req SetupRequest) SetupModel {
 	inputs := make([]textinput.Model, inputCount)
-	defaults := initial
+	defaults := req.Initial
 	if defaults == nil {
 		defaults = config.DefaultConfig()
 	}
@@ -195,65 +204,65 @@ func NewInstallModel(configPath string, initial *config.Config, imageOverride st
 	// Cache existing container names to avoid blocking I/O during Update.
 	existingNames := map[string]bool{}
 	existingPorts := map[string]bool{}
-	if instances, err := config.ListInstances(); err == nil {
-		for _, inst := range instances {
-			if inst.Config != nil {
-				existingNames[inst.Config.ContainerName] = true
-				existingPorts[inst.Config.WebUIPortOrDefault()] = true
-			}
+	for _, inst := range req.ExistingInstances {
+		if inst.Config != nil {
+			existingNames[inst.Config.ContainerName] = true
+			existingPorts[inst.Config.WebUIPortOrDefault()] = true
 		}
 	}
 
-	setupMode := SetupFirstRun
-	if len(existingNames) > 0 {
+	setupMode := req.Mode
+	if setupMode == SetupFirstRun && len(existingNames) > 0 {
 		setupMode = SetupAdditionalInstance
 	}
 
-	return InstallModel{
-		BaseModel:         BaseModel{Phase: PhasePreflight},
+	return SetupModel{
+		Stage:             SetupStageQuickCheck,
+		Embedded:          req.Embedded,
 		setupMode:         setupMode,
 		inputs:            inputs,
 		inputErrs:         make([]string, inputCount),
-		preflightSpinner:  sp,
-		configPath:        configPath,
+		quickCheckSpinner: sp,
 		lastCompletedStep: -1,
 		existingNames:     existingNames,
 		existingPorts:     existingPorts,
-		imageOverride:     imageOverride,
+		imageOverride:     req.ImageOverride,
+		preferredEngine:   req.PreferredEngine,
 		hostPlatform:      engine.DetectHostPlatform(),
+		BaseModel:         BaseModel{WindowWidth: req.WindowWidth, WindowHeight: req.WindowHeight},
 	}
 }
 
-func (m InstallModel) Init() tea.Cmd {
+func (m SetupModel) Init() tea.Cmd {
 	return tea.Batch(
-		m.preflightSpinner.Tick,
+		m.quickCheckSpinner.Tick,
 		runEngineCheckFor(m.preferredEngine),
 		runOllamaCheck,
 		runMemoryCheck,
 	)
 }
 
-func (m InstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch m.Phase {
-	case PhasePreflight:
-		return m.updatePreflight(msg)
-	case PhaseRuntimeSetup:
+func (m SetupModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch m.Stage {
+	case SetupStageQuickCheck:
+		return m.updateQuickCheck(msg)
+	case SetupStageRuntime:
 		return m.updateRuntimeSetup(msg)
-	case PhaseConfig:
-		return m.updateConfig(msg)
-	case PhaseConfirm:
-		return m.updateConfirm(msg)
-	case PhaseInstall:
-		return m.updateInstall(msg)
-	case PhaseDone:
+	case SetupStageSettings:
+		return m.updateSettings(msg)
+	case SetupStageReview:
+		return m.updateReview(msg)
+	case SetupStageApplying:
+		return m.updateApplying(msg)
+	case SetupStageComplete:
 		if isKeyMsg(msg) {
 			if m.Embedded {
-				return m, func() tea.Msg { return WizardExitMsg{} }
+				return m, func() tea.Msg { return WorkflowExitMsg{} }
 			}
 			return m, tea.Quit
 		}
-	case PhaseError:
-		return m.updateError(msg)
+	case SetupStageFailed:
+		return m.updateFailed(msg)
 	}
 	if msg, ok := msg.(tea.WindowSizeMsg); ok {
 		m.HandleWindowSize(msg)
@@ -261,17 +270,17 @@ func (m InstallModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
-		m.preflightSpinner, cmd = m.preflightSpinner.Update(msg)
+		m.quickCheckSpinner, cmd = m.quickCheckSpinner.Update(msg)
 		return m, cmd
 
 	case tea.KeyMsg:
-		if !m.preflightReady || m.permChecking {
+		if !m.quickCheckReady || m.permChecking {
 			if msg.Type == tea.KeyCtrlC {
 				return m, tea.Quit
 			}
@@ -281,8 +290,8 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc", "q":
 			return m, tea.Quit
 		case "enter", " ":
-			if m.preflightAlternative != "" {
-				m.preferredEngine = m.preflightAlternative
+			if m.quickCheckAlternative != "" {
+				m.preferredEngine = m.quickCheckAlternative
 				m.runtimeSetupEntry = runtimeSetupFromFirstRunChoice
 				m.configureRuntimeSetup()
 				return m, nil
@@ -293,10 +302,10 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.afterRuntimeReady()
 		case "tab", "s":
 			if alternative := m.setupAlternativeRuntime(); alternative != "" {
-				if m.preflightAlternative == alternative {
-					m.preflightAlternative = ""
+				if m.quickCheckAlternative == alternative {
+					m.quickCheckAlternative = ""
 				} else {
-					m.preflightAlternative = alternative
+					m.quickCheckAlternative = alternative
 				}
 				return m, nil
 			}
@@ -315,44 +324,44 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case engineCheckResult:
-		m.preflightDone++
+		m.quickCheckDone++
 		m.eng = msg.eng
 		m.engErr = msg.err
 		m.availableEngines = msg.all
 		m.runtimeProbes = msg.probes
-		m.preflightAlternative = ""
+		m.quickCheckAlternative = ""
 		// Run permission check only after engine is known.
 		if msg.eng != nil {
 			return m, runPermissionCheck(msg.eng)
 		}
 		// Engine not found — permission check will never fire; count it as done.
-		m.preflightDone++
-		return m, m.maybeAdvancePreflight()
+		m.quickCheckDone++
+		return m, m.maybeAdvanceQuickCheck()
 
 	case permissionCheckResult:
-		if m.preflightReady {
+		if m.quickCheckReady {
 			// Engine was switched — update result without touching the counter.
 			m.permChecking = false
 			m.permErr = msg.err
 			return m, nil
 		}
-		m.preflightDone++
+		m.quickCheckDone++
 		m.permErr = msg.err
-		return m, m.maybeAdvancePreflight()
+		return m, m.maybeAdvanceQuickCheck()
 
 	case ollamaCheckResult:
-		m.preflightDone++
+		m.quickCheckDone++
 		m.ollamaOK = msg.reachable
 		m.ollamaHost = msg.host
-		return m, m.maybeAdvancePreflight()
+		return m, m.maybeAdvanceQuickCheck()
 
 	case memoryCheckResult:
-		m.preflightDone++
+		m.quickCheckDone++
 		m.memMB = msg.mb
 		m.memWarning = msg.warning
-		return m, m.maybeAdvancePreflight()
+		return m, m.maybeAdvanceQuickCheck()
 
-	case allPreflightDone:
+	case allQuickCheckDone:
 		if m.engErr != nil {
 			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
@@ -373,7 +382,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// On a fresh setup, pause whenever there is a meaningful runtime
 		// choice—even if one option is ready and the other still needs setup.
 		if m.preferredEngine == "" && (len(m.availableEngines) > 1 || m.setupAlternativeRuntime() != "") {
-			m.preflightReady = true
+			m.quickCheckReady = true
 			return m, nil
 		}
 		return m.afterRuntimeReady()
@@ -384,7 +393,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 // setupAlternativeRuntime returns a runtime that is not ready yet but can be
 // explicitly chosen during a fresh setup. Existing instances stay on their one
 // shared runtime so their containers and volumes are never silently stranded.
-func (m InstallModel) setupAlternativeRuntime() string {
+func (m SetupModel) setupAlternativeRuntime() string {
 	if m.setupMode != SetupFirstRun || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
 		return ""
 	}
@@ -396,8 +405,8 @@ func (m InstallModel) setupAlternativeRuntime() string {
 	return ""
 }
 
-func (m *InstallModel) configureRuntimeSetup() {
-	m.Phase = PhaseRuntimeSetup
+func (m *SetupModel) configureRuntimeSetup() {
+	m.Stage = SetupStageRuntime
 	m.runtimeSetupStage = runtimeSetupChoose
 	m.runtimeShowDetails = false
 	m.runtimeLastError = ""
@@ -426,18 +435,18 @@ func (m *InstallModel) configureRuntimeSetup() {
 	}
 }
 
-func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
 	case spinner.TickMsg:
 		var cmd tea.Cmd
-		m.preflightSpinner, cmd = m.preflightSpinner.Update(msg)
+		m.quickCheckSpinner, cmd = m.quickCheckSpinner.Update(msg)
 		return m, cmd
 	case tea.KeyMsg:
 		if msg.String() == "ctrl+c" || msg.String() == "q" {
 			if m.Embedded {
-				return m, func() tea.Msg { return WizardExitMsg{} }
+				return m, func() tea.Msg { return WorkflowExitMsg{} }
 			}
 			return m, tea.Quit
 		}
@@ -454,9 +463,9 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 					m.runtimeSetupEntry = runtimeSetupFromCheck
 					m.preferredEngine = ""
-					m.preflightAlternative = ""
-					m.Phase = PhasePreflight
-					m.preflightReady = true
+					m.quickCheckAlternative = ""
+					m.Stage = SetupStageQuickCheck
+					m.quickCheckReady = true
 					m.runtimeMessage = ""
 				}
 			}
@@ -469,7 +478,7 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 			if m.Embedded {
-				return m, func() tea.Msg { return WizardExitMsg{} }
+				return m, func() tea.Msg { return WorkflowExitMsg{} }
 			}
 			return m, tea.Quit
 		}
@@ -528,9 +537,9 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 				m.runtimeSetupEntry = runtimeSetupFromCheck
 				m.preferredEngine = ""
-				m.preflightAlternative = ""
-				m.Phase = PhasePreflight
-				m.preflightReady = true
+				m.quickCheckAlternative = ""
+				m.Stage = SetupStageQuickCheck
+				m.quickCheckReady = true
 				m.runtimeMessage = ""
 				m.runtimeLastError = ""
 			}
@@ -629,33 +638,33 @@ func runtimeNotReadyMessage(plans []engine.SetupPlan, preferred string) string {
 	}
 }
 
-func (m InstallModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
+func (m SetupModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
 	if m.setupMode == SetupRuntimeRepair {
 		if m.eng == nil {
-			m.Phase = PhaseError
+			m.Stage = SetupStageFailed
 			m.errorMsg = "Omnideck could not find a ready container runtime"
 			return m, nil
 		}
 		if err := config.SaveRuntime(m.eng.Name()); err != nil {
-			m.Phase = PhaseError
+			m.Stage = SetupStageFailed
 			m.errorMsg = "Omnideck could not remember the container runtime"
 			m.errorDetail = err.Error()
 			return m, nil
 		}
 		if m.Embedded {
-			return m, func() tea.Msg { return WizardExitMsg{} }
+			return m, func() tea.Msg { return WorkflowExitMsg{} }
 		}
 		return m, tea.Quit
 	}
 	m.ensureRecommendedSettingsAvailable()
-	m.Phase = PhaseConfig
+	m.Stage = SetupStageSettings
 	return m, nil
 }
 
 // ensureRecommendedSettingsAvailable quietly advances default names and ports
 // when another container or app already uses the first suggestion. The user
 // still sees and confirms the final values before setup starts.
-func (m *InstallModel) ensureRecommendedSettingsAvailable() {
+func (m *SetupModel) ensureRecommendedSettingsAvailable() {
 	if m.eng != nil {
 		candidate := strings.TrimSpace(m.inputs[inputContainerName].Value())
 		exists, err := m.eng.ContainerExists(candidate)
@@ -691,40 +700,40 @@ func execRuntimeCommand(command engine.SetupCommand) tea.Cmd {
 	})
 }
 
-// maybeAdvancePreflight returns a Cmd that fires allPreflightDone once all
+// maybeAdvanceQuickCheck returns a Cmd that fires allQuickCheckDone once all
 // 4 checks (engine, permission counted together, ollama, memory) are done.
 // Engine check fires permission check as a follow-up, so we wait for 4 total.
-func (m *InstallModel) maybeAdvancePreflight() tea.Cmd {
+func (m *SetupModel) maybeAdvanceQuickCheck() tea.Cmd {
 	// We expect: engine(1) + permission(1) + ollama(1) + memory(1) = 4
-	if m.preflightDone >= 4 {
-		return func() tea.Msg { return allPreflightDone{} }
+	if m.quickCheckDone >= 4 {
+		return func() tea.Msg { return allQuickCheckDone{} }
 	}
 	return nil
 }
 
-func (m InstallModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SetupModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
 	case tea.KeyMsg:
-		if !m.configAdvanced {
+		if !m.settingsAdvanced {
 			switch msg.String() {
 			case "q", "ctrl+c", "esc":
 				return m, tea.Quit
 			case "enter", " ":
 				if m.validateAllInputs() {
-					m.Phase = PhaseConfirm
-					m.confirmShowDetails = false
-					m.buildConfirmWarnings()
+					m.Stage = SetupStageReview
+					m.reviewShowDetails = false
+					m.buildReviewWarnings()
 				} else {
-					m.configAdvanced = true
+					m.settingsAdvanced = true
 					for i := range m.inputs {
 						m.inputs[i].Blur()
 					}
 					m.inputs[m.inputFocus].Focus()
 				}
 			case "c":
-				m.configAdvanced = true
+				m.settingsAdvanced = true
 				m.inputFocus = 0
 				m.inputs[m.inputFocus].Focus()
 			}
@@ -735,7 +744,7 @@ func (m InstallModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case tea.KeyEsc:
 			m.inputs[m.inputFocus].Blur()
-			m.configAdvanced = false
+			m.settingsAdvanced = false
 			return m, nil
 		case tea.KeyTab, tea.KeyEnter:
 			if m.validateCurrentInput() {
@@ -743,8 +752,8 @@ func (m InstallModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputFocus++
 				if m.inputFocus >= inputCount {
 					m.inputFocus = inputCount - 1
-					m.Phase = PhaseConfirm
-					m.buildConfirmWarnings()
+					m.Stage = SetupStageReview
+					m.buildReviewWarnings()
 					return m, nil
 				}
 				m.inputs[m.inputFocus].Focus()
@@ -764,7 +773,7 @@ func (m InstallModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m *InstallModel) validateCurrentInput() bool {
+func (m *SetupModel) validateCurrentInput() bool {
 	val := strings.TrimSpace(m.inputs[m.inputFocus].Value())
 	if val == "" {
 		m.inputErrs[m.inputFocus] = "cannot be empty"
@@ -814,7 +823,7 @@ func (m *InstallModel) validateCurrentInput() bool {
 	return true
 }
 
-func (m *InstallModel) validateAllInputs() bool {
+func (m *SetupModel) validateAllInputs() bool {
 	originalFocus := m.inputFocus
 	for i := range m.inputs {
 		m.inputFocus = i
@@ -850,25 +859,25 @@ func validPort(s string) bool {
 	return checks.ValidPort(s)
 }
 
-func (m *InstallModel) buildConfirmWarnings() {
-	m.confirmWarnings = nil
+func (m *SetupModel) buildReviewWarnings() {
+	m.reviewWarnings = nil
 	if !m.ollamaOK {
-		m.confirmWarnings = append(m.confirmWarnings,
+		m.reviewWarnings = append(m.reviewWarnings,
 			"Optional local AI was not found. That is okay—you can use online AI services now and add Ollama later.")
 	}
 	if m.memWarning != "" {
-		m.confirmWarnings = append(m.confirmWarnings, m.memWarning)
+		m.reviewWarnings = append(m.reviewWarnings, m.memWarning)
 	}
 	if m.eng != nil {
 		for _, probe := range m.runtimeProbes {
 			if probe.Name == m.eng.Name() && probe.Warning != "" {
-				m.confirmWarnings = append(m.confirmWarnings, probe.Warning)
+				m.reviewWarnings = append(m.reviewWarnings, probe.Warning)
 			}
 		}
 	}
 }
 
-func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SetupModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
@@ -877,35 +886,35 @@ func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "b":
-			m.Phase = PhaseConfig
-			m.configAdvanced = false
-			m.confirmShowDetails = false
+			m.Stage = SetupStageSettings
+			m.settingsAdvanced = false
+			m.reviewShowDetails = false
 			return m, nil
 		case "d":
-			m.confirmShowDetails = !m.confirmShowDetails
+			m.reviewShowDetails = !m.reviewShowDetails
 		case "i", "enter", " ":
 			if !m.validateAllInputs() {
-				m.Phase = PhaseConfig
-				m.configAdvanced = true
+				m.Stage = SetupStageSettings
+				m.settingsAdvanced = true
 				for i := range m.inputs {
 					m.inputs[i].Blur()
 				}
 				m.inputs[m.inputFocus].Focus()
 				return m, nil
 			}
-			m.Phase = PhaseInstall
+			m.Stage = SetupStageApplying
 			m.lastCompletedStep = -1
 			m.errorMsg = ""
 			m.errorDetail = ""
 			m.errorShowDetails = false
-			m.spinnerModel = NewSpinnerModel(installStepLabels, defaultFlavorMessages)
-			return m, tea.Batch(m.spinnerModel.Init(), m.startInstallStep(0))
+			m.spinnerModel = NewSpinnerModel(setupStepLabels, defaultFlavorMessages)
+			return m, tea.Batch(m.spinnerModel.Init(), m.startSetupStep(0))
 		}
 	}
 	return m, nil
 }
 
-var installStepLabels = []string{
+var setupStepLabels = []string{
 	"Check that the name and browser address are available",
 	"Prepare space for your files",
 	"Prepare space for Omnideck data",
@@ -914,7 +923,7 @@ var installStepLabels = []string{
 	"Remember these settings",
 }
 
-func (m InstallModel) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
@@ -924,23 +933,23 @@ func (m InstallModel) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.spinnerModel, cmd = m.spinnerModel.Update(msg)
 		next := msg.Index + 1
-		if next < len(installStepLabels) {
-			return m, tea.Batch(cmd, m.startInstallStep(next))
+		if next < len(setupStepLabels) {
+			return m, tea.Batch(cmd, m.startSetupStep(next))
 		}
 		// All steps done.
-		m.Phase = PhaseDone
+		m.Stage = SetupStageComplete
 		return m, cmd
 
 	case StepFailedMsg:
 		var cmd tea.Cmd
 		m.spinnerModel, cmd = m.spinnerModel.Update(msg)
-		m.Phase = PhaseError
-		m.errorMsg = installStepLabels[msg.Index]
+		m.Stage = SetupStageFailed
+		m.errorMsg = setupStepLabels[msg.Index]
 		m.errorDetail = msg.Err.Error()
 		m.errorShowDetails = false
 		if msg.Index == 0 {
-			m.Phase = PhaseConfig
-			m.configAdvanced = true
+			m.Stage = SetupStageSettings
+			m.settingsAdvanced = true
 			_ = m.validateAllInputs()
 			for i := range m.inputs {
 				m.inputs[i].Blur()
@@ -949,13 +958,12 @@ func (m InstallModel) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 		// Attempt rollback: if the container was run (step 4 completed) but
-		// config was not saved (step 5 failed), remove the orphaned container.
+		// settings were not saved (step 5 failed), remove the orphaned container.
 		if m.lastCompletedStep >= 4 {
 			cfg := m.buildConfig()
 			eng := m.eng
 			rollbackCmd := func() tea.Msg {
-				_ = eng.StopContainer(cfg.ContainerName)
-				_ = eng.RemoveContainer(cfg.ContainerName)
+				_, _ = workflow.EnsureRemoved(eng, cfg.ContainerName)
 				return nil
 			}
 			return m, tea.Batch(cmd, rollbackCmd)
@@ -970,7 +978,7 @@ func (m InstallModel) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m InstallModel) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m SetupModel) updateFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
@@ -979,11 +987,11 @@ func (m InstallModel) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			m.errorShowDetails = !m.errorShowDetails
 		case "r":
-			m.Phase = PhaseConfirm
-			m.confirmShowDetails = false
+			m.Stage = SetupStageReview
+			m.reviewShowDetails = false
 		case "b", "enter", "esc", "q", "ctrl+c":
 			if m.Embedded {
-				return m, func() tea.Msg { return WizardExitMsg{} }
+				return m, func() tea.Msg { return WorkflowExitMsg{} }
 			}
 			return m, tea.Quit
 		}
@@ -991,9 +999,9 @@ func (m InstallModel) updateError(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// startInstallStep returns the tea.Cmd for step i, sending StepStartedMsg
+// startSetupStep returns the tea.Cmd for step i, sending StepStartedMsg
 // immediately and running the work asynchronously.
-func (m *InstallModel) startInstallStep(i int) tea.Cmd {
+func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 	cfg := m.buildConfig()
 	eng := m.eng
 
@@ -1037,20 +1045,9 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 		})
 	case 4: // Run container.
 		workCmd = StepCmd(i, func() (string, error) {
-			opts := engine.RunOptions{
-				Name:        cfg.ContainerName,
-				Image:       cfg.Image,
-				Memory:      cfg.Memory,
-				ShmSize:     cfg.ShmSize,
-				HomeVolume:  cfg.HomeVolumeName(),
-				StateVolume: cfg.StateVolumeName(),
-				Restart:     "always",
-				WebUIPort:   cfg.WebUIPortOrDefault(),
-				Platform:    runtime.GOOS,
-			}
-			return "", eng.RunContainer(opts)
+			return "", eng.RunContainer(workflow.RunOptions(cfg))
 		})
-	case 5: // Save config.
+	case 5: // Save settings.
 		workCmd = StepCmd(i, func() (string, error) {
 			cfg.InstalledAt = time.Now()
 			cfg.Engine = ""
@@ -1059,7 +1056,6 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 			}
 			// Always save to the instances dir keyed by container name.
 			savePath := config.InstancePath(cfg.ContainerName)
-			m.configPath = savePath
 			return savePath, config.Save(savePath, cfg)
 		})
 	}
@@ -1067,7 +1063,7 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 	return tea.Sequence(startCmd, workCmd)
 }
 
-func (m *InstallModel) buildConfig() *config.Config {
+func (m *SetupModel) buildConfig() *config.Config {
 	image := config.DefaultConfig().Image
 	if m.imageOverride != "" {
 		image = m.imageOverride
@@ -1081,28 +1077,28 @@ func (m *InstallModel) buildConfig() *config.Config {
 	}
 }
 
-// View renders the current wizard phase.
-func (m InstallModel) View() string {
-	switch m.Phase {
-	case PhasePreflight:
-		return m.viewPreflight()
-	case PhaseRuntimeSetup:
+// View renders the current setup stage.
+func (m SetupModel) View() string {
+	switch m.Stage {
+	case SetupStageQuickCheck:
+		return m.viewQuickCheck()
+	case SetupStageRuntime:
 		return m.viewRuntimeSetup()
-	case PhaseConfig:
-		return m.viewConfig()
-	case PhaseConfirm:
-		return m.viewConfirm()
-	case PhaseInstall:
-		return m.viewInstall()
-	case PhaseDone:
-		return m.viewDone()
-	case PhaseError:
-		return m.viewError()
+	case SetupStageSettings:
+		return m.viewSettings()
+	case SetupStageReview:
+		return m.viewReview()
+	case SetupStageApplying:
+		return m.viewApplying()
+	case SetupStageComplete:
+		return m.viewComplete()
+	case SetupStageFailed:
+		return m.viewFailed()
 	}
 	return ""
 }
 
-func (m InstallModel) viewPreflight() string {
+func (m SetupModel) viewQuickCheck() string {
 	out := styles.Header("OMNIDECK", "Quick check", m.WindowWidth)
 
 	type row struct {
@@ -1122,7 +1118,7 @@ func (m InstallModel) viewPreflight() string {
 	}
 
 	if m.eng != nil {
-		permDone := m.preflightDone >= 2
+		permDone := m.quickCheckDone >= 2
 		if permDone {
 			permOK := m.permErr == nil
 			detail := "your account can use it"
@@ -1156,7 +1152,7 @@ func (m InstallModel) viewPreflight() string {
 	for _, r := range rows {
 		label := padRight(r.label, labelW)
 		if !r.done {
-			out += "   " + m.preflightSpinner.View() + "  " +
+			out += "   " + m.quickCheckSpinner.View() + "  " +
 				styles.Dim.Render(label) +
 				styles.Dim.Render("checking...") + "\n"
 			continue
@@ -1173,10 +1169,10 @@ func (m InstallModel) viewPreflight() string {
 		}
 	}
 
-	if m.preflightReady && m.preferredEngine == "" {
+	if m.quickCheckReady && m.preferredEngine == "" {
 		out += "\n"
 		if m.permChecking {
-			out += "   " + m.preflightSpinner.View() + "  " + styles.Dim.Render("Checking whether your account can use "+runtimeNameForPeople(m.eng.Name())+"...") + "\n"
+			out += "   " + m.quickCheckSpinner.View() + "  " + styles.Dim.Render("Checking whether your account can use "+runtimeNameForPeople(m.eng.Name())+"...") + "\n"
 		} else if m.permErr != nil {
 			out += "   " + styles.CrossMark + "  " + styles.Error.Render("Your account cannot use "+runtimeNameForPeople(m.eng.Name())+" yet. Choose the other option to continue.") + "\n"
 		}
@@ -1194,7 +1190,7 @@ func (m InstallModel) viewPreflight() string {
 			currentName := runtimeNameForPeople(m.eng.Name())
 			alternativeName := runtimeNameForPeople(alternative)
 			selected := "Use " + currentName + " — Ready"
-			if m.preflightAlternative != "" {
+			if m.quickCheckAlternative != "" {
 				selected = "Set up " + alternativeName + " instead"
 			}
 			out += "\n   " + styles.Active.Render(selected) + "\n"
@@ -1207,9 +1203,9 @@ func (m InstallModel) viewPreflight() string {
 	return out
 }
 
-func (m InstallModel) viewConfig() string {
+func (m SetupModel) viewSettings() string {
 	out := styles.Header("OMNIDECK", "Settings", m.WindowWidth)
-	if !m.configAdvanced {
+	if !m.settingsAdvanced {
 		out += "  " + styles.Active.Render("Recommended settings are ready") + "\n"
 		out += "  " + styles.Dim.Render("Omnideck chose sensible settings for this computer. Most people can continue without changing anything.") + "\n\n"
 		out += "  " + styles.Dim.Render(padRight("Name", 20)) + styles.Active.Render(m.inputs[inputContainerName].Value()) + "\n"
@@ -1247,7 +1243,7 @@ func (m InstallModel) viewConfig() string {
 	return out
 }
 
-func (m InstallModel) viewConfirm() string {
+func (m SetupModel) viewReview() string {
 	out := styles.Header("OMNIDECK", "Ready to set up", m.WindowWidth)
 
 	kv := func(k, v string) string {
@@ -1263,11 +1259,11 @@ func (m InstallModel) viewConfirm() string {
 	out += kv("Name", m.inputs[inputContainerName].Value())
 	out += kv("Memory", m.inputs[inputMemory].Value())
 
-	for _, w := range m.confirmWarnings {
+	for _, w := range m.reviewWarnings {
 		out += "\n   " + styles.Warning.Render(w) + "\n"
 	}
 
-	if m.confirmShowDetails {
+	if m.reviewShowDetails {
 		out += "\n   " + styles.Dim.Render("Technical details") + "\n"
 		out += kv("Computer", runtime.GOOS+" / "+runtime.GOARCH)
 		out += kv("File storage", cfg.HomeVolumeName())
@@ -1283,13 +1279,13 @@ func (m InstallModel) viewConfirm() string {
 	return out
 }
 
-func (m InstallModel) viewInstall() string {
-	out := styles.Header("OMNIDECK", "Installing", m.WindowWidth)
+func (m SetupModel) viewApplying() string {
+	out := styles.Header("OMNIDECK", "Setting up Omnideck", m.WindowWidth)
 	out += m.spinnerModel.View()
 	return out
 }
 
-func (m InstallModel) viewDone() string {
+func (m SetupModel) viewComplete() string {
 	out := "\n" + styles.Success.Render("  ✓  Omnideck is ready!") + "\n"
 	out += styles.Dim.Render("  ─────────────────────────────────────") + "\n\n"
 
@@ -1300,7 +1296,7 @@ func (m InstallModel) viewDone() string {
 	return out
 }
 
-func (m InstallModel) viewRuntimeSetup() string {
+func (m SetupModel) viewRuntimeSetup() string {
 	out := styles.Header("OMNIDECK", "Container setup", m.WindowWidth)
 	if len(m.runtimePlans) == 0 {
 		name := "Podman or Docker"
@@ -1314,7 +1310,7 @@ func (m InstallModel) viewRuntimeSetup() string {
 		}
 		out += "  " + styles.Dim.Render(message) + "\n\n"
 		if m.runtimeSetupStage == runtimeSetupWorking {
-			out += "  " + m.preflightSpinner.View() + " " + styles.Dim.Render("Checking again…") + "\n"
+			out += "  " + m.quickCheckSpinner.View() + " " + styles.Dim.Render("Checking again…") + "\n"
 		} else {
 			out += "  " + styles.Success.Render("Press R to check again. You can also press Q to leave setup.") + "\n"
 		}
@@ -1446,7 +1442,7 @@ func (m InstallModel) viewRuntimeSetup() string {
 	return out
 }
 
-func (m InstallModel) viewError() string {
+func (m SetupModel) viewFailed() string {
 	out := "\n" + styles.Error.Render("  ✗  Omnideck could not finish setup") + "\n"
 	out += styles.Dim.Render("  ─────────────────────────────────────") + "\n\n"
 	out += "  It stopped while trying to: " + styles.Active.Render(m.errorMsg) + "\n"
@@ -1468,7 +1464,7 @@ func isKeyMsg(msg tea.Msg) bool {
 	return ok
 }
 
-// --- Preflight commands ---
+// --- QuickCheck commands ---
 
 func runEngineCheck() tea.Msg {
 	return runEngineCheckFor("")()

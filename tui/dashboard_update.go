@@ -11,12 +11,13 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 // Update dispatches messages to the appropriate screen handler.
 func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	// WizardExitMsg is handled at the dashboard level regardless of screen.
-	if _, ok := msg.(WizardExitMsg); ok {
+	// WorkflowExitMsg is handled at the dashboard level regardless of screen.
+	if _, ok := msg.(WorkflowExitMsg); ok {
 		m.screen = ScreenDashboard
 		return m, reloadInstancesCmd()
 	}
@@ -26,11 +27,11 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		if m.screen == ScreenInstall {
-			m.installModel.HandleWindowSize(msg)
+		if m.screen == ScreenSetup {
+			m.setupModel.HandleWindowSize(msg)
 		}
-		if m.screen == ScreenUpdate {
-			m.updateModel.HandleWindowSize(msg)
+		if m.screen == ScreenMaintenance {
+			m.maintenanceModel.HandleWindowSize(msg)
 		}
 		return m, nil
 
@@ -79,6 +80,10 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case instancesRefreshedMsg:
+		if msg.err != nil {
+			m.toast = "Could not refresh saved installations: " + msg.err.Error()
+			return m, clearToastCmd()
+		}
 		existing := map[string]InstanceState{}
 		for _, inst := range m.instances {
 			if inst.Info.Config == nil {
@@ -86,8 +91,8 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			existing[inst.Info.Config.ContainerName] = inst
 		}
-		newStates := make([]InstanceState, 0, len(msg))
-		for _, info := range msg {
+		newStates := make([]InstanceState, 0, len(msg.instances))
+		for _, info := range msg.instances {
 			if info.Config == nil {
 				continue
 			}
@@ -113,18 +118,18 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.eng != nil {
 			m.eng = msg.eng
 		}
-		m.doctorDone = true
+		m.doctorStage = doctorStageResults
 		m.doctorMessage = ""
 		m.doctorFocus = firstDoctorAction(m.doctorResults)
 		return m, nil
 
 	case doctorActionDoneMsg:
 		if msg.err != nil {
-			m.doctorDone = true
+			m.doctorStage = doctorStageResults
 			m.doctorMessage = "Omnideck could not finish that action: " + msg.err.Error()
 			return m, nil
 		}
-		m.doctorDone = false
+		m.doctorStage = doctorStageChecking
 		m.doctorMessage = "Action finished. Checking again…"
 		return m, tea.Batch(m.doctorSpinner.Tick, m.runDoctorCmd())
 
@@ -143,44 +148,56 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.toast = ""
 		return m, nil
 
-	case cfgApplyDoneMsg:
-		m.screen = ScreenDashboard
-		m.cfgFields = nil
+	case settingsApplyDoneMsg:
+		m.settingsStage = settingsStageEditing
 		if msg.err != nil {
-			m.toast = "Apply failed: " + msg.err.Error()
-			return m, clearToastCmd()
+			m.screen = ScreenSettings
+			m.toast = ""
+			m.settingsMessage = "The new settings could not be applied: " + msg.err.Error()
+			return m, nil
 		}
-		m.toast = "Config applied — " + msg.newName + " restarted"
-		// Poll the specific instance with its new container name (already updated
-		// in memory by saveCfgFields). A full reloadInstancesCmd is not needed
-		// and can cause duplicate entries when instance metadata is in flux.
+		m.screen = ScreenDashboard
+		m.settingFields = nil
+		if msg.idx >= 0 && msg.idx < len(m.instances) && msg.cfg != nil {
+			*m.instances[msg.idx].Info.Config = *msg.cfg
+		}
+		name := "Omnideck"
+		if msg.cfg != nil {
+			name = msg.cfg.ContainerName
+		}
+		m.toast = "Settings applied — " + name + " restarted"
 		return m, tea.Batch(m.pollStats(msg.idx), clearToastCmd())
 
 	case containerToggleDoneMsg:
-		if msg.idx >= 0 && msg.idx < len(m.instances) {
-			inst := &m.instances[msg.idx]
-			inst.Status = msg.status
-			inst.CPU = msg.cpu
-			inst.CPUPct = msg.cpuPct
-			inst.RAM = msg.ram
-			inst.RAMTotal = msg.ramTotal
-			inst.RAMPct = msg.ramPct
-			if msg.uptime != "" {
-				inst.Uptime = msg.uptime
+		if msg.err != nil {
+			m.toast = "Could not " + msg.action + " Omnideck: " + msg.err.Error()
+			return m, clearToastCmd()
+		}
+		stats := msg.stats
+		if stats.idx >= 0 && stats.idx < len(m.instances) {
+			inst := &m.instances[stats.idx]
+			inst.Status = stats.status
+			inst.CPU = stats.cpu
+			inst.CPUPct = stats.cpuPct
+			inst.RAM = stats.ram
+			inst.RAMTotal = stats.ramTotal
+			inst.RAMPct = stats.ramPct
+			if stats.uptime != "" {
+				inst.Uptime = stats.uptime
 			}
-			if msg.restarts != "" {
-				inst.Restarts = msg.restarts
+			if stats.restarts != "" {
+				inst.Restarts = stats.restarts
 			}
-			if msg.created != "" {
-				inst.Created = msg.created
+			if stats.created != "" {
+				inst.Created = stats.created
 			}
-			if msg.health != "" {
-				inst.Health = msg.health
+			if stats.health != "" {
+				inst.Health = stats.health
 			}
-			inst.CPUHistory = pushHistory(inst.CPUHistory, msg.cpuPct)
-			inst.RAMHistory = pushHistory(inst.RAMHistory, msg.ramPct)
+			inst.CPUHistory = pushHistory(inst.CPUHistory, stats.cpuPct)
+			inst.RAMHistory = pushHistory(inst.RAMHistory, stats.ramPct)
 			action := "Stopped"
-			if msg.status == "running" {
+			if stats.status == "running" {
 				action = "Started"
 			}
 			m.toast = action + " " + inst.Info.Name
@@ -195,23 +212,23 @@ func (m DashboardModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// Per-screen handlers.
 	switch m.screen {
-	case ScreenInstall:
-		newModel, cmd := m.installModel.Update(msg)
-		m.installModel = newModel.(InstallModel)
-		if m.installModel.eng != nil {
-			m.eng = m.installModel.eng
+	case ScreenSetup:
+		newModel, cmd := m.setupModel.Update(msg)
+		m.setupModel = newModel.(SetupModel)
+		if m.setupModel.eng != nil {
+			m.eng = m.setupModel.eng
 		}
 		return m, cmd
-	case ScreenUpdate:
-		newModel, cmd := m.updateModel.Update(msg)
-		m.updateModel = newModel.(UpdateModel)
+	case ScreenMaintenance:
+		newModel, cmd := m.maintenanceModel.Update(msg)
+		m.maintenanceModel = newModel.(MaintenanceModel)
 		return m, cmd
 	case ScreenDashboard:
 		return m.updateDashboard(msg)
 	case ScreenLogs:
 		return m.updateLogs(msg)
-	case ScreenConfig:
-		return m.updateConfig(msg)
+	case ScreenSettings:
+		return m.updateSettings(msg)
 	case ScreenDoctor:
 		return m.updateDoctor(msg)
 	}
@@ -317,16 +334,16 @@ func (m DashboardModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case "c":
 		if len(m.instances) > 0 {
-			m.screen = ScreenConfig
-			m.buildCfgFields()
+			m.screen = ScreenSettings
+			m.buildSettingFields()
 		}
 
 	case "n":
-		return m.startEmbeddedInstall()
+		return m.startEmbeddedSetup()
 
 	case "d":
 		m.screen = ScreenDoctor
-		m.doctorDone = false
+		m.doctorStage = doctorStageChecking
 		m.doctorResults = nil
 		m.doctorFocus = -1
 		m.doctorMessage = ""
@@ -489,29 +506,32 @@ func (m DashboardModel) logModalVisibleLines() int {
 	return visible
 }
 
-func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
+func (m DashboardModel) updateSettings(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if m.settingsStage == settingsStageApplying {
+		return m, nil
+	}
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
 	}
 
-	if m.cfgEditing {
+	if m.settingEditing {
 		switch key.Type {
 		case tea.KeyEnter: //nolint:exhaustive
-			m.cfgFields[m.cfgFocus].Value = m.cfgBuf
-			m.cfgFields[m.cfgFocus].Changed = (m.cfgBuf != m.cfgFields[m.cfgFocus].Orig)
-			m.cfgEditing = false
-			m.cfgBuf = ""
+			m.settingFields[m.settingFocus].Value = m.settingBuffer
+			m.settingFields[m.settingFocus].Changed = (m.settingBuffer != m.settingFields[m.settingFocus].Orig)
+			m.settingEditing = false
+			m.settingBuffer = ""
 		case tea.KeyEsc:
-			m.cfgEditing = false
-			m.cfgBuf = ""
+			m.settingEditing = false
+			m.settingBuffer = ""
 		case tea.KeyBackspace:
-			if len(m.cfgBuf) > 0 {
-				m.cfgBuf = m.cfgBuf[:len(m.cfgBuf)-1]
+			if len(m.settingBuffer) > 0 {
+				m.settingBuffer = m.settingBuffer[:len(m.settingBuffer)-1]
 			}
 		default:
 			if key.Type == tea.KeyRunes {
-				m.cfgBuf += string(key.Runes)
+				m.settingBuffer += string(key.Runes)
 			}
 		}
 		return m, nil
@@ -520,59 +540,51 @@ func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch key.String() {
 	case "esc", "q", "backspace":
 		m.screen = ScreenDashboard
-		m.cfgFields = nil
+		m.settingFields = nil
 
 	case "ctrl+s":
 		inst := m.CurrentInstance()
 		if inst == nil {
 			break
 		}
-		// Capture old name before saveCfgFields mutates the in-memory config.
-		oldName := inst.Info.Config.ContainerName
-		oldPort := inst.Info.Config.WebUIPortOrDefault()
 		needsRestart := false
-		for _, f := range m.cfgFields {
+		for _, f := range m.settingFields {
 			if !f.Changed {
 				continue
 			}
 			switch f.Key {
-			case "container_name", "home_volume", "state_volume", "memory", "shm_size", "web_ui_port", "image":
+			case "home_volume", "state_volume", "memory", "shm_size", "web_ui_port", "image":
 				needsRestart = true
 			}
 		}
-		if err := m.validateCfgFields(); err != nil {
-			m.toast = "Cannot save: " + err.Error()
-			return m, clearToastCmd()
+		if err := m.validateSettingFields(); err != nil {
+			m.settingsMessage = "Cannot apply these settings: " + err.Error()
+			return m, nil
 		}
-		if err := m.saveCfgFields(); err != nil {
-			m.toast = "Save failed: " + err.Error()
-			return m, clearToastCmd()
-		}
-		for i := range m.cfgFields {
-			m.cfgFields[i].Orig = m.cfgFields[i].Value
-			m.cfgFields[i].Changed = false
-		}
+		m.settingsMessage = ""
+		candidate := m.configFromSettingFields()
 		if needsRestart {
-			m.toast = "Applying config…"
-			return m, applyConfigCmd(oldName, oldPort, inst.Info.Config, m.eng, m.selected)
+			m.toast = "Applying settings…"
+			m.settingsStage = settingsStageApplying
+			return m, applySettingsCmd(inst.Info.Config, candidate, inst.Info.Path, m.eng, m.selected)
 		}
-		m.toast = "Config saved"
+		m.toast = "No settings changed"
 		return m, clearToastCmd()
 
 	case "down", "tab":
-		if m.cfgFocus < len(m.cfgFields)-1 {
-			m.cfgFocus++
+		if m.settingFocus < len(m.settingFields)-1 {
+			m.settingFocus++
 		}
 
 	case "up", "shift+tab":
-		if m.cfgFocus > 0 {
-			m.cfgFocus--
+		if m.settingFocus > 0 {
+			m.settingFocus--
 		}
 
 	case "enter":
-		if len(m.cfgFields) > 0 {
-			m.cfgBuf = m.cfgFields[m.cfgFocus].Value
-			m.cfgEditing = true
+		if len(m.settingFields) > 0 {
+			m.settingBuffer = m.settingFields[m.settingFocus].Value
+			m.settingEditing = true
 		}
 	}
 	return m, nil
@@ -587,7 +599,7 @@ func (m DashboardModel) updateDoctor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "esc", "q", "backspace":
 		m.screen = ScreenDashboard
 	case "r":
-		m.doctorDone = false
+		m.doctorStage = doctorStageChecking
 		m.doctorMessage = "Checking again…"
 		return m, tea.Batch(m.doctorSpinner.Tick, m.runDoctorCmd())
 	case "up", "shift+tab":
@@ -595,7 +607,7 @@ func (m DashboardModel) updateDoctor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "down", "tab":
 		m.doctorFocus = nextDoctorAction(m.doctorResults, m.doctorFocus, 1)
 	case "enter", " ":
-		if !m.doctorDone || m.doctorFocus < 0 || m.doctorFocus >= len(m.doctorResults) {
+		if m.doctorStage != doctorStageResults || m.doctorFocus < 0 || m.doctorFocus >= len(m.doctorResults) {
 			return m, nil
 		}
 		return m.runDoctorAction(m.doctorResults[m.doctorFocus])
@@ -635,25 +647,28 @@ func (m DashboardModel) runDoctorAction(result CheckResult) (tea.Model, tea.Cmd)
 	switch result.Action {
 	case DoctorActionRuntimeSetup:
 		if len(m.instances) == 0 {
-			next, _ := m.startEmbeddedInstall()
-			next.installModel.preferredEngine = result.ActionValue
-			return next, next.installModel.Init()
+			return m.startEmbeddedSetupWithRuntime(result.ActionValue)
 		}
 		inst := m.CurrentInstance()
 		cfg := config.DefaultConfig()
-		configPath := config.InstancePath(cfg.ContainerName)
 		if inst != nil && inst.Info.Config != nil {
 			cfg = inst.Info.Config
-			configPath = inst.Info.Path
 		}
-		im := NewInstallModel(configPath, cfg, "")
-		im.Embedded = true
-		im.setupMode = SetupRuntimeRepair
-		im.preferredEngine = result.ActionValue
-		im.WindowWidth = m.width
-		im.WindowHeight = m.height
-		m.installModel = im
-		m.screen = ScreenInstall
+		instances := make([]config.InstanceInfo, len(m.instances))
+		for i := range m.instances {
+			instances[i] = m.instances[i].Info
+		}
+		im := NewSetupModel(SetupRequest{
+			Initial:           cfg,
+			ExistingInstances: instances,
+			Mode:              SetupRuntimeRepair,
+			PreferredEngine:   result.ActionValue,
+			Embedded:          true,
+			WindowWidth:       m.width,
+			WindowHeight:      m.height,
+		})
+		m.setupModel = im
+		m.screen = ScreenSetup
 		return m, im.Init()
 	case DoctorActionStartInstance:
 		if m.eng == nil {
@@ -662,11 +677,16 @@ func (m DashboardModel) runDoctorAction(result CheckResult) (tea.Model, tea.Cmd)
 		}
 		name := result.ActionValue
 		eng := m.eng
-		m.doctorDone = false
+		m.doctorStage = doctorStageActing
 		m.doctorMessage = "Starting Omnideck…"
-		return m, func() tea.Msg { return doctorActionDoneMsg{err: eng.StartContainer(name)} }
+		return m, func() tea.Msg {
+			_, err := workflow.EnsureStarted(eng, name)
+			return doctorActionDoneMsg{err: err}
+		}
 	case DoctorActionSetupInstance:
-		return m.startEmbeddedInstall()
+		return m.startEmbeddedSetup()
+	case DoctorActionRepairInstance:
+		return m.startEmbeddedRepair()
 	}
 	return m, nil
 }
@@ -682,12 +702,18 @@ func (m DashboardModel) toggleContainer() tea.Cmd {
 	eng := m.eng
 	idx := m.selected
 	return func() tea.Msg {
+		action := "start"
+		var err error
 		if status == "running" {
-			_ = eng.StopContainer(name)
+			action = "stop"
+			_, err = workflow.EnsureStopped(eng, name)
 		} else {
-			_ = eng.StartContainer(name)
+			_, err = workflow.EnsureStarted(eng, name)
 		}
-		return containerToggleDoneMsg(fetchStats(eng, name, idx).(instanceStatsMsg))
+		if err != nil {
+			return containerToggleDoneMsg{action: action, err: err}
+		}
+		return containerToggleDoneMsg{stats: fetchStats(eng, name, idx).(instanceStatsMsg), action: action}
 	}
 }
 

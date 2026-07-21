@@ -16,7 +16,7 @@ import (
 
 func TestValidMemSize(t *testing.T) {
 	valid := []string{"256m", "512M", "1g", "1G", "128k", "128K"}
-	invalid := []string{"256", "256mb", "abc", "", "1.5g"}
+	invalid := []string{"0g", "256", "256mb", "abc", "", "1.5g"}
 
 	for _, s := range valid {
 		if !validMemSize(s) {
@@ -30,10 +30,10 @@ func TestValidMemSize(t *testing.T) {
 	}
 }
 
-func TestNewInstallModelDefaults(t *testing.T) {
-	m := NewInstallModel("/tmp/test-config.yaml", nil, "")
-	if m.Phase != PhasePreflight {
-		t.Errorf("initial phase should be PhasePreflight, got %d", m.Phase)
+func TestNewSetupModelDefaults(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	if m.Stage != SetupStageQuickCheck {
+		t.Errorf("initial phase should be SetupStageQuickCheck, got %d", m.Stage)
 	}
 	if m.inputs[inputContainerName].Value() != "omnideck" {
 		t.Errorf("default container name should be 'omnideck'")
@@ -48,7 +48,7 @@ func TestNewInstallModelDefaults(t *testing.T) {
 }
 
 func TestBuildConfig(t *testing.T) {
-	m := NewInstallModel("/tmp/test-config.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	// Set custom values.
 	m.inputs[inputContainerName].SetValue("mycontainer")
 	m.inputs[inputMemory].SetValue("4g")
@@ -73,7 +73,7 @@ func TestBuildConfig(t *testing.T) {
 }
 
 func TestBuildConfigImageOverride(t *testing.T) {
-	m := NewInstallModel("/tmp/test-config.yaml", nil, "my-custom-image:latest")
+	m := NewSetupModel(SetupRequest{ImageOverride: "my-custom-image:latest"})
 	cfg := m.buildConfig()
 	if cfg.Image != "my-custom-image:latest" {
 		t.Errorf("Image: got %q, want 'my-custom-image:latest'", cfg.Image)
@@ -81,7 +81,7 @@ func TestBuildConfigImageOverride(t *testing.T) {
 }
 
 func TestValidateInputEmpty(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.inputs[inputContainerName].SetValue("")
 	if m.validateCurrentInput() {
 		t.Error("empty container name should fail validation")
@@ -92,7 +92,7 @@ func TestValidateInputEmpty(t *testing.T) {
 }
 
 func TestValidateInputShmSizeBad(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.inputFocus = inputShmSize
 	m.inputs[inputShmSize].SetValue("256mb") // invalid
 	if m.validateCurrentInput() {
@@ -101,7 +101,7 @@ func TestValidateInputShmSizeBad(t *testing.T) {
 }
 
 func TestValidateInputShmSizeGood(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.inputFocus = inputShmSize
 	m.inputs[inputShmSize].SetValue("256m")
 	if !m.validateCurrentInput() {
@@ -110,7 +110,7 @@ func TestValidateInputShmSizeGood(t *testing.T) {
 }
 
 func TestValidateInputMemoryBad(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.inputFocus = inputMemory
 	m.inputs[inputMemory].SetValue("2gb") // invalid
 	if m.validateCurrentInput() {
@@ -119,7 +119,7 @@ func TestValidateInputMemoryBad(t *testing.T) {
 }
 
 func TestValidateInputMemoryGood(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.inputFocus = inputMemory
 	m.inputs[inputMemory].SetValue("4g")
 	if !m.validateCurrentInput() {
@@ -183,73 +183,73 @@ func TestExpandTilde(t *testing.T) {
 	}
 }
 
-func TestPreflightAdvancement(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+func TestQuickCheckAdvancement(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
 	// Simulate all checks arriving.
-	m.preflightDone = 3 // one before 4
-	cmd := m.maybeAdvancePreflight()
+	m.quickCheckDone = 3 // one before 4
+	cmd := m.maybeAdvanceQuickCheck()
 	if cmd != nil {
 		t.Error("should not advance until 4 checks complete")
 	}
-	m.preflightDone = 4
-	cmd = m.maybeAdvancePreflight()
+	m.quickCheckDone = 4
+	cmd = m.maybeAdvanceQuickCheck()
 	if cmd == nil {
 		t.Error("should advance after 4 checks complete")
 	}
 }
 
-func TestUpdatePreflightEngineOK(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+func TestUpdateQuickCheckEngineOK(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
 	// When eng == nil, both the engine check and the skipped permission check
-	// are counted immediately, so preflightDone goes from 0 to 2.
+	// are counted immediately, so quickCheckDone goes from 0 to 2.
 	msg := engineCheckResult{eng: nil, err: nil}
-	m.preflightDone = 0
-	newModel, _ := m.updatePreflight(msg)
-	nm := newModel.(InstallModel)
-	if nm.preflightDone != 2 {
-		t.Errorf("preflightDone should be 2, got %d", nm.preflightDone)
+	m.quickCheckDone = 0
+	newModel, _ := m.updateQuickCheck(msg)
+	nm := newModel.(SetupModel)
+	if nm.quickCheckDone != 2 {
+		t.Errorf("quickCheckDone should be 2, got %d", nm.quickCheckDone)
 	}
 }
 
-func TestUpdatePreflightEngineError(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
-	m.preflightDone = 4 // all other checks done
+func TestUpdateQuickCheckEngineError(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.quickCheckDone = 4 // all other checks done
 	msg := engineCheckResult{eng: nil, err: fmt.Errorf("no engine")}
-	newModel, _ := m.updatePreflight(msg)
-	nm := newModel.(InstallModel)
-	// allPreflightDone will be fired next tick, but we test direct path:
-	// Set preflightDone high and fire allPreflightDone directly.
+	newModel, _ := m.updateQuickCheck(msg)
+	nm := newModel.(SetupModel)
+	// allQuickCheckDone will be fired next tick, but we test direct path:
+	// Set quickCheckDone high and fire allQuickCheckDone directly.
 	nm.engErr = msg.err
-	nm2, _ := nm.updatePreflight(allPreflightDone{})
-	final := nm2.(InstallModel)
-	if final.Phase != PhaseRuntimeSetup {
-		t.Errorf("should enter runtime setup phase when engine missing, got %d", final.Phase)
+	nm2, _ := nm.updateQuickCheck(allQuickCheckDone{})
+	final := nm2.(SetupModel)
+	if final.Stage != SetupStageRuntime {
+		t.Errorf("should enter runtime setup phase when engine missing, got %d", final.Stage)
 	}
 }
 
 func TestSetupOnlyReturnsToDashboardWhenRuntimeIsReady(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.Embedded = true
 	m.setupMode = SetupRuntimeRepair
 	m.eng = &mockEngine{}
 
 	newModel, cmd := m.afterRuntimeReady()
-	nm := newModel.(InstallModel)
-	if nm.Phase == PhaseConfig {
+	nm := newModel.(SetupModel)
+	if nm.Stage == SetupStageSettings {
 		t.Fatal("runtime repair must not continue into new-instance settings")
 	}
 	if cmd == nil {
 		t.Fatal("runtime repair should return to the dashboard")
 	}
-	if _, ok := cmd().(WizardExitMsg); !ok {
-		t.Fatal("runtime repair should emit WizardExitMsg")
+	if _, ok := cmd().(WorkflowExitMsg); !ok {
+		t.Fatal("runtime repair should emit WorkflowExitMsg")
 	}
 }
 
 func TestContainerNameCollisionIsRejected(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.eng = &mockEngine{containerExists: true}
 	m.inputFocus = inputContainerName
 	m.inputs[inputContainerName].SetValue("omnideck")
@@ -264,7 +264,7 @@ func TestContainerNameCollisionIsRejected(t *testing.T) {
 
 func TestExistingBrowserPortIsRejected(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.inputFocus = inputWebUIPort
 	m.inputs[inputWebUIPort].SetValue("2337")
 	m.existingPorts["2337"] = true
@@ -279,16 +279,16 @@ func TestExistingBrowserPortIsRejected(t *testing.T) {
 
 func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	docker := &mockEngine{name: "docker"}
 	podman := &mockEngine{name: "podman"}
-	m.preflightReady = true
+	m.quickCheckReady = true
 	m.preferredEngine = "docker"
 	m.eng = docker
 	m.availableEngines = []engine.Engine{docker, podman}
 
-	newModel, cmd := m.updatePreflight(tea.KeyMsg{Type: tea.KeyTab})
-	nm := newModel.(InstallModel)
+	newModel, cmd := m.updateQuickCheck(tea.KeyMsg{Type: tea.KeyTab})
+	nm := newModel.(SetupModel)
 	if cmd != nil || nm.eng.Name() != "docker" {
 		t.Fatalf("per-instance switch changed runtime to %s", nm.eng.Name())
 	}
@@ -319,9 +319,9 @@ func TestReadyRuntimeDefaultMatchesThePlatformRecommendation(t *testing.T) {
 
 func TestFreshSetupCanChooseMissingPodmanWhenDockerIsReady(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	docker := &mockEngine{name: "docker"}
-	m.preflightReady = true
+	m.quickCheckReady = true
 	m.eng = docker
 	m.availableEngines = []engine.Engine{docker}
 	m.runtimeProbes = []engine.ProbeResult{
@@ -329,38 +329,38 @@ func TestFreshSetupCanChooseMissingPodmanWhenDockerIsReady(t *testing.T) {
 		{Name: "docker", State: engine.RuntimeReady},
 	}
 
-	if view := m.tnPreflight(100); !strings.Contains(view, "Set up Podman instead") {
+	if view := m.tnQuickCheck(100); !strings.Contains(view, "Set up Podman instead") {
 		t.Fatalf("fresh setup does not show the Podman choice:\n%s", view)
 	}
 
-	newModel, cmd := m.updatePreflight(tea.KeyMsg{Type: tea.KeyTab})
+	newModel, cmd := m.updateQuickCheck(tea.KeyMsg{Type: tea.KeyTab})
 	if cmd != nil {
 		t.Fatal("choosing the alternative should not run anything")
 	}
-	nm := newModel.(InstallModel)
-	if nm.preflightAlternative != "podman" {
-		t.Fatalf("preflight alternative = %q, want podman", nm.preflightAlternative)
+	nm := newModel.(SetupModel)
+	if nm.quickCheckAlternative != "podman" {
+		t.Fatalf("quickCheck alternative = %q, want podman", nm.quickCheckAlternative)
 	}
 
-	newModel, cmd = nm.updatePreflight(tea.KeyMsg{Type: tea.KeyEnter})
+	newModel, cmd = nm.updateQuickCheck(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
 		t.Fatal("opening Podman setup should not install anything immediately")
 	}
-	nm = newModel.(InstallModel)
-	if nm.Phase != PhaseRuntimeSetup || nm.preferredEngine != "podman" || len(nm.runtimePlans) != 1 || nm.runtimePlans[0].Runtime != "podman" {
-		t.Fatalf("Podman setup was not selected safely: phase=%d preferred=%q plans=%#v", nm.Phase, nm.preferredEngine, nm.runtimePlans)
+	nm = newModel.(SetupModel)
+	if nm.Stage != SetupStageRuntime || nm.preferredEngine != "podman" || len(nm.runtimePlans) != 1 || nm.runtimePlans[0].Runtime != "podman" {
+		t.Fatalf("Podman setup was not selected safely: phase=%d preferred=%q plans=%#v", nm.Stage, nm.preferredEngine, nm.runtimePlans)
 	}
 
 	newModel, _ = nm.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	nm = newModel.(InstallModel)
-	if nm.Phase != PhasePreflight || nm.preferredEngine != "" {
-		t.Fatalf("back did not return to the runtime choice: phase=%d preferred=%q", nm.Phase, nm.preferredEngine)
+	nm = newModel.(SetupModel)
+	if nm.Stage != SetupStageQuickCheck || nm.preferredEngine != "" {
+		t.Fatalf("back did not return to the runtime choice: phase=%d preferred=%q", nm.Stage, nm.preferredEngine)
 	}
 }
 
 func TestRecommendedNameSkipsUnrelatedContainer(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.eng = &mockEngine{containerNames: map[string]bool{"omnideck": true}}
 	m.ensureRecommendedSettingsAvailable()
 	if got := m.inputs[inputContainerName].Value(); got != "omnideck2" {
@@ -369,7 +369,7 @@ func TestRecommendedNameSkipsUnrelatedContainer(t *testing.T) {
 }
 
 func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
 		{Name: "docker", State: engine.RuntimeMissing},
@@ -386,18 +386,18 @@ func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
 }
 
 func TestMissingContainerRuntimeDoesNotClaimAccountAccessWasChecked(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
-	m.preflightDone = 2
+	m := NewSetupModel(SetupRequest{})
+	m.quickCheckDone = 2
 	m.engErr = fmt.Errorf("Podman and Docker are not ready")
 
-	view := m.tnPreflight(100)
+	view := m.tnQuickCheck(100)
 	if strings.Contains(view, "Account access") {
 		t.Fatalf("account access cannot be checked before Podman or Docker is ready:\n%s", view)
 	}
 }
 
 func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
 		{Name: "docker", State: engine.RuntimeMissing},
@@ -405,7 +405,7 @@ func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 	m.configureRuntimeSetup()
 
 	newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := newModel.(InstallModel)
+	nm := newModel.(SetupModel)
 	if cmd != nil {
 		t.Fatal("the first Enter must only open the review; it must not run setup")
 	}
@@ -420,8 +420,8 @@ func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 
 func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
 	const width = 56
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
-	m.Phase = PhaseRuntimeSetup
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageRuntime
 	m.runtimeSetupStage = runtimeSetupReview
 	m.runtimePlans = []engine.SetupPlan{{
 		Action: "Install Docker Desktop for this computer",
@@ -442,7 +442,7 @@ func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
 }
 
 func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
 		{Name: "docker", State: engine.RuntimeMissing},
@@ -462,7 +462,7 @@ func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
 		t.Fatalf("technical details should be hidden by default:\n%s", view)
 	}
 	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-	nm := newModel.(InstallModel)
+	nm := newModel.(SetupModel)
 	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields(detail), "")) {
 		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
 	}
@@ -489,7 +489,7 @@ func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
 			if tt.runtime == "docker" {
 				other = "podman"
 			}
-			m := NewInstallModel("/tmp/test.yaml", nil, "")
+			m := NewSetupModel(SetupRequest{})
 			m.hostPlatform = tt.host
 			m.preferredEngine = tt.runtime
 			m.runtimeProbes = []engine.ProbeResult{
@@ -511,7 +511,7 @@ func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
 			}
 
 			newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-			m = newModel.(InstallModel)
+			m = newModel.(SetupModel)
 			if cmd != nil || m.runtimeSetupStage != runtimeSetupReview {
 				t.Fatal("first Enter must only open the review")
 			}
@@ -521,7 +521,7 @@ func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
 			}
 
 			newModel, cmd = m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-			m = newModel.(InstallModel)
+			m = newModel.(SetupModel)
 			if cmd == nil {
 				t.Fatal("second Enter must perform the reviewed action")
 			}
@@ -543,7 +543,7 @@ func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
 
 func TestWindowsDockerInstallRecheckTransitionsToStartThenSettings(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.preferredEngine = "docker"
 	m.runtimeProbes = []engine.ProbeResult{
@@ -553,9 +553,9 @@ func TestWindowsDockerInstallRecheckTransitionsToStartThenSettings(t *testing.T)
 	m.configureRuntimeSetup()
 
 	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(InstallModel)
+	m = newModel.(SetupModel)
 	newModel, _ = m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(InstallModel)
+	m = newModel.(SetupModel)
 	if m.runtimeSetupStage != runtimeSetupWaiting {
 		t.Fatal("Docker Store setup should wait for the user to return")
 	}
@@ -567,7 +567,7 @@ func TestWindowsDockerInstallRecheckTransitionsToStartThenSettings(t *testing.T)
 		},
 		err: fmt.Errorf("docker is not ready"),
 	})
-	m = newModel.(InstallModel)
+	m = newModel.(SetupModel)
 	if len(m.runtimePlans) != 1 || m.runtimePlans[0].State != engine.RuntimeStopped {
 		t.Fatalf("post-install plan = %#v, want Start Docker", m.runtimePlans)
 	}
@@ -585,15 +585,15 @@ func TestWindowsDockerInstallRecheckTransitionsToStartThenSettings(t *testing.T)
 			{Name: "docker", State: engine.RuntimeReady},
 		},
 	})
-	m = newModel.(InstallModel)
-	if m.Phase != PhaseConfig {
-		t.Fatalf("ready Docker should continue to settings, phase = %d", m.Phase)
+	m = newModel.(SetupModel)
+	if m.Stage != SetupStageSettings {
+		t.Fatalf("ready Docker should continue to settings, phase = %d", m.Stage)
 	}
 }
 
 func TestWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.preferredEngine = "podman"
 	m.runtimeProbes = []engine.ProbeResult{
@@ -609,7 +609,7 @@ func TestWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
 		},
 		err: fmt.Errorf("podman is not ready"),
 	})
-	m = newModel.(InstallModel)
+	m = newModel.(SetupModel)
 	if len(m.runtimePlans) != 1 || m.runtimePlans[0].State != engine.RuntimeMachineMissing {
 		t.Fatalf("post-install plan = %#v, want Podman one-time setup", m.runtimePlans)
 	}
@@ -621,7 +621,7 @@ func TestWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
 
 func TestRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.preferredEngine = "docker"
 	// A partial or unexpected probe result must never leave the user trapped.
@@ -636,7 +636,7 @@ func TestRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
 		t.Fatalf("empty setup state gives unusable guidance:\n%s", view)
 	}
 	newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(InstallModel)
+	m = newModel.(SetupModel)
 	if cmd == nil || m.runtimeSetupStage != runtimeSetupWorking {
 		t.Fatal("Enter must recheck even when no setup option could be built")
 	}
@@ -664,39 +664,39 @@ func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
 			port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 			_ = listener.Close()
 
-			m := NewInstallModel("/tmp/test.yaml", nil, "")
+			m := NewSetupModel(SetupRequest{})
 			m.eng = &mockEngine{name: runtimeName}
 			m.inputs[inputContainerName].SetValue(fmt.Sprintf("omnideck-%s-%d", runtimeName, index))
 			m.inputs[inputWebUIPort].SetValue(port)
 			newModel, _ := m.afterRuntimeReady()
-			m = newModel.(InstallModel)
-			if m.Phase != PhaseConfig || !strings.Contains(m.tnConfig(88), "Recommended settings are ready") {
+			m = newModel.(SetupModel)
+			if m.Stage != SetupStageSettings || !strings.Contains(m.tnSettings(88), "Recommended settings are ready") {
 				t.Fatalf("ready %s did not reach settings", runtimeName)
 			}
 
-			newModel, _ = m.updateConfig(tea.KeyMsg{Type: tea.KeyEnter})
-			m = newModel.(InstallModel)
-			confirm := m.tnConfirm(88)
-			if m.Phase != PhaseConfirm || !strings.Contains(confirm, "Runs with") || !strings.Contains(confirm, runtimeNameForPeople(runtimeName)) {
+			newModel, _ = m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+			m = newModel.(SetupModel)
+			confirm := m.tnReview(88)
+			if m.Stage != SetupStageReview || !strings.Contains(confirm, "Runs with") || !strings.Contains(confirm, runtimeNameForPeople(runtimeName)) {
 				t.Fatalf("%s review is incomplete:\n%s", runtimeName, confirm)
 			}
 
-			newModel, cmd := m.updateConfirm(tea.KeyMsg{Type: tea.KeyEnter})
-			m = newModel.(InstallModel)
-			if cmd == nil || m.Phase != PhaseInstall {
+			newModel, cmd := m.updateReview(tea.KeyMsg{Type: tea.KeyEnter})
+			m = newModel.(SetupModel)
+			if cmd == nil || m.Stage != SetupStageApplying {
 				t.Fatalf("%s did not enter working screen", runtimeName)
 			}
-			working := m.tnInstall(88)
-			for _, label := range installStepLabels {
+			working := m.tnApplying(88)
+			for _, label := range setupStepLabels {
 				if !strings.Contains(working, label) {
 					t.Fatalf("%s working screen is missing %q:\n%s", runtimeName, label, working)
 				}
 			}
-			for step := range installStepLabels {
-				newModel, _ = m.updateInstall(StepDoneMsg{Index: step})
-				m = newModel.(InstallModel)
+			for step := range setupStepLabels {
+				newModel, _ = m.updateApplying(StepDoneMsg{Index: step})
+				m = newModel.(SetupModel)
 			}
-			if m.Phase != PhaseDone || !strings.Contains(m.tnDone(88), "Omnideck is ready") {
+			if m.Stage != SetupStageComplete || !strings.Contains(m.tnComplete(88), "Omnideck is ready") {
 				t.Fatalf("%s did not reach the ready screen", runtimeName)
 			}
 		})
@@ -705,47 +705,47 @@ func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
 
 func TestRecommendedSettingsAreOneStep(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
-	m.Phase = PhaseConfig
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageSettings
 
-	view := m.tnConfig(100)
+	view := m.tnSettings(100)
 	if !strings.Contains(view, "Recommended settings are ready") || strings.Contains(view, "Shared memory") {
 		t.Fatalf("simple settings view should hide advanced fields:\n%s", view)
 	}
-	newModel, _ := m.updateConfig(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := newModel.(InstallModel)
-	if nm.Phase != PhaseConfirm {
-		t.Fatalf("Enter should accept recommended settings, phase = %d", nm.Phase)
+	newModel, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyEnter})
+	nm := newModel.(SetupModel)
+	if nm.Stage != SetupStageReview {
+		t.Fatalf("Enter should accept recommended settings, phase = %d", nm.Stage)
 	}
 }
 
 func TestSettingsCanBeCustomized(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
-	m.Phase = PhaseConfig
-	newModel, _ := m.updateConfig(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
-	nm := newModel.(InstallModel)
-	if !nm.configAdvanced {
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageSettings
+	newModel, _ := m.updateSettings(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}})
+	nm := newModel.(SetupModel)
+	if !nm.settingsAdvanced {
 		t.Fatal("c should open advanced settings")
 	}
-	if view := nm.tnConfig(100); !strings.Contains(view, "Shared memory") {
+	if view := nm.tnSettings(100); !strings.Contains(view, "Shared memory") {
 		t.Fatalf("advanced settings should explain every field:\n%s", view)
 	}
 }
 
 func TestInstallErrorOffersRetryAndHidesTechnicalDetails(t *testing.T) {
-	m := NewInstallModel("/tmp/test.yaml", nil, "")
-	m.Phase = PhaseError
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageFailed
 	m.errorMsg = "Download Omnideck"
 	m.errorDetail = "connection reset by peer"
 
-	view := m.tnError(100)
+	view := m.tnFailed(100)
 	if !strings.Contains(view, "Press r") || strings.Contains(view, m.errorDetail) {
 		t.Fatalf("error screen must offer a retry and hide technical details by default:\n%s", view)
 	}
 
-	newModel, _ := m.updateError(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
-	nm := newModel.(InstallModel)
-	if view := nm.tnError(100); !strings.Contains(view, m.errorDetail) {
+	newModel, _ := m.updateFailed(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	nm := newModel.(SetupModel)
+	if view := nm.tnFailed(100); !strings.Contains(view, m.errorDetail) {
 		t.Fatalf("details should be available when requested:\n%s", view)
 	}
 }

@@ -3,13 +3,14 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/tui"
 	"github.com/spf13/cobra"
 )
 
 var doctorCmd = &cobra.Command{
 	Use:   "doctor",
-	Short: "Run a deep health check and display a report",
+	Short: "Check Omnideck and explain how to fix problems",
 	RunE:  runDoctor,
 }
 
@@ -18,6 +19,15 @@ func init() {
 }
 
 func runDoctor(_ *cobra.Command, _ []string) error {
+	instances, err := config.ListInstances()
+	if err != nil {
+		return fmt.Errorf("reading saved Omnideck installations: %w", err)
+	}
+	if LoadedConfig == nil && (len(instances) > 0 || nameFlag != "" || cfgPath != "") {
+		if err := requireConfigMulti(); err != nil {
+			return err
+		}
+	}
 	engName := ""
 	if LoadedConfig != nil {
 		engName = LoadedConfig.Engine

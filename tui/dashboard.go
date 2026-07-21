@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 // Screen identifies which view is currently visible.
@@ -22,10 +22,10 @@ type Screen int
 const (
 	ScreenDashboard Screen = iota
 	ScreenLogs
-	ScreenConfig  // modal overlay over Dashboard
-	ScreenDoctor  // modal overlay over Dashboard
-	ScreenInstall // install wizard modal
-	ScreenUpdate  // update wizard modal
+	ScreenSettings    // modal overlay over Dashboard
+	ScreenDoctor      // modal overlay over Dashboard
+	ScreenSetup       // setup workflow modal
+	ScreenMaintenance // update or repair workflow modal
 )
 
 // LogLine is one parsed container log entry.
@@ -35,14 +35,30 @@ type LogLine struct {
 	Msg   string
 }
 
-// cfgField is one editable row in the config modal.
-type cfgField struct {
+// settingField is one editable row in the settings modal.
+type settingField struct {
 	Key     string
-	Type    string // "string" | "path" | "memory" | "port"
+	Label   string
+	Type    string // short input-kind label shown beside the value
 	Value   string
 	Orig    string // value at modal open time, used to detect changes
 	Changed bool
 }
+
+type settingsStage int
+
+const (
+	settingsStageEditing settingsStage = iota
+	settingsStageApplying
+)
+
+type doctorStage int
+
+const (
+	doctorStageChecking doctorStage = iota
+	doctorStageResults
+	doctorStageActing
+)
 
 // InstanceState holds live runtime data for one managed instance.
 type InstanceState struct {
@@ -95,8 +111,13 @@ type doctorResultsMsg struct {
 
 type doctorActionDoneMsg struct{ err error }
 
-// containerToggleDoneMsg is returned by toggleContainer after the stop/start completes.
-type containerToggleDoneMsg instanceStatsMsg
+// containerToggleDoneMsg preserves lifecycle failures instead of inferring
+// success from a follow-up status poll.
+type containerToggleDoneMsg struct {
+	stats  instanceStatsMsg
+	action string
+	err    error
+}
 
 // logCopyResultMsg is returned after a clipboard copy attempt.
 type logCopyResultMsg struct{ err error }
@@ -104,18 +125,22 @@ type logCopyResultMsg struct{ err error }
 // logCopyClearMsg clears the "Copied!" flash after a delay.
 type logCopyClearMsg struct{}
 
-// WizardExitMsg is emitted by an embedded install/update wizard when done.
-type WizardExitMsg struct{}
+// WorkflowExitMsg is emitted when an embedded workflow returns to the dashboard.
+type WorkflowExitMsg struct{}
 
-// cfgApplyDoneMsg is returned after a container recreate triggered by a config save.
-type cfgApplyDoneMsg struct {
-	err     error
-	newName string // new container name (may differ from old)
-	idx     int
+// settingsApplyDoneMsg is returned after settings recreate and persist a container.
+type settingsApplyDoneMsg struct {
+	err error
+	cfg *config.Config
+	idx int
 }
 
-// instancesRefreshedMsg carries a fresh list of instances (e.g. after install).
-type instancesRefreshedMsg []config.InstanceInfo
+// instancesRefreshedMsg carries either a fresh instance list or the read error.
+// A refresh failure must never look like every instance was deleted.
+type instancesRefreshedMsg struct {
+	instances []config.InstanceInfo
+	err       error
+}
 
 // DashboardModel is the top-level Bubble Tea model for the v2 dashboard TUI.
 type DashboardModel struct {
@@ -135,7 +160,7 @@ type DashboardModel struct {
 
 	// Doctor modal
 	doctorResults []CheckResult
-	doctorDone    bool
+	doctorStage   doctorStage
 	doctorSpinner spinner.Model
 	doctorFocus   int
 	doctorMessage string
@@ -146,15 +171,17 @@ type DashboardModel struct {
 	logSearchQuery string
 	logCopied      bool
 
-	// Config modal
-	cfgFields  []cfgField
-	cfgFocus   int
-	cfgEditing bool
-	cfgBuf     string // in-progress edit buffer
+	// Settings modal
+	settingFields   []settingField
+	settingFocus    int
+	settingEditing  bool
+	settingBuffer   string // in-progress edit buffer
+	settingsStage   settingsStage
+	settingsMessage string
 
-	// Embedded wizard sub-models (active when screen == ScreenInstall/ScreenUpdate).
-	installModel InstallModel
-	updateModel  UpdateModel
+	// Embedded workflow models (active when screen == ScreenSetup/ScreenMaintenance).
+	setupModel       SetupModel
+	maintenanceModel MaintenanceModel
 }
 
 // CurrentInstance returns a pointer to the selected instance, or nil.
@@ -186,20 +213,35 @@ func NewDashboardModel(eng engine.Engine, instances []config.InstanceInfo) Dashb
 	}
 }
 
-// NewDashboardModelForInstall creates a dashboard that opens directly on the install wizard screen.
-func NewDashboardModelForInstall(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string) DashboardModel {
+// NewDashboardModelForDoctor opens Doctor for a selected broken installation.
+func NewDashboardModelForDoctor(eng engine.Engine, instances []config.InstanceInfo, selected int) DashboardModel {
 	m := NewDashboardModel(eng, instances)
-	cfg := suggestInstallDefaultsFor(instances)
-	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, imageOverride)
-	im.Embedded = true
-	if len(instances) == 0 {
-		im.setupMode = SetupFirstRun
-	} else {
-		im.setupMode = SetupAdditionalInstance
+	if selected >= 0 && selected < len(instances) {
+		m.selected = selected
 	}
-	im.preferredEngine = preferredEngine
-	m.installModel = im
-	m.screen = ScreenInstall
+	m.screen = ScreenDoctor
+	m.doctorStage = doctorStageChecking
+	return m
+}
+
+// NewDashboardModelForSetup creates a dashboard that opens directly in setup.
+func NewDashboardModelForSetup(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string) DashboardModel {
+	m := NewDashboardModel(eng, instances)
+	cfg := workflow.NewInstanceDefaults(instances)
+	mode := SetupAdditionalInstance
+	if len(instances) == 0 {
+		mode = SetupFirstRun
+	}
+	im := NewSetupModel(SetupRequest{
+		Initial:           cfg,
+		ImageOverride:     imageOverride,
+		ExistingInstances: instances,
+		Mode:              mode,
+		PreferredEngine:   preferredEngine,
+		Embedded:          true,
+	})
+	m.setupModel = im
+	m.screen = ScreenSetup
 	return m
 }
 
@@ -208,28 +250,32 @@ func NewDashboardModelForInstall(eng engine.Engine, instances []config.InstanceI
 func NewDashboardModelForRuntimeSetup(instances []config.InstanceInfo, preferredEngine string) DashboardModel {
 	m := NewDashboardModel(nil, instances)
 	cfg := config.DefaultConfig()
-	configPath := config.InstancePath(cfg.ContainerName)
 	if len(instances) > 0 && instances[0].Config != nil {
 		cfg = instances[0].Config
-		configPath = instances[0].Path
 	}
-	im := NewInstallModel(configPath, cfg, "")
-	im.Embedded = true
-	im.setupMode = SetupRuntimeRepair
-	im.preferredEngine = preferredEngine
-	m.installModel = im
-	m.screen = ScreenInstall
+	im := NewSetupModel(SetupRequest{
+		Initial:           cfg,
+		ExistingInstances: instances,
+		Mode:              SetupRuntimeRepair,
+		PreferredEngine:   preferredEngine,
+		Embedded:          true,
+	})
+	m.setupModel = im
+	m.screen = ScreenSetup
 	return m
 }
 
-// NewDashboardModelForUpdate creates a dashboard that opens directly on the update wizard screen.
+// NewDashboardModelForUpdate opens Maintenance in update mode.
 func NewDashboardModelForUpdate(eng engine.Engine, instances []config.InstanceInfo, cfg *config.Config, selectedIdx int) DashboardModel {
 	m := NewDashboardModel(eng, instances)
 	m.selected = selectedIdx
-	um := NewUpdateModel(cfg, eng)
-	um.Embedded = true
-	m.updateModel = um
-	m.screen = ScreenUpdate
+	configPath := ""
+	if selectedIdx >= 0 && selectedIdx < len(instances) {
+		configPath = instances[selectedIdx].Path
+	}
+	um := NewMaintenanceModel(MaintenanceRequest{Config: cfg, ConfigPath: configPath, Engine: eng, Embedded: true})
+	m.maintenanceModel = um
+	m.screen = ScreenMaintenance
 	return m
 }
 
@@ -242,11 +288,14 @@ func (m DashboardModel) Init() tea.Cmd {
 	for i := range m.instances {
 		cmds = append(cmds, m.pollStats(i))
 	}
-	if m.screen == ScreenInstall {
-		cmds = append(cmds, m.installModel.Init())
+	if m.screen == ScreenSetup {
+		cmds = append(cmds, m.setupModel.Init())
 	}
-	if m.screen == ScreenUpdate {
-		cmds = append(cmds, m.updateModel.Init())
+	if m.screen == ScreenMaintenance {
+		cmds = append(cmds, m.maintenanceModel.Init())
+	}
+	if m.screen == ScreenDoctor {
+		cmds = append(cmds, m.runDoctorCmd())
 	}
 	return tea.Batch(cmds...)
 }
@@ -358,86 +407,59 @@ func (m DashboardModel) runDoctorCmd() tea.Cmd {
 	}
 }
 
-// buildCfgFields populates m.cfgFields from the current instance's config.
-func (m *DashboardModel) buildCfgFields() {
+// buildSettingFields populates m.settingFields from the current instance's config.
+func (m *DashboardModel) buildSettingFields() {
 	inst := m.CurrentInstance()
 	if inst == nil {
-		m.cfgFields = nil
+		m.settingFields = nil
 		return
 	}
 	cfg := inst.Info.Config
-	m.cfgFields = []cfgField{
-		{Key: "home_volume", Type: "string", Value: cfg.HomeVolumeName(), Orig: cfg.HomeVolumeName()},
-		{Key: "state_volume", Type: "string", Value: cfg.StateVolumeName(), Orig: cfg.StateVolumeName()},
-		{Key: "memory", Type: "memory", Value: cfg.Memory, Orig: cfg.Memory},
-		{Key: "shm_size", Type: "memory", Value: cfg.ShmSize, Orig: cfg.ShmSize},
-		{Key: "web_ui_port", Type: "port", Value: cfg.WebUIPortOrDefault(), Orig: cfg.WebUIPortOrDefault()},
-		{Key: "image", Type: "string", Value: cfg.Image, Orig: cfg.Image},
+	m.settingFields = []settingField{
+		{Key: "home_volume", Label: "File storage", Type: "name", Value: cfg.HomeVolumeName(), Orig: cfg.HomeVolumeName()},
+		{Key: "state_volume", Label: "App storage", Type: "name", Value: cfg.StateVolumeName(), Orig: cfg.StateVolumeName()},
+		{Key: "memory", Label: "Memory limit", Type: "size", Value: cfg.Memory, Orig: cfg.Memory},
+		{Key: "shm_size", Label: "Shared memory", Type: "size", Value: cfg.ShmSize, Orig: cfg.ShmSize},
+		{Key: "web_ui_port", Label: "Browser port", Type: "number", Value: cfg.WebUIPortOrDefault(), Orig: cfg.WebUIPortOrDefault()},
+		{Key: "image", Label: "Container image", Type: "advanced", Value: cfg.Image, Orig: cfg.Image},
 	}
-	m.cfgFocus = 0
+	m.settingFocus = 0
+	m.settingsStage = settingsStageEditing
+	m.settingsMessage = ""
 }
 
-// saveCfgFields writes changed fields back to the instance config on disk.
-func (m *DashboardModel) saveCfgFields() error {
+// configFromSettingFields returns a candidate configuration without mutating or
+// persisting the configuration that describes the currently running container.
+func (m *DashboardModel) configFromSettingFields() *config.Config {
 	inst := m.CurrentInstance()
 	if inst == nil {
 		return nil
 	}
-	cfg := inst.Info.Config
-	for _, f := range m.cfgFields {
+	candidate := *inst.Info.Config
+	for _, f := range m.settingFields {
 		if !f.Changed {
 			continue
 		}
-		switch f.Key {
-		case "container_name":
-			cfg.ContainerName = f.Value
-		case "home_volume":
-			cfg.HomeVolume = f.Value
-		case "state_volume":
-			cfg.StateVolume = f.Value
-		case "memory":
-			cfg.Memory = f.Value
-		case "shm_size":
-			cfg.ShmSize = f.Value
-		case "web_ui_port":
-			cfg.WebUIPort = f.Value
-		case "image":
-			cfg.Image = f.Value
-		}
+		_ = workflow.ApplySetting(&candidate, f.Key, f.Value)
 	}
-	return config.Save(inst.Info.Path, cfg)
+	return &candidate
 }
 
-func (m *DashboardModel) validateCfgFields() error {
+func (m *DashboardModel) validateSettingFields() error {
 	inst := m.CurrentInstance()
 	if inst == nil || inst.Info.Config == nil {
 		return nil
 	}
-	oldName := inst.Info.Config.ContainerName
 	oldPort := inst.Info.Config.WebUIPortOrDefault()
-	for _, field := range m.cfgFields {
+	candidate := *inst.Info.Config
+	for _, field := range m.settingFields {
 		if !field.Changed {
 			continue
 		}
+		if err := workflow.ApplySetting(&candidate, field.Key, field.Value); err != nil {
+			return err
+		}
 		switch field.Key {
-		case "container_name":
-			if !checks.ValidContainerName(field.Value) {
-				return fmt.Errorf("name must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens")
-			}
-			for i, other := range m.instances {
-				if i != m.selected && other.Info.Config != nil && other.Info.Config.ContainerName == field.Value {
-					return fmt.Errorf("another Omnideck installation already uses the name %q", field.Value)
-				}
-			}
-			if field.Value != oldName && m.eng != nil {
-				exists, err := m.eng.ContainerExists(field.Value)
-				if err != nil {
-					return fmt.Errorf("could not check whether the name is available: %w", err)
-				}
-				if exists {
-					return fmt.Errorf("another container already uses the name %q", field.Value)
-				}
-			}
 		case "web_ui_port":
 			if !checks.ValidPort(field.Value) {
 				return fmt.Errorf("browser address number must be between 1 and 65535")
@@ -450,59 +472,77 @@ func (m *DashboardModel) validateCfgFields() error {
 			if field.Value != oldPort && !checks.PortAvailable(field.Value) {
 				return fmt.Errorf("another app is already using browser address number %s", field.Value)
 			}
-		case "memory", "shm_size":
-			if !validMemSize(field.Value) {
-				return fmt.Errorf("%s must be a number and unit, such as 512m or 2g", field.Key)
-			}
-		case "home_volume", "state_volume":
-			if field.Value != "" && !checks.ValidContainerName(field.Value) {
-				return fmt.Errorf("%s must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens", field.Key)
-			}
 		}
 	}
 	return nil
 }
 
-// startEmbeddedInstall sets up and launches the install wizard as an embedded screen.
-func (m DashboardModel) startEmbeddedInstall() (DashboardModel, tea.Cmd) {
-	cfg := suggestInstallDefaults()
-	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, "")
-	im.Embedded = true
+// startEmbeddedSetup launches setup as an embedded workflow.
+func (m DashboardModel) startEmbeddedSetup() (DashboardModel, tea.Cmd) {
+	return m.startEmbeddedSetupWithRuntime("")
+}
+
+func (m DashboardModel) startEmbeddedSetupWithRuntime(requestedRuntime string) (DashboardModel, tea.Cmd) {
+	instances := make([]config.InstanceInfo, len(m.instances))
+	for i := range m.instances {
+		instances[i] = m.instances[i].Info
+	}
+	cfg := workflow.NewInstanceDefaults(instances)
+	mode := SetupAdditionalInstance
 	if len(m.instances) == 0 {
-		im.setupMode = SetupFirstRun
-	} else {
-		im.setupMode = SetupAdditionalInstance
+		mode = SetupFirstRun
 	}
-	if m.eng != nil {
-		im.preferredEngine = m.eng.Name()
+	preferredEngine := requestedRuntime
+	if preferredEngine == "" && m.eng != nil {
+		preferredEngine = m.eng.Name()
 	}
-	im.WindowWidth = m.width
-	im.WindowHeight = m.height
-	m.installModel = im
-	m.screen = ScreenInstall
+	im := NewSetupModel(SetupRequest{
+		Initial:           cfg,
+		ExistingInstances: instances,
+		Mode:              mode,
+		PreferredEngine:   preferredEngine,
+		Embedded:          true,
+		WindowWidth:       m.width,
+		WindowHeight:      m.height,
+	})
+	m.setupModel = im
+	m.screen = ScreenSetup
 	return m, im.Init()
 }
 
-// startEmbeddedUpdate sets up and launches the update wizard as an embedded screen.
+// startEmbeddedUpdate launches Maintenance in update mode.
 func (m DashboardModel) startEmbeddedUpdate() (DashboardModel, tea.Cmd) {
+	return m.startEmbeddedMaintenance(MaintenanceUpdate)
+}
+
+func (m DashboardModel) startEmbeddedRepair() (DashboardModel, tea.Cmd) {
+	return m.startEmbeddedMaintenance(MaintenanceRepair)
+}
+
+func (m DashboardModel) startEmbeddedMaintenance(mode MaintenanceMode) (DashboardModel, tea.Cmd) {
 	inst := m.CurrentInstance()
 	if inst == nil {
 		return m, nil
 	}
-	um := NewUpdateModel(inst.Info.Config, m.eng)
-	um.Embedded = true
+	um := NewMaintenanceModel(MaintenanceRequest{
+		Config:     inst.Info.Config,
+		ConfigPath: inst.Info.Path,
+		Engine:     m.eng,
+		Embedded:   true,
+		Mode:       mode,
+	})
 	um.WindowWidth = m.width
 	um.WindowHeight = m.height
-	m.updateModel = um
-	m.screen = ScreenUpdate
+	m.maintenanceModel = um
+	m.screen = ScreenMaintenance
 	return m, um.Init()
 }
 
 // reloadInstancesCmd fetches the current instance list and returns instancesRefreshedMsg.
 func reloadInstancesCmd() tea.Cmd {
 	return func() tea.Msg {
-		instances, _ := config.ListInstances()
-		return instancesRefreshedMsg(instances)
+		instances, err := config.ListInstances()
+		return instancesRefreshedMsg{instances: instances, err: err}
 	}
 }
 
@@ -511,38 +551,19 @@ func clearToastCmd() tea.Cmd {
 	return tea.Tick(1700*time.Millisecond, func(time.Time) tea.Msg { return toastClearMsg{} })
 }
 
-// applyConfigCmd stops and removes the old container, then recreates it with the new config.
-// oldName is the container name before any rename so we can stop/remove the right container.
-func applyConfigCmd(oldName, oldPort string, cfg *config.Config, eng engine.Engine, idx int) tea.Cmd {
+// applySettingsCmd recreates the container first, then saves the candidate settings.
+// If either operation fails it restores the previous runtime/settings pairing.
+func applySettingsCmd(current, candidate *config.Config, configPath string, eng engine.Engine, idx int) tea.Cmd {
 	return func() tea.Msg {
-		if cfg.ContainerName != oldName {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil {
-				return cfgApplyDoneMsg{err: err, newName: cfg.ContainerName, idx: idx}
-			}
-			if exists {
-				return cfgApplyDoneMsg{err: fmt.Errorf("another container already uses the name %q", cfg.ContainerName), newName: cfg.ContainerName, idx: idx}
-			}
+		currentCopy := *current
+		candidateCopy := *candidate
+		if candidateCopy.WebUIPortOrDefault() != currentCopy.WebUIPortOrDefault() && !checks.PortAvailable(candidateCopy.WebUIPortOrDefault()) {
+			return settingsApplyDoneMsg{err: fmt.Errorf("another app is already using browser address number %s", candidateCopy.WebUIPortOrDefault()), idx: idx}
 		}
-		if cfg.WebUIPortOrDefault() != oldPort && !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-			return cfgApplyDoneMsg{err: fmt.Errorf("another app is already using browser address number %s", cfg.WebUIPortOrDefault()), newName: cfg.ContainerName, idx: idx}
+		if err := workflow.RecreateAndSave(eng, &currentCopy, &candidateCopy, configPath); err != nil {
+			return settingsApplyDoneMsg{err: err, idx: idx}
 		}
-		_ = eng.StopContainer(oldName)
-		_ = eng.RemoveContainer(oldName)
-		opts := engine.RunOptions{
-			Name:        cfg.ContainerName,
-			Image:       cfg.Image,
-			Memory:      cfg.Memory,
-			ShmSize:     cfg.ShmSize,
-			HomeVolume:  cfg.HomeVolumeName(),
-			StateVolume: cfg.StateVolumeName(),
-			Restart:     "always",
-			OllamaHost:  checks.OllamaHost(),
-			WebUIPort:   cfg.WebUIPortOrDefault(),
-			Platform:    runtime.GOOS,
-		}
-		err := eng.RunContainer(opts)
-		return cfgApplyDoneMsg{err: err, newName: cfg.ContainerName, idx: idx}
+		return settingsApplyDoneMsg{cfg: &candidateCopy, idx: idx}
 	}
 }
 
@@ -553,46 +574,6 @@ func pushHistory(hist []float64, val float64) []float64 {
 		hist = hist[len(hist)-16:]
 	}
 	return hist
-}
-
-// suggestInstallDefaults builds a Config pre-filled with a unique name and port.
-func suggestInstallDefaults() *config.Config {
-	instances, _ := config.ListInstances()
-	return suggestInstallDefaultsFor(instances)
-}
-
-func suggestInstallDefaultsFor(instances []config.InstanceInfo) *config.Config {
-	takenNames := map[string]bool{}
-	takenPorts := map[string]bool{}
-	maxPort := 2337
-	for _, inst := range instances {
-		if inst.Config == nil {
-			continue
-		}
-		takenNames[inst.Config.ContainerName] = true
-		takenPorts[inst.Config.WebUIPortOrDefault()] = true
-		if p, err := strconv.Atoi(inst.Config.WebUIPortOrDefault()); err == nil && p >= maxPort {
-			maxPort = p
-		}
-	}
-	d := config.DefaultConfig()
-	if len(takenNames) > 0 {
-		for i := 2; ; i++ {
-			name := fmt.Sprintf("omnideck%d", i)
-			if !takenNames[name] {
-				d.ContainerName = name
-				break
-			}
-		}
-	}
-	portStart := 2337
-	if len(takenPorts) > 0 {
-		portStart = maxPort + 1
-	}
-	if port, ok := checks.NextAvailablePort(portStart, takenPorts); ok {
-		d.WebUIPort = port
-	}
-	return d
 }
 
 // formatDuration formats a duration as a human-readable uptime string.

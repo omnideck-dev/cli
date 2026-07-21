@@ -10,29 +10,29 @@ import (
 	"github.com/omnideck-dev/cli/styles"
 )
 
-// TNView renders the install wizard in Tokyo Night style.
-// Called by DashboardModel.viewInstall() when Embedded == true.
-func (m InstallModel) TNView(w, _ int) string {
-	switch m.Phase {
-	case PhasePreflight:
-		return m.tnPreflight(w)
-	case PhaseRuntimeSetup:
+// TNView renders setup in Tokyo Night style.
+// Called by DashboardModel.viewSetup() when Embedded == true.
+func (m SetupModel) TNView(w, _ int) string {
+	switch m.Stage {
+	case SetupStageQuickCheck:
+		return m.tnQuickCheck(w)
+	case SetupStageRuntime:
 		return m.tnRuntimeSetup(w)
-	case PhaseConfig:
-		return m.tnConfig(w)
-	case PhaseConfirm:
-		return m.tnConfirm(w)
-	case PhaseInstall:
-		return m.tnInstall(w)
-	case PhaseDone:
-		return m.tnDone(w)
-	case PhaseError:
-		return m.tnError(w)
+	case SetupStageSettings:
+		return m.tnSettings(w)
+	case SetupStageReview:
+		return m.tnReview(w)
+	case SetupStageApplying:
+		return m.tnApplying(w)
+	case SetupStageComplete:
+		return m.tnComplete(w)
+	case SetupStageFailed:
+		return m.tnFailed(w)
 	}
 	return ""
 }
 
-func (m InstallModel) tnRuntimeSetup(w int) string {
+func (m SetupModel) tnRuntimeSetup(w int) string {
 	var sb strings.Builder
 	if len(m.runtimePlans) == 0 {
 		sb.WriteString("\n")
@@ -48,7 +48,7 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 		writeTNWrapped(&sb, w, "  ", "  ", message, styles.TNDimText)
 		sb.WriteString("\n")
 		if m.runtimeSetupStage == runtimeSetupWorking {
-			sb.WriteString("  " + m.preflightSpinner.View() + " " + styles.TNDimText.Render("Checking again…") + "\n")
+			sb.WriteString("  " + m.quickCheckSpinner.View() + " " + styles.TNDimText.Render("Checking again…") + "\n")
 		} else {
 			writeTNWrapped(&sb, w, "  ", "  ", "Press R to check again. You can also press Q to leave setup.", styles.TNGreenTxt)
 		}
@@ -168,7 +168,7 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeMessage, style)
 	}
 	if m.runtimeSetupStage == runtimeSetupWorking {
-		sb.WriteString("\n  " + m.preflightSpinner.View() + " " + styles.TNDimText.Render("Working…") + "\n")
+		sb.WriteString("\n  " + m.quickCheckSpinner.View() + " " + styles.TNDimText.Render("Working…") + "\n")
 	}
 	return sb.String()
 }
@@ -202,7 +202,7 @@ func friendlyOS(goos string) string {
 	}
 }
 
-func (m InstallModel) tnPreflight(_ int) string {
+func (m SetupModel) tnQuickCheck(_ int) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 
@@ -222,7 +222,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 	}
 
 	if m.eng != nil {
-		permDone := m.preflightDone >= 2
+		permDone := m.quickCheckDone >= 2
 		if permDone {
 			detail := "your account can use it"
 			if m.permErr != nil {
@@ -254,7 +254,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 	for _, r := range rows {
 		label := padRight(r.label, labelW)
 		if !r.done {
-			sb.WriteString("  " + m.preflightSpinner.View() + "  " + styles.TNDimText.Render(label+"checking…") + "\n")
+			sb.WriteString("  " + m.quickCheckSpinner.View() + "  " + styles.TNDimText.Render(label+"checking…") + "\n")
 		} else if r.warn {
 			sb.WriteString("  " + styles.TNYellowTxt.Render("!") + "  " + styles.TNYellowTxt.Render(label+r.detail) + "\n")
 		} else if r.ok {
@@ -263,10 +263,10 @@ func (m InstallModel) tnPreflight(_ int) string {
 			sb.WriteString("  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(label+r.detail) + "\n")
 		}
 	}
-	if m.preflightReady && m.preferredEngine == "" && len(m.availableEngines) > 1 {
+	if m.quickCheckReady && m.preferredEngine == "" && len(m.availableEngines) > 1 {
 		sb.WriteString("\n  " + styles.TNTextSub.Render("Both Podman and Docker are ready.") + "\n")
 		sb.WriteString("  " + styles.TNDimText.Render("Press Tab to switch, or Enter to continue with "+runtimeNameForPeople(m.eng.Name())+".") + "\n")
-	} else if m.preflightReady && m.preferredEngine == "" {
+	} else if m.quickCheckReady && m.preferredEngine == "" {
 		if alternative := m.setupAlternativeRuntime(); alternative != "" {
 			currentName := runtimeNameForPeople(m.eng.Name())
 			alternativeName := runtimeNameForPeople(alternative)
@@ -275,7 +275,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 			alternativePrefix := "    "
 			currentStyle := styles.TNTextBold
 			alternativeStyle := styles.TNDimText
-			if m.preflightAlternative != "" {
+			if m.quickCheckAlternative != "" {
 				currentPrefix = "    "
 				alternativePrefix = "  " + styles.TNBlueTxt.Render("▸ ")
 				currentStyle = styles.TNDimText
@@ -299,10 +299,10 @@ func runtimeNameForPeople(name string) string {
 	return name
 }
 
-func (m InstallModel) tnConfig(w int) string {
+func (m SetupModel) tnSettings(w int) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	if !m.configAdvanced {
+	if !m.settingsAdvanced {
 		sb.WriteString("  " + styles.TNTextBold.Render("Recommended settings are ready") + "\n")
 		sb.WriteString("  " + styles.TNDimText.Render("Omnideck chose sensible settings for this computer. Most people can continue without changing anything.") + "\n\n")
 		sb.WriteString("  " + styles.TNDimText.Render(padRight("Name", 18)) + styles.TNTextSub.Render(m.inputs[inputContainerName].Value()) + "\n")
@@ -353,7 +353,7 @@ func (m InstallModel) tnConfig(w int) string {
 	return sb.String()
 }
 
-func (m InstallModel) tnConfirm(w int) string {
+func (m SetupModel) tnReview(w int) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 
@@ -377,11 +377,11 @@ func (m InstallModel) tnConfirm(w int) string {
 	sb.WriteString(kv("Name", m.inputs[inputContainerName].Value()))
 	sb.WriteString(kv("Memory", m.inputs[inputMemory].Value()))
 
-	for _, warn := range m.confirmWarnings {
+	for _, warn := range m.reviewWarnings {
 		sb.WriteString("\n  " + styles.TNYellowTxt.Render("⚠  ") + styles.TNDimText.Render(warn) + "\n")
 	}
 
-	if m.confirmShowDetails {
+	if m.reviewShowDetails {
 		sb.WriteString("\n  " + styles.TNFaintText.Render("Technical details") + "\n")
 		sb.WriteString(kv("Computer", runtime.GOOS+" / "+runtime.GOARCH))
 		sb.WriteString(kv("File storage", cfg.HomeVolumeName()))
@@ -396,7 +396,7 @@ func (m InstallModel) tnConfirm(w int) string {
 	return sb.String()
 }
 
-func (m InstallModel) tnInstall(_ int) string {
+func (m SetupModel) tnApplying(_ int) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
 	for _, step := range m.spinnerModel.Steps {
@@ -405,7 +405,7 @@ func (m InstallModel) tnInstall(_ int) string {
 	return sb.String()
 }
 
-func (m InstallModel) tnDone(_ int) string {
+func (m SetupModel) tnComplete(_ int) string {
 	var sb strings.Builder
 	sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render("Omnideck is ready!") + "\n\n")
 
@@ -416,7 +416,7 @@ func (m InstallModel) tnDone(_ int) string {
 	return sb.String()
 }
 
-func (m InstallModel) tnError(_ int) string {
+func (m SetupModel) tnFailed(_ int) string {
 	var sb strings.Builder
 	sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render("Omnideck could not finish setup") + "\n\n")
 	if m.errorMsg != "" {

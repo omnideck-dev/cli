@@ -72,12 +72,19 @@ func runStatus(_ *cobra.Command, _ []string) error {
 
 	containerDot := styles.RedBullet()
 	running := false
-	if res.containerStatus == "running" {
+	containerStatus := res.containerStatus
+	if containerStatus == "" {
+		containerStatus = "not found"
+		if res.containerErr != nil {
+			containerStatus = "unavailable"
+		}
+	}
+	if containerStatus == "running" {
 		containerDot = styles.GreenBullet()
 		running = true
 	}
 
-	ollamaStatus := styles.Error.Render("✗ not reachable")
+	ollamaStatus := styles.Dim.Render("○ not detected (optional)")
 	if res.ollamaOK {
 		ollamaStatus = styles.Success.Render("✓ reachable at " + res.ollamaHost)
 	}
@@ -94,9 +101,9 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	fmt.Println()
 	fmt.Println(styles.Title.Render("  Omnideck Status"))
 	fmt.Println("  " + sep)
-	fmt.Printf("  %s %s %s\n", label.Render("Container"), value.Render(cfg.ContainerName), containerDot+" "+res.containerStatus)
+	fmt.Printf("  %s %s %s\n", label.Render("Container"), value.Render(cfg.ContainerName), containerDot+" "+containerStatus)
 	fmt.Printf("  %s %s\n", label.Render("Image"), value.Render(cfg.Image))
-	fmt.Printf("  %s %s\n", label.Render("Runtime"), value.Render(eng.Name()))
+	fmt.Printf("  %s %s\n", label.Render("Runtime"), value.Render(runtimeDisplayName(eng.Name())))
 	fmt.Printf("  %s %s  %s\n", label.Render("Home volume"), value.Render(cfg.HomeVolumeName()), homeVolumeStatus)
 	fmt.Printf("  %s %s  %s\n", label.Render("State volume"), value.Render(cfg.StateVolumeName()), stateVolumeStatus)
 	fmt.Printf("  %s %s\n", label.Render("Ollama"), ollamaStatus)
