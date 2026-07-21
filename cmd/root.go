@@ -85,9 +85,9 @@ func init() {
 			case interactiveStartRuntimeSetup:
 				return runRuntimeSetup(instances)
 			case interactiveStartDoctor:
-				return runDashboardForDoctor(readyEngine, instances, brokenIndex)
+				return runAppForDoctor(readyEngine, instances, brokenIndex)
 			}
-			return runDashboard(readyEngine, instances, LoadedConfig, ConfigPath)
+			return runApp(readyEngine, instances, LoadedConfig, ConfigPath)
 		}
 		return cmd.Help()
 	}

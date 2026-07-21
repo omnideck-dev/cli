@@ -12,9 +12,9 @@ import (
 
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
-	Short: "Open the interactive dashboard TUI",
-	Long: `Opens the full Omnideck dashboard — a keyboard-driven terminal UI for managing
-all installed instances. Shows live CPU/memory stats, logs, settings, and health checks.
+	Short: "Open the interactive Omnideck app",
+	Long: `Opens Omnideck's keyboard-driven terminal app for managing all installed
+instances. Shows live CPU/memory stats, logs, settings, and health checks.
 
 Key bindings (Dashboard):
   ↑↓      move selection
@@ -46,27 +46,27 @@ func runTUI(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		return fmt.Errorf("reading saved Omnideck installations: %w", err)
 	}
-	return runDashboard(eng, instances, LoadedConfig, ConfigPath)
+	return runApp(eng, instances, LoadedConfig, ConfigPath)
 }
 
-// runDashboard is the single interactive shell for returning users. A legacy
+// runApp is the single interactive shell for returning users. A legacy
 // single-file configuration is included until the user next saves it in the
 // conventional instances directory.
-func runDashboard(eng engine.Engine, instances []config.InstanceInfo, loaded *config.Config, loadedPath string) error {
+func runApp(eng engine.Engine, instances []config.InstanceInfo, loaded *config.Config, loadedPath string) error {
 	if eng == nil {
 		return fmt.Errorf("Podman or Docker is not ready\nRun `omnideck` for guided setup")
 	}
 	instances = withLoadedInstance(instances, loaded, loadedPath)
-	model := tui.NewDashboardModel(eng, instances)
-	return runDashboardModel(model)
+	model := tui.NewAppModel(eng, instances)
+	return runAppModel(model)
 }
 
-func runDashboardForDoctor(eng engine.Engine, instances []config.InstanceInfo, selected int) error {
-	model := tui.NewDashboardModelForDoctor(eng, instances, selected)
-	return runDashboardModel(model)
+func runAppForDoctor(eng engine.Engine, instances []config.InstanceInfo, selected int) error {
+	model := tui.NewAppModelForDoctor(eng, instances, selected)
+	return runAppModel(model)
 }
 
-func runDashboardModel(model tui.DashboardModel) error {
+func runAppModel(model tui.AppModel) error {
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err

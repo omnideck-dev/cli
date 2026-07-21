@@ -61,7 +61,7 @@ func runSetup(_ *cobra.Command, _ []string) error {
 		return runSetupPlain(preferredEngine, instances)
 	}
 
-	model := tui.NewDashboardModelForSetup(nil, instances, setupImageFlag, preferredEngine)
+	model := tui.NewAppModelForSetup(nil, instances, setupImageFlag, preferredEngine)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
@@ -71,7 +71,7 @@ func runSetup(_ *cobra.Command, _ []string) error {
 // creating another Omnideck instance.
 func runRuntimeSetup(instances []config.InstanceInfo) error {
 	preferredEngine := configuredEngineName(LoadedConfig, instances)
-	model := tui.NewDashboardModelForRuntimeSetup(instances, preferredEngine)
+	model := tui.NewAppModelForRuntimeSetup(instances, preferredEngine)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err

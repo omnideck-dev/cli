@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 func TestRenderDoctorReportAllPass(t *testing.T) {
@@ -56,14 +57,14 @@ func TestRenderDoctorReportShowsHint(t *testing.T) {
 }
 
 func TestVolumeCheckMissing(t *testing.T) {
-	r := volumeCheck("Test volume", "missing-volume", &mockEngine{})
+	r := workflow.CheckVolume("Test volume", "missing-volume", &mockEngine{})
 	if r.Status != CheckFail {
 		t.Error("missing volume should be CheckFail")
 	}
 }
 
 func TestVolumeCheckExists(t *testing.T) {
-	r := volumeCheck("Test volume", "omnideck-home", &mockEngine{
+	r := workflow.CheckVolume("Test volume", "omnideck-home", &mockEngine{
 		volumes: map[string]bool{"omnideck-home": true},
 	})
 	if r.Status != CheckPass {
@@ -72,7 +73,7 @@ func TestVolumeCheckExists(t *testing.T) {
 }
 
 func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
-	results := runDoctorChecksWithProbes(
+	results, _ := workflow.DiagnoseWithProbes(
 		&config.Config{ContainerName: "omnideck", WebUIPort: "2337"},
 		&mockEngine{name: "docker"},
 		[]engine.ProbeResult{
@@ -100,7 +101,7 @@ func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
 
 func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results := runDoctorChecksWithProbes(cfg, &mockEngine{name: "docker", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
+	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "docker", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
 		{Name: "docker", State: engine.RuntimeReady, Version: "27.0.0"},
 	})
 	if results[0].Status != CheckPass {
@@ -117,7 +118,7 @@ func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 
 func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results := runDoctorChecksWithProbes(cfg, &mockEngine{name: "docker"}, []engine.ProbeResult{
+	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "docker"}, []engine.ProbeResult{
 		{Name: "docker", State: engine.RuntimeReady, Version: "27.0.0"},
 	})
 	instance := results[1]
@@ -150,8 +151,8 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 			WebUIPort:     "2337",
 		},
 	}}
-	m := NewDashboardModel(&mockEngine{name: "docker"}, instances)
-	m.screen = ScreenDoctor
+	m := NewAppModel(&mockEngine{name: "docker"}, instances)
+	m.router.Replace(RouteDoctor)
 	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{{
 		Label:       "Container runtime",
@@ -164,8 +165,8 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 	m.doctorFocus = 0
 
 	newModel, cmd := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := newModel.(DashboardModel)
-	if cmd == nil || nm.screen != ScreenSetup {
+	nm := newModel.(AppModel)
+	if cmd == nil || nm.router.Current() != RouteSetup {
 		t.Fatal("Doctor action should open guided runtime setup")
 	}
 	if nm.setupModel.setupMode != SetupRuntimeRepair || nm.setupModel.preferredEngine != "docker" {
@@ -174,9 +175,9 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 }
 
 func TestDoctorDashboardPresentsActionsWithoutTruncatingTheFix(t *testing.T) {
-	m := NewDashboardModel(nil, nil)
+	m := NewAppModel(nil, nil)
 	m.width, m.height = 100, 36
-	m.screen = ScreenDoctor
+	m.router.Replace(RouteDoctor)
 	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{
 		{
@@ -209,8 +210,8 @@ func TestDoctorDashboardOpensRepairReviewForMissingContainer(t *testing.T) {
 			Image:         "example:test",
 		},
 	}}
-	m := NewDashboardModel(&mockEngine{name: "docker"}, instances)
-	m.screen = ScreenDoctor
+	m := NewAppModel(&mockEngine{name: "docker"}, instances)
+	m.router.Replace(RouteDoctor)
 	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{{
 		Label:       "Omnideck instance",
@@ -221,9 +222,9 @@ func TestDoctorDashboardOpensRepairReviewForMissingContainer(t *testing.T) {
 	m.doctorFocus = 0
 
 	newModel, cmd := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
-	nm := newModel.(DashboardModel)
-	if cmd != nil || nm.screen != ScreenMaintenance || nm.maintenanceModel.Mode != MaintenanceRepair || nm.maintenanceModel.Stage != MaintenanceStageReview {
-		t.Fatalf("repair action = screen %d mode %d stage %d cmd %v", nm.screen, nm.maintenanceModel.Mode, nm.maintenanceModel.Stage, cmd)
+	nm := newModel.(AppModel)
+	if cmd != nil || nm.router.Current() != RouteMaintenance || nm.maintenanceModel.Mode != MaintenanceRepair || nm.maintenanceModel.Stage != MaintenanceStageReview {
+		t.Fatalf("repair action = route %d mode %d stage %d cmd %v", nm.router.Current(), nm.maintenanceModel.Mode, nm.maintenanceModel.Stage, cmd)
 	}
 	if !strings.Contains(nm.maintenanceModel.TNView(80), "same saved file and app-data volumes") {
 		t.Fatal("repair review must explain that saved data is reconnected")

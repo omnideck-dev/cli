@@ -376,8 +376,8 @@ func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
 	}
 	m.configureRuntimeSetup()
 
-	view := m.viewRuntimeSetup()
-	if !strings.Contains(view, "Choose Podman or Docker") || !strings.Contains(view, "isolated from the rest of your system") {
+	view := m.tnRuntimeSetup(80)
+	if !strings.Contains(view, "Choose Podman or Docker") || !strings.Contains(view, "Why this is needed") || !strings.Contains(view, "isolated") {
 		t.Fatalf("runtime setup must explain why the dependency exists:\n%s", view)
 	}
 	if len(m.runtimePlans) != 2 {
@@ -632,7 +632,7 @@ func TestRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
 		t.Fatalf("test requires the defensive empty-plan state, got %#v", m.runtimePlans)
 	}
 	view := m.tnRuntimeSetup(72)
-	if strings.Contains(view, "Choose an option below") || !strings.Contains(view, "Press R to check again") {
+	if strings.Contains(view, "Choose an option below") || !strings.Contains(view, "Press Enter to check again") {
 		t.Fatalf("empty setup state gives unusable guidance:\n%s", view)
 	}
 	newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
