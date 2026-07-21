@@ -15,6 +15,7 @@ type PodmanEngine struct{}
 func (e *PodmanEngine) Name() string { return "podman" }
 
 func (e *PodmanEngine) IsAvailable() bool {
+	prepareRuntimeCommand("podman")
 	if _, err := lookPath("podman"); err != nil {
 		return false
 	}
@@ -95,7 +96,6 @@ func (e *PodmanEngine) PullImage(image string, msgs chan<- string) error {
 }
 
 func (e *PodmanEngine) RunContainer(opts RunOptions) error {
-	// Podman uses --replace instead of pre-removing the container.
 	args := buildPodmanRunArgs(opts)
 	cmd := buildCmd("podman", args...)
 	cmd.Stdout = os.Stdout
@@ -156,7 +156,7 @@ func (e *PodmanEngine) TailLogs(name string, follow bool, tail int) error {
 
 // Version returns the Podman version string.
 func (e *PodmanEngine) Version() string {
-	cmd := exec.Command("podman", "version", "--format", "{{.Version}}")
+	cmd := buildCmd("podman", "version", "--format", "{{.Version}}")
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -166,7 +166,7 @@ func (e *PodmanEngine) Version() string {
 
 // ImageDigest returns the repo digest of the given image.
 func (e *PodmanEngine) ImageDigest(image string) string {
-	cmd := exec.Command("podman", "inspect", "--format", "{{index .RepoDigests 0}}", image)
+	cmd := buildCmd("podman", "inspect", "--format", "{{index .RepoDigests 0}}", image)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -174,7 +174,8 @@ func (e *PodmanEngine) ImageDigest(image string) string {
 	return strings.TrimSpace(string(out))
 }
 
-// buildPodmanRunArgs builds args for `podman run` — uses --replace instead of pre-remove.
+// buildPodmanRunArgs builds args for `podman run`. It deliberately avoids
+// --replace so a name collision can never remove an unrelated container.
 func buildPodmanRunArgs(opts RunOptions) []string {
 	restart := opts.Restart
 	if restart == "" {
@@ -187,7 +188,6 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 
 	args := []string{
 		"run", "-d",
-		"--replace",
 		"--name", opts.Name,
 		"--restart", restart,
 		"--shm-size=" + opts.ShmSize,
@@ -229,7 +229,7 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 
 // ContainerStats returns live CPU and memory stats for a running container.
 func (e *PodmanEngine) ContainerStats(name string) (cpu string, cpuPct float64, ram, ramTotal string, ramPct float64, err error) {
-	cmd := exec.Command("podman", "stats", "--no-stream",
+	cmd := buildCmd("podman", "stats", "--no-stream",
 		"--format", "{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}", name)
 	out, runErr := cmd.Output()
 	if runErr != nil {

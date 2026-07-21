@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -56,6 +58,10 @@ func ProbeAll() []ProbeResult {
 	return probeAllForOS(runtime.GOOS)
 }
 
+func prepareRuntimeCommand(name string) {
+	refreshRuntimePath(name, runtime.GOOS)
+}
+
 func probeAllForOS(goos string) []ProbeResult {
 	names := []string{"podman", "docker"}
 	results := make([]ProbeResult, len(names))
@@ -91,6 +97,7 @@ func ReadyEngines(probes []ProbeResult) []Engine {
 
 func probeRuntime(name, goos string) ProbeResult {
 	result := ProbeResult{Name: name, State: RuntimeMissing}
+	refreshRuntimePath(name, goos)
 	path, err := probeLookPath(name)
 	if err != nil {
 		return result
@@ -133,6 +140,63 @@ func probeRuntime(name, goos string) ProbeResult {
 		result.Detail = infoErr.Error()
 	}
 	return result
+}
+
+// refreshRuntimePath makes software installed while Omnideck is already open
+// visible to this process. Windows installers update future terminals, but an
+// existing process keeps the PATH it inherited when it started.
+func refreshRuntimePath(name, goos string) {
+	if goos != "windows" {
+		return
+	}
+
+	var candidates []string
+	switch name {
+	case "docker":
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			candidates = append(candidates,
+				filepath.Join(localAppData, "Programs", "DockerDesktop", "resources", "bin"),
+			)
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			candidates = append(candidates,
+				filepath.Join(programFiles, "Docker", "Docker", "resources", "bin"),
+			)
+		}
+	case "podman":
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			candidates = append(candidates,
+				filepath.Join(localAppData, "Programs", "Podman"),
+			)
+		}
+		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+			candidates = append(candidates,
+				filepath.Join(programFiles, "Podman"),
+			)
+		}
+	default:
+		return
+	}
+
+	pathValue := os.Getenv("PATH")
+	pathEntries := filepath.SplitList(pathValue)
+	for _, candidate := range candidates {
+		binary := filepath.Join(candidate, name+".exe")
+		if _, err := os.Stat(binary); err != nil || pathEntryExists(pathEntries, candidate) {
+			continue
+		}
+		pathEntries = append(pathEntries, candidate)
+	}
+	_ = os.Setenv("PATH", strings.Join(pathEntries, string(os.PathListSeparator)))
+}
+
+func pathEntryExists(entries []string, target string) bool {
+	for _, entry := range entries {
+		if strings.EqualFold(filepath.Clean(entry), filepath.Clean(target)) {
+			return true
+		}
+	}
+	return false
 }
 
 func probeVersion(name string) string {

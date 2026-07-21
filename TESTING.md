@@ -7,11 +7,11 @@ to validate before a broader release. Items marked ✅ have been verified.
 
 ## 1. Container Internal Port
 
-**Assumption:** The container app listens on port 2337 internally (or respects
-the `PORT=2337` env var we set).
+**Current behavior:** The container app listens on port 8080 internally. The CLI
+maps each instance's chosen host port (2337, 2338, …) to container port 8080.
 
 **Risk:** If the image binds to a different port (e.g., 3000, 8000), the
-`-p HOST:2337` mapping silently fails — the container starts but the web UI is
+`-p HOST:8080` mapping silently fails — the container starts but the web UI is
 unreachable on any host port.
 
 **To test:**
@@ -25,7 +25,7 @@ unreachable on any host port.
 ## 2. Multi-Instance (Two Omnideck Installs)
 
 **To test:**
-- Install a second instance (`omnideck install`), confirm it picks port 2338
+- Set up a second instance (`omnideck setup`), confirm it picks port 2338
 - Both containers running simultaneously — confirm port 2337 and 2338 both load
   correct web UIs
 - `omnideck status` / `omnideck --name omnideck2 status` — correct instance shown
@@ -59,7 +59,7 @@ Combinations to validate end-to-end (install → use → uninstall):
 | Podman rootless | Linux (Ubuntu)  | Podman version may differ                  |
 | Podman rootful  | Linux           | Named volume behavior should match rootless |
 | Docker Desktop  | macOS           | Volume ownership handled by Desktop        |
-| Podman Desktop  | macOS           | Host aliases resolved by Podman machine DNS |
+| Podman          | macOS           | Host aliases resolved by Podman machine DNS |
 
 ---
 
@@ -106,7 +106,7 @@ Validate the new no-runtime and repair paths before promoting the preview:
 | Linux | Docker socket permission denied | Explain that Docker access can give apps full control of the computer; do not change account groups |
 | macOS | Podman installed, no machine | Run `podman machine init --now --update-connection=true`, then continue without a technical connection prompt |
 | macOS | Docker Desktop stopped | Launch app, wait, then recheck |
-| Windows | Neither installed | Recommend Docker Desktop/WSL 2; show Podman Desktop alternative |
+| Windows | Neither installed | Recommend Docker Desktop/WSL 2; show the official Podman installer as an alternative |
 | Windows | Podman machine stopped | Run `podman machine start`, then continue |
 | WSL 2 | Neither usable | Recommend Windows Docker Desktop and WSL integration |
 | Any | Runtime already healthy | Skip runtime setup entirely |
@@ -117,7 +117,7 @@ For every case, verify:
 - Every command is available under **technical details** before execution and uses direct arguments, not a shell pipeline.
 - Omnideck itself runs as the current user. Only the computer's built-in software or background-app tool may ask for the user's account password.
 - `--plain` prints guidance and exits non-zero without modifying the host.
-- `--engine docker` and `--engine podman` honor the requested runtime even when the other is healthy.
+- The first setup honors `--engine docker` or `--engine podman`; later setups keep the saved machine-wide runtime.
 
 ---
 

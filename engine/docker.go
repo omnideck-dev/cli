@@ -17,6 +17,7 @@ type DockerEngine struct{}
 func (e *DockerEngine) Name() string { return "docker" }
 
 func (e *DockerEngine) IsAvailable() bool {
+	prepareRuntimeCommand("docker")
 	if _, err := lookPath("docker"); err != nil {
 		return false
 	}
@@ -25,7 +26,7 @@ func (e *DockerEngine) IsAvailable() bool {
 }
 
 func (e *DockerEngine) HasPermission() bool {
-	cmd := exec.Command("docker", "ps")
+	cmd := buildCmd("docker", "ps")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return !strings.Contains(string(out), "permission denied") &&
@@ -227,6 +228,7 @@ func buildRunArgs(binary string, opts RunOptions) []string {
 
 // buildCmd builds an exec.Cmd and prints the command if debug mode is on.
 func buildCmd(binary string, args ...string) *exec.Cmd {
+	prepareRuntimeCommand(binary)
 	if debug.Enabled() {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", binary, strings.Join(args, " "))
 	}
@@ -235,7 +237,7 @@ func buildCmd(binary string, args ...string) *exec.Cmd {
 
 // ContainerVersion returns the Docker version string.
 func (e *DockerEngine) Version() string {
-	cmd := exec.Command("docker", "version", "--format", "{{.Server.Version}}")
+	cmd := buildCmd("docker", "version", "--format", "{{.Server.Version}}")
 	out, err := cmd.Output()
 	if err != nil {
 		return "unknown"
@@ -245,7 +247,7 @@ func (e *DockerEngine) Version() string {
 
 // ImageDigest returns the repo digest of the given image.
 func (e *DockerEngine) ImageDigest(image string) string {
-	cmd := exec.Command("docker", "inspect", "--format", "{{index .RepoDigests 0}}", image)
+	cmd := buildCmd("docker", "inspect", "--format", "{{index .RepoDigests 0}}", image)
 	out, err := cmd.Output()
 	if err != nil {
 		return ""
@@ -256,7 +258,7 @@ func (e *DockerEngine) ImageDigest(image string) string {
 // ContainerStats returns live CPU and memory stats for a running container.
 // Calls `docker stats --no-stream` which blocks briefly; returns zero values for stopped containers.
 func (e *DockerEngine) ContainerStats(name string) (cpu string, cpuPct float64, ram, ramTotal string, ramPct float64, err error) {
-	cmd := exec.Command("docker", "stats", "--no-stream",
+	cmd := buildCmd("docker", "stats", "--no-stream",
 		"--format", "{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}", name)
 	out, runErr := cmd.Output()
 	if runErr != nil {

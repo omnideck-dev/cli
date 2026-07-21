@@ -162,8 +162,9 @@ func TestBuildRunArgsWindows(t *testing.T) {
 	assertNotContains(t, args, "--user")
 }
 
-// TestBuildPodmanRunArgsHasReplace verifies --replace is present and Linux uses host.containers.internal.
-func TestBuildPodmanRunArgsHasReplace(t *testing.T) {
+// TestBuildPodmanRunArgsDoesNotReplace verifies setup cannot remove an
+// unrelated container in a name-collision race.
+func TestBuildPodmanRunArgsDoesNotReplace(t *testing.T) {
 	opts := RunOptions{
 		Name:        "omnideck",
 		Image:       "ghcr.io/example/img:latest",
@@ -175,7 +176,7 @@ func TestBuildPodmanRunArgsHasReplace(t *testing.T) {
 	}
 
 	args := buildPodmanRunArgs(opts)
-	assertContains(t, args, "--replace")
+	assertNotContains(t, args, "--replace")
 	assertContains(t, args, "2337:8080")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
 	assertNotContains(t, args, "--network")
@@ -196,7 +197,7 @@ func TestBuildPodmanRunArgsMacOS(t *testing.T) {
 	}
 
 	args := buildPodmanRunArgs(opts)
-	assertContains(t, args, "--replace")
+	assertNotContains(t, args, "--replace")
 	assertContains(t, args, "2337:8080")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
 	assertContains(t, args, "omnideck-home:/home/omnideck")

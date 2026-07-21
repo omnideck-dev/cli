@@ -6,7 +6,6 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/omnideck-dev/cli/checks"
-	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
 	"github.com/spf13/cobra"
 )
@@ -27,19 +26,9 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}
 	cfg := LoadedConfig
 
-	// Detect engine.
-	var eng engine.Engine
-	switch cfg.Engine {
-	case "docker":
-		eng = &engine.DockerEngine{}
-	case "podman":
-		eng = &engine.PodmanEngine{}
-	default:
-		var err error
-		eng, err = engine.Detect()
-		if err != nil {
-			return err
-		}
+	eng, err := engineFromConfig(cfg.Engine)
+	if err != nil {
+		return err
 	}
 
 	// Gather status concurrently.
@@ -107,7 +96,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	fmt.Println("  " + sep)
 	fmt.Printf("  %s %s %s\n", label.Render("Container"), value.Render(cfg.ContainerName), containerDot+" "+res.containerStatus)
 	fmt.Printf("  %s %s\n", label.Render("Image"), value.Render(cfg.Image))
-	fmt.Printf("  %s %s\n", label.Render("Engine"), value.Render(cfg.Engine))
+	fmt.Printf("  %s %s\n", label.Render("Runtime"), value.Render(eng.Name()))
 	fmt.Printf("  %s %s  %s\n", label.Render("Home volume"), value.Render(cfg.HomeVolumeName()), homeVolumeStatus)
 	fmt.Printf("  %s %s  %s\n", label.Render("State volume"), value.Render(cfg.StateVolumeName()), stateVolumeStatus)
 	fmt.Printf("  %s %s\n", label.Render("Ollama"), ollamaStatus)

@@ -12,15 +12,17 @@ import (
 
 // Config holds all persisted settings for omnideck.
 type Config struct {
-	ContainerName string    `yaml:"container_name"`
-	HomeVolume    string    `yaml:"home_volume,omitempty"`
-	StateVolume   string    `yaml:"state_volume,omitempty"`
-	Memory        string    `yaml:"memory"` // container --memory limit (e.g. "2g")
-	ShmSize       string    `yaml:"shm_size"`
-	WebUIPort     string    `yaml:"web_ui_port"` // host port for the web UI (default "2337")
-	Engine        string    `yaml:"engine"`      // "docker" or "podman"
-	Image         string    `yaml:"image"`
-	InstalledAt   time.Time `yaml:"installed_at"`
+	ContainerName string `yaml:"container_name"`
+	HomeVolume    string `yaml:"home_volume,omitempty"`
+	StateVolume   string `yaml:"state_volume,omitempty"`
+	Memory        string `yaml:"memory"` // container --memory limit (e.g. "2g")
+	ShmSize       string `yaml:"shm_size"`
+	WebUIPort     string `yaml:"web_ui_port"` // host port for the web UI (default "2337")
+	// Engine is retained only to read configurations created before runtime
+	// selection became shared. New configurations leave it empty.
+	Engine      string    `yaml:"engine,omitempty"`
+	Image       string    `yaml:"image"`
+	InstalledAt time.Time `yaml:"installed_at"`
 }
 
 // DefaultImage is the current container image the CLI installs and updates to.
@@ -44,12 +46,22 @@ type InstanceInfo struct {
 // instancesDirOverride is set in tests to avoid touching the real config dir.
 var instancesDirOverride string
 
+// Dir returns the directory containing Omnideck's machine-wide settings and
+// instance configurations. OMNIDECK_CONFIG_DIR is intended for isolated test
+// and automation runs.
+func Dir() string {
+	if override := os.Getenv("OMNIDECK_CONFIG_DIR"); override != "" {
+		return expandHome(override)
+	}
+	return expandHome("~/.config/omnideck-cli")
+}
+
 // InstancesDir returns the directory where per-instance config files live.
 func InstancesDir() string {
 	if instancesDirOverride != "" {
 		return instancesDirOverride
 	}
-	return expandHome("~/.config/omnideck-cli/instances")
+	return filepath.Join(Dir(), "instances")
 }
 
 // InstancePath returns the config path for a named instance.
@@ -85,7 +97,7 @@ func ListInstances() ([]InstanceInfo, error) {
 
 // DefaultPath returns the legacy single-file config path (kept for --config flag use).
 func DefaultPath() string {
-	return expandHome("~/.config/omnideck-cli/config.yaml")
+	return filepath.Join(Dir(), "config.yaml")
 }
 
 // DefaultConfig returns a Config with sensible defaults.

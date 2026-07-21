@@ -7,6 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/tui"
@@ -23,36 +24,54 @@ var (
 )
 
 var installCmd = &cobra.Command{
-	Use:          "install",
-	Short:        "Install Omnideck via interactive TUI wizard",
+	Use:          "setup",
+	Aliases:      []string{"install"},
+	Short:        "Set up an Omnideck instance",
 	SilenceUsage: true,
-	Long: `Runs a full interactive TUI wizard to install and configure the Omnideck container.
+	Long: `Walks through setting up one Omnideck instance.
 
-Use --plain for non-interactive / CI-CD installs:
-  omnideck install --plain --name omnideck --port 2337`,
+Use --plain for non-interactive / CI-CD setup:
+  omnideck setup --plain --name omnideck --port 2337`,
 	RunE: runInstall,
 }
 
 func init() {
 	rootCmd.AddCommand(installCmd)
 	installCmd.Flags().StringVar(&installImageFlag, "image", "", "override container image")
-	installCmd.Flags().BoolVar(&installPlainFlag, "plain", false, "non-interactive install (no TUI) — for scripts and CI/CD")
+	installCmd.Flags().BoolVar(&installPlainFlag, "plain", false, "non-interactive setup (no TUI) — for scripts and CI/CD")
 	installCmd.Flags().StringVar(&installPortFlag, "port", "", "web UI host port (default: 2337)")
 	installCmd.Flags().StringVar(&installMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
 	installCmd.Flags().StringVar(&installShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
-	installCmd.Flags().StringVar(&installEngineFlag, "engine", "", "container engine to use: docker or podman (default: auto-detect, prefers podman)")
+	installCmd.Flags().StringVar(&installEngineFlag, "engine", "", "runtime for the first setup: docker or podman (later instances reuse it)")
 }
 
 func runInstall(_ *cobra.Command, _ []string) error {
 	if installEngineFlag != "" && installEngineFlag != "docker" && installEngineFlag != "podman" {
 		return fmt.Errorf("--engine must be docker or podman")
 	}
+	if RuntimeName != "" && installEngineFlag != "" && installEngineFlag != RuntimeName {
+		return fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --engine %s", RuntimeName, installEngineFlag)
+	}
 	if installPlainFlag {
 		return runInstallPlain()
 	}
 
 	instances, _ := config.ListInstances()
-	model := tui.NewDashboardModelForInstall(nil, instances, installImageFlag, installEngineFlag)
+	preferredEngine := RuntimeName
+	if preferredEngine == "" {
+		preferredEngine = installEngineFlag
+	}
+	model := tui.NewDashboardModelForInstall(nil, instances, installImageFlag, preferredEngine)
+	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	_, err := p.Run()
+	return err
+}
+
+// runRuntimeSetup repairs container support for existing installations without
+// creating another Omnideck instance.
+func runRuntimeSetup(instances []config.InstanceInfo) error {
+	preferredEngine := configuredEngineName(LoadedConfig, instances)
+	model := tui.NewDashboardModelForRuntimeSetup(instances, preferredEngine)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
@@ -64,27 +83,31 @@ func runInstallPlain() error {
 	probes := engine.ProbeAll()
 	available := engine.ReadyEngines(probes)
 	var eng engine.Engine
+	preferredEngine := RuntimeName
+	if preferredEngine == "" {
+		preferredEngine = installEngineFlag
+	}
 	for _, candidate := range available {
-		if installEngineFlag == "" || candidate.Name() == installEngineFlag {
+		if preferredEngine == "" || candidate.Name() == preferredEngine {
 			eng = candidate
 			break
 		}
 	}
 	if eng == nil {
-		printRuntimeSetupGuidanceFromProbes(installEngineFlag, probes)
-		if installEngineFlag != "" {
-			return fmt.Errorf("--engine %s is not ready; complete the setup option above", installEngineFlag)
+		printRuntimeSetupGuidanceFromProbes(preferredEngine, probes)
+		if preferredEngine != "" {
+			return fmt.Errorf("%s is not ready; complete the setup option above", preferredEngine)
 		}
 		return fmt.Errorf("neither Podman nor Docker is ready; complete one of the setup options above")
 	}
-	fmt.Printf("Engine: %s\n", eng.Name())
+	fmt.Printf("Runtime: %s\n", eng.Name())
 	for _, probe := range probes {
 		if probe.Name == eng.Name() && probe.Warning != "" {
 			fmt.Printf("Note: %s\n", probe.Warning)
 		}
 	}
 
-	cfg := config.DefaultConfig()
+	cfg := suggestNewInstanceDefaults()
 	if nameFlag != "" {
 		cfg.ContainerName = nameFlag
 	}
@@ -100,6 +123,16 @@ func runInstallPlain() error {
 	if installImageFlag != "" {
 		cfg.Image = installImageFlag
 	}
+	if nameFlag == "" {
+		availableName, err := suggestAvailableRuntimeName(cfg.ContainerName, eng)
+		if err != nil {
+			return err
+		}
+		cfg.ContainerName = availableName
+	}
+	if err := validatePlainSetup(cfg, eng); err != nil {
+		return err
+	}
 
 	savePath := config.InstancePath(cfg.ContainerName)
 
@@ -107,15 +140,21 @@ func runInstallPlain() error {
 		label string
 		fn    func() error
 	}{
+		{"Check that the name and browser address are available", func() error {
+			exists, err := eng.ContainerExists(cfg.ContainerName)
+			if err != nil {
+				return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
+			}
+			if exists {
+				return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
+			}
+			if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
+				return fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault())
+			}
+			return nil
+		}},
 		{"Prepare space for your files", func() error { return eng.CreateVolume(cfg.HomeVolumeName()) }},
 		{"Prepare space for Omnideck data", func() error { return eng.CreateVolume(cfg.StateVolumeName()) }},
-		{"Check for an earlier Omnideck installation", func() error {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil || !exists {
-				return nil
-			}
-			return eng.RemoveContainer(cfg.ContainerName)
-		}},
 		{"Download Omnideck", func() error {
 			msgs := make(chan string, 32)
 			go func() {
@@ -151,14 +190,16 @@ func runInstallPlain() error {
 		fmt.Println("ok")
 	}
 
-	fmt.Printf("\n✓  Omnideck installed: http://localhost:%s\n", cfg.WebUIPortOrDefault())
+	fmt.Printf("\n✓  Omnideck is ready: http://localhost:%s\n", cfg.WebUIPortOrDefault())
 	return nil
 }
 
-// saveInstalledConfig records which runtime created the container so later
-// commands keep using that runtime, even when both Podman and Docker are ready.
+// saveInstalledConfig records the machine-wide runtime and the new instance.
 func saveInstalledConfig(path string, cfg *config.Config, engineName string) error {
-	cfg.Engine = engineName
+	if err := config.SaveRuntime(engineName); err != nil {
+		return err
+	}
+	cfg.Engine = ""
 	cfg.InstalledAt = time.Now()
 	return config.Save(path, cfg)
 }
@@ -204,7 +245,7 @@ func printRuntimeSetupGuidanceFromProbes(preferred string, probes []engine.Probe
 			fmt.Printf("  %s\n", plan.SafetyNote)
 		}
 	}
-	fmt.Println("\nFor guided setup, run `omnideck install` without --plain.")
+	fmt.Println("\nFor guided setup, run `omnideck setup` without --plain.")
 	fmt.Println("After manual setup, run this command again.")
 }
 
@@ -215,25 +256,98 @@ func suggestNewInstanceDefaults() *config.Config {
 
 	// Collect names and ports already in use.
 	takenNames := map[string]bool{}
-	maxPort := 2337
+	takenPorts := map[string]bool{}
+	maxPort := 2336
 	for _, inst := range instances {
 		if inst.Config == nil {
 			continue
 		}
 		takenNames[inst.Config.ContainerName] = true
+		takenPorts[inst.Config.WebUIPortOrDefault()] = true
 		if p, err := strconv.Atoi(inst.Config.WebUIPortOrDefault()); err == nil && p >= maxPort {
 			maxPort = p
 		}
 	}
 
-	// Pick the first unused name: omnideck2, omnideck3, …
-	name := "omnideck2"
-	for i := 2; takenNames[name]; i++ {
-		name = fmt.Sprintf("omnideck%d", i)
+	name := "omnideck"
+	if takenNames[name] {
+		for i := 2; ; i++ {
+			name = fmt.Sprintf("omnideck%d", i)
+			if !takenNames[name] {
+				break
+			}
+		}
 	}
 
 	d := config.DefaultConfig()
 	d.ContainerName = name
-	d.WebUIPort = strconv.Itoa(maxPort + 1)
+	if port, ok := checks.NextAvailablePort(maxPort+1, takenPorts); ok {
+		d.WebUIPort = port
+	}
 	return d
+}
+
+func suggestAvailableRuntimeName(initial string, eng engine.Engine) (string, error) {
+	instances, err := config.ListInstances()
+	if err != nil {
+		return "", fmt.Errorf("checking existing installations: %w", err)
+	}
+	reserved := map[string]bool{}
+	for _, instance := range instances {
+		if instance.Config != nil {
+			reserved[instance.Config.ContainerName] = true
+		}
+	}
+	for suffix := 1; suffix < 10000; suffix++ {
+		candidate := initial
+		if suffix > 1 {
+			candidate = fmt.Sprintf("omnideck%d", suffix)
+		}
+		if reserved[candidate] {
+			continue
+		}
+		exists, err := eng.ContainerExists(candidate)
+		if err != nil {
+			return "", fmt.Errorf("checking the name %q: %w", candidate, err)
+		}
+		if !exists {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("could not find an available Omnideck name")
+}
+
+func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
+	if !checks.ValidContainerName(cfg.ContainerName) {
+		return fmt.Errorf("--name must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens")
+	}
+	if !checks.ValidPort(cfg.WebUIPortOrDefault()) {
+		return fmt.Errorf("--port must be a number between 1 and 65535")
+	}
+	instances, err := config.ListInstances()
+	if err != nil {
+		return fmt.Errorf("checking existing installations: %w", err)
+	}
+	for _, instance := range instances {
+		if instance.Config == nil {
+			continue
+		}
+		if instance.Config.ContainerName == cfg.ContainerName {
+			return fmt.Errorf("an Omnideck installation named %q already exists; choose a different --name", cfg.ContainerName)
+		}
+		if instance.Config.WebUIPortOrDefault() == cfg.WebUIPortOrDefault() {
+			return fmt.Errorf("another Omnideck installation already uses port %s; choose a different --port", cfg.WebUIPortOrDefault())
+		}
+	}
+	exists, err := eng.ContainerExists(cfg.ContainerName)
+	if err != nil {
+		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
+	}
+	if exists {
+		return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
+	}
+	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
+		return fmt.Errorf("another app is already using port %s; choose a different --port", cfg.WebUIPortOrDefault())
+	}
+	return nil
 }

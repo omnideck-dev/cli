@@ -84,6 +84,20 @@ func TestDefaultPath(t *testing.T) {
 	}
 }
 
+func TestConfigDirOverride(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("OMNIDECK_CONFIG_DIR", dir)
+	if got := Dir(); got != dir {
+		t.Fatalf("Dir() = %q, want %q", got, dir)
+	}
+	if got := InstancesDir(); got != filepath.Join(dir, "instances") {
+		t.Fatalf("InstancesDir() = %q", got)
+	}
+	if got := SettingsPath(); got != filepath.Join(dir, "settings.yaml") {
+		t.Fatalf("SettingsPath() = %q", got)
+	}
+}
+
 func TestInstancePath(t *testing.T) {
 	p := InstancePath("myapp")
 	home, _ := os.UserHomeDir()

@@ -13,7 +13,9 @@ import (
 
 // mockEngine is a minimal Engine stub for testing menu command runners.
 type mockEngine struct {
+	name            string
 	containerExists bool
+	containerNames  map[string]bool
 	containerStatus string
 	startErr        error
 	stopErr         error
@@ -22,7 +24,12 @@ type mockEngine struct {
 	volumes         map[string]bool
 }
 
-func (m *mockEngine) Name() string                          { return "mock" }
+func (m *mockEngine) Name() string {
+	if m.name != "" {
+		return m.name
+	}
+	return "docker"
+}
 func (m *mockEngine) IsAvailable() bool                     { return true }
 func (m *mockEngine) HasPermission() bool                   { return true }
 func (m *mockEngine) Version() string                       { return "1.0" }
@@ -31,7 +38,11 @@ func (m *mockEngine) PullImage(string, chan<- string) error { return nil }
 func (m *mockEngine) RunContainer(engine.RunOptions) error  { return nil }
 func (m *mockEngine) RemoveContainer(string) error          { return nil }
 func (m *mockEngine) TailLogs(string, bool, int) error      { return nil }
-func (m *mockEngine) ContainerExists(string) (bool, error) {
+
+func (m *mockEngine) ContainerExists(name string) (bool, error) {
+	if m.containerNames != nil {
+		return m.containerNames[name], nil
+	}
 	return m.containerExists, nil
 }
 func (m *mockEngine) CreateVolume(string) error { return nil }
@@ -67,8 +78,8 @@ var testCfg = &config.Config{
 
 func TestMenuCmdStartNilCfg(t *testing.T) {
 	msg := menuCmdStart(nil, &mockEngine{})
-	if msg.err == nil || !strings.Contains(msg.err.Error(), "not installed") {
-		t.Errorf("nil cfg: expected 'not installed' error, got %v", msg.err)
+	if msg.err == nil || !strings.Contains(msg.err.Error(), "not set up") {
+		t.Errorf("nil cfg: expected 'not set up' error, got %v", msg.err)
 	}
 }
 
@@ -170,7 +181,7 @@ func TestMenuCmdStatusRunning(t *testing.T) {
 
 func TestMenuCmdFetchLogsNilCfg(t *testing.T) {
 	lines := menuCmdFetchLogs(nil, &mockEngine{})
-	if len(lines) == 0 || !strings.Contains(lines[0], "not installed") {
+	if len(lines) == 0 || !strings.Contains(lines[0], "not set up") {
 		t.Errorf("nil cfg: expected error line, got %v", lines)
 	}
 }
@@ -219,6 +230,13 @@ func TestMenuTitleForUnknown(t *testing.T) {
 
 func newTestMenu() MenuModel {
 	return NewMenuModel("test", testCfg, nil, DefaultMenuItems())
+}
+
+func TestLauncherCallsNewInstanceFlowSetup(t *testing.T) {
+	items := DefaultMenuItems()
+	if items[1].Key != "install" || items[1].Label != "Setup" {
+		t.Fatalf("new-instance menu item = %#v, want Setup label with install action", items[1])
+	}
 }
 
 func updateMenu(m MenuModel, msg tea.Msg) MenuModel {

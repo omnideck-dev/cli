@@ -186,9 +186,28 @@ func NewDashboardModel(eng engine.Engine, instances []config.InstanceInfo) Dashb
 // NewDashboardModelForInstall creates a dashboard that opens directly on the install wizard screen.
 func NewDashboardModelForInstall(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string) DashboardModel {
 	m := NewDashboardModel(eng, instances)
-	cfg := suggestInstallDefaults()
+	cfg := suggestInstallDefaultsFor(instances)
 	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, imageOverride)
 	im.Embedded = true
+	im.preferredEngine = preferredEngine
+	m.installModel = im
+	m.screen = ScreenInstall
+	return m
+}
+
+// NewDashboardModelForRuntimeSetup opens container runtime setup for existing
+// installations and returns to the dashboard as soon as a runtime is ready.
+func NewDashboardModelForRuntimeSetup(instances []config.InstanceInfo, preferredEngine string) DashboardModel {
+	m := NewDashboardModel(nil, instances)
+	cfg := config.DefaultConfig()
+	configPath := config.InstancePath(cfg.ContainerName)
+	if len(instances) > 0 && instances[0].Config != nil {
+		cfg = instances[0].Config
+		configPath = instances[0].Path
+	}
+	im := NewInstallModel(configPath, cfg, "")
+	im.Embedded = true
+	im.setupOnly = true
 	im.preferredEngine = preferredEngine
 	m.installModel = im
 	m.screen = ScreenInstall
@@ -340,7 +359,6 @@ func (m *DashboardModel) buildCfgFields() {
 	}
 	cfg := inst.Info.Config
 	m.cfgFields = []cfgField{
-		{Key: "container_name", Type: "string", Value: cfg.ContainerName, Orig: cfg.ContainerName},
 		{Key: "home_volume", Type: "string", Value: cfg.HomeVolumeName(), Orig: cfg.HomeVolumeName()},
 		{Key: "state_volume", Type: "string", Value: cfg.StateVolumeName(), Orig: cfg.StateVolumeName()},
 		{Key: "memory", Type: "memory", Value: cfg.Memory, Orig: cfg.Memory},
@@ -382,11 +400,69 @@ func (m *DashboardModel) saveCfgFields() error {
 	return config.Save(inst.Info.Path, cfg)
 }
 
+func (m *DashboardModel) validateCfgFields() error {
+	inst := m.CurrentInstance()
+	if inst == nil || inst.Info.Config == nil {
+		return nil
+	}
+	oldName := inst.Info.Config.ContainerName
+	oldPort := inst.Info.Config.WebUIPortOrDefault()
+	for _, field := range m.cfgFields {
+		if !field.Changed {
+			continue
+		}
+		switch field.Key {
+		case "container_name":
+			if !checks.ValidContainerName(field.Value) {
+				return fmt.Errorf("name must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens")
+			}
+			for i, other := range m.instances {
+				if i != m.selected && other.Info.Config != nil && other.Info.Config.ContainerName == field.Value {
+					return fmt.Errorf("another Omnideck installation already uses the name %q", field.Value)
+				}
+			}
+			if field.Value != oldName && m.eng != nil {
+				exists, err := m.eng.ContainerExists(field.Value)
+				if err != nil {
+					return fmt.Errorf("could not check whether the name is available: %w", err)
+				}
+				if exists {
+					return fmt.Errorf("another container already uses the name %q", field.Value)
+				}
+			}
+		case "web_ui_port":
+			if !checks.ValidPort(field.Value) {
+				return fmt.Errorf("browser address number must be between 1 and 65535")
+			}
+			for i, other := range m.instances {
+				if i != m.selected && other.Info.Config != nil && other.Info.Config.WebUIPortOrDefault() == field.Value {
+					return fmt.Errorf("another Omnideck installation already uses browser address number %s", field.Value)
+				}
+			}
+			if field.Value != oldPort && !checks.PortAvailable(field.Value) {
+				return fmt.Errorf("another app is already using browser address number %s", field.Value)
+			}
+		case "memory", "shm_size":
+			if !validMemSize(field.Value) {
+				return fmt.Errorf("%s must be a number and unit, such as 512m or 2g", field.Key)
+			}
+		case "home_volume", "state_volume":
+			if field.Value != "" && !checks.ValidContainerName(field.Value) {
+				return fmt.Errorf("%s must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens", field.Key)
+			}
+		}
+	}
+	return nil
+}
+
 // startEmbeddedInstall sets up and launches the install wizard as an embedded screen.
 func (m DashboardModel) startEmbeddedInstall() (DashboardModel, tea.Cmd) {
 	cfg := suggestInstallDefaults()
 	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, "")
 	im.Embedded = true
+	if m.eng != nil {
+		im.preferredEngine = m.eng.Name()
+	}
 	im.WindowWidth = m.width
 	im.WindowHeight = m.height
 	m.installModel = im
@@ -424,8 +500,20 @@ func clearToastCmd() tea.Cmd {
 
 // applyConfigCmd stops and removes the old container, then recreates it with the new config.
 // oldName is the container name before any rename so we can stop/remove the right container.
-func applyConfigCmd(oldName string, cfg *config.Config, eng engine.Engine, idx int) tea.Cmd {
+func applyConfigCmd(oldName, oldPort string, cfg *config.Config, eng engine.Engine, idx int) tea.Cmd {
 	return func() tea.Msg {
+		if cfg.ContainerName != oldName {
+			exists, err := eng.ContainerExists(cfg.ContainerName)
+			if err != nil {
+				return cfgApplyDoneMsg{err: err, newName: cfg.ContainerName, idx: idx}
+			}
+			if exists {
+				return cfgApplyDoneMsg{err: fmt.Errorf("another container already uses the name %q", cfg.ContainerName), newName: cfg.ContainerName, idx: idx}
+			}
+		}
+		if cfg.WebUIPortOrDefault() != oldPort && !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
+			return cfgApplyDoneMsg{err: fmt.Errorf("another app is already using browser address number %s", cfg.WebUIPortOrDefault()), newName: cfg.ContainerName, idx: idx}
+		}
 		_ = eng.StopContainer(oldName)
 		_ = eng.RemoveContainer(oldName)
 		opts := engine.RunOptions{
@@ -457,24 +545,40 @@ func pushHistory(hist []float64, val float64) []float64 {
 // suggestInstallDefaults builds a Config pre-filled with a unique name and port.
 func suggestInstallDefaults() *config.Config {
 	instances, _ := config.ListInstances()
+	return suggestInstallDefaultsFor(instances)
+}
+
+func suggestInstallDefaultsFor(instances []config.InstanceInfo) *config.Config {
 	takenNames := map[string]bool{}
+	takenPorts := map[string]bool{}
 	maxPort := 2337
 	for _, inst := range instances {
 		if inst.Config == nil {
 			continue
 		}
 		takenNames[inst.Config.ContainerName] = true
+		takenPorts[inst.Config.WebUIPortOrDefault()] = true
 		if p, err := strconv.Atoi(inst.Config.WebUIPortOrDefault()); err == nil && p >= maxPort {
 			maxPort = p
 		}
 	}
-	name := "omnideck2"
-	for i := 2; takenNames[name]; i++ {
-		name = fmt.Sprintf("omnideck%d", i)
-	}
 	d := config.DefaultConfig()
-	d.ContainerName = name
-	d.WebUIPort = strconv.Itoa(maxPort + 1)
+	if len(takenNames) > 0 {
+		for i := 2; ; i++ {
+			name := fmt.Sprintf("omnideck%d", i)
+			if !takenNames[name] {
+				d.ContainerName = name
+				break
+			}
+		}
+	}
+	portStart := 2337
+	if len(takenPorts) > 0 {
+		portStart = maxPort + 1
+	}
+	if port, ok := checks.NextAvailablePort(portStart, takenPorts); ok {
+		d.WebUIPort = port
+	}
 	return d
 }
 

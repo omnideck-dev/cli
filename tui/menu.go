@@ -43,7 +43,7 @@ type MenuItem struct {
 func DefaultMenuItems() []MenuItem {
 	return []MenuItem{
 		{Key: "tui", Label: "Open Dashboard", Desc: "Full interactive terminal UI", External: true},
-		{Key: "install", Label: "Install", Desc: "Set up a new Omnideck container", External: true},
+		{Key: "install", Label: "Setup", Desc: "Set up another Omnideck instance", External: true},
 		{Key: "update", Label: "Update", Desc: "Pull latest image and restart", External: true},
 		{Key: "start", Label: "Start", Desc: "Start the container"},
 		{Key: "stop", Label: "Stop", Desc: "Stop the container"},
@@ -271,7 +271,7 @@ func (m MenuModel) cmdDispatch(key string) tea.Cmd {
 
 func menuCmdStart(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 	if cfg == nil {
-		return menuActionDoneMsg{err: fmt.Errorf("Omnideck is not installed.\nRun: omnideck install")}
+		return menuActionDoneMsg{err: fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")}
 	}
 	if eng == nil {
 		return menuActionDoneMsg{err: fmt.Errorf("No container engine found.\nInstall Podman: https://podman.io/docs/installation")}
@@ -281,7 +281,7 @@ func menuCmdStart(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 		return menuActionDoneMsg{err: err}
 	}
 	if !exists {
-		return menuActionDoneMsg{err: fmt.Errorf("container '%s' not found.\nRun: omnideck install", cfg.ContainerName)}
+		return menuActionDoneMsg{err: fmt.Errorf("container '%s' not found.\nRun: omnideck setup", cfg.ContainerName)}
 	}
 	if err := eng.StartContainer(cfg.ContainerName); err != nil {
 		return menuActionDoneMsg{err: err}
@@ -294,7 +294,7 @@ func menuCmdStart(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 
 func menuCmdStop(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 	if cfg == nil {
-		return menuActionDoneMsg{err: fmt.Errorf("Omnideck is not installed.\nRun: omnideck install")}
+		return menuActionDoneMsg{err: fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")}
 	}
 	if eng == nil {
 		return menuActionDoneMsg{err: fmt.Errorf("No container engine found.\nInstall Podman: https://podman.io/docs/installation")}
@@ -317,7 +317,7 @@ func menuCmdStop(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 
 func menuCmdStatus(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 	if cfg == nil {
-		return menuActionDoneMsg{err: fmt.Errorf("Omnideck is not installed.\nRun: omnideck install")}
+		return menuActionDoneMsg{err: fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")}
 	}
 	if eng == nil {
 		return menuActionDoneMsg{err: fmt.Errorf("No container engine found.\nInstall Podman: https://podman.io/docs/installation")}
@@ -390,7 +390,7 @@ func menuCmdStatus(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 		"",
 		kv("CONTAINER", cfg.ContainerName, styles.TNTextSub),
 		kv("IMAGE", cfg.Image, styles.TNCyanTxt),
-		kv("ENGINE", cfg.Engine, styles.TNTextSub),
+		kv("RUNTIME", eng.Name(), styles.TNTextSub),
 		kv("PORT", ":"+cfg.WebUIPortOrDefault(), styles.TNTextSub),
 		kv("HOME VOLUME", cfg.HomeVolumeName()+"  "+homeVolumeVal, styles.TNFaintText),
 		kv("STATE VOLUME", cfg.StateVolumeName()+"  "+stateVolumeVal, styles.TNFaintText),
@@ -427,7 +427,7 @@ func menuCmdDoctor(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 
 func menuCmdFetchLogs(cfg *config.Config, eng engine.Engine) menuLogsReadyMsg {
 	if cfg == nil {
-		return menuLogsReadyMsg{"  " + styles.TNRedTxt.Render("✗") + "  not installed"}
+		return menuLogsReadyMsg{"  " + styles.TNRedTxt.Render("✗") + "  not set up"}
 	}
 	if eng == nil {
 		return menuLogsReadyMsg{"  " + styles.TNRedTxt.Render("✗") + "  no container engine found — install Podman: https://podman.io/docs/installation"}

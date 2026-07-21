@@ -16,6 +16,7 @@ port="${OMNIDECK_HARDWARE_PORT:-$((42000 + ($$ % 2000)))}"
 registry_port="${OMNIDECK_HARDWARE_REGISTRY_PORT:-$((46000 + ($$ % 1000)))}"
 output_dir="${OMNIDECK_HARDWARE_OUTPUT_DIR:-${repo_root}/artifacts/hardware/${host_os}-${host_arch}-${safe_run_id}}"
 temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/omnideck-hardware.XXXXXX")"
+export OMNIDECK_CONFIG_DIR="${temp_dir}/config"
 cli_path="${temp_dir}/omnideck"
 log_file="${output_dir}/hardware-test.log"
 summary_file="${output_dir}/summary.json"
@@ -198,11 +199,13 @@ if [[ -z "${fixture_image}" ]]; then
   "${engine}" push "${fixture_image}"
 fi
 
-current_step="install"
-run_cli install --plain --engine "${engine}" --image "${fixture_image}" \
+current_step="setup"
+run_cli setup --plain --engine "${engine}" --image "${fixture_image}" \
   --port "${port}" --memory 512m --shm-size 64m
 
-grep -Eq "^engine:[[:space:]]+${engine}$" "${config_path}" || fail "The saved configuration did not record engine: ${engine}."
+settings_path="${OMNIDECK_CONFIG_DIR}/settings.yaml"
+grep -Eq "^runtime:[[:space:]]+${engine}$" "${settings_path}" || fail "The shared settings did not record runtime: ${engine}."
+if grep -Eq "^engine:" "${config_path}"; then fail "The instance configuration still contains a per-instance runtime."; fi
 grep -Eq "^container_name:[[:space:]]+${instance}$" "${config_path}" || fail "The saved configuration has the wrong container name."
 
 current_step="verify web UI"

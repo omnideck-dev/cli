@@ -5,6 +5,7 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
 )
@@ -31,61 +32,59 @@ func (m InstallModel) TNView(w, _ int) string {
 	return ""
 }
 
-func (m InstallModel) tnRuntimeSetup(_ int) string {
+func (m InstallModel) tnRuntimeSetup(w int) string {
 	var sb strings.Builder
 	if len(m.runtimePlans) == 0 {
-		return "\n  " + styles.TNRedTxt.Render("Omnideck could not find a setup option for this computer.") + "\n  " + styles.TNDimText.Render("Press q to leave, then visit https://podman.io/docs/installation for help.")
+		sb.WriteString("\n")
+		writeTNWrapped(&sb, w, "  ", "  ", "Omnideck could not find a setup option for this computer.", styles.TNRedTxt)
+		writeTNWrapped(&sb, w, "  ", "  ", "Press q to leave, then visit https://podman.io/docs/installation for help.", styles.TNDimText)
+		return sb.String()
 	}
 	plan := m.runtimePlans[m.runtimeChoice]
 
 	if m.runtimeWaiting {
 		sb.WriteString("\n  " + styles.TNTextBold.Render("Finish this step, then come back here") + "\n\n")
-		sb.WriteString("  " + styles.TNDimText.Render(m.runtimeMessage) + "\n\n")
+		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeMessage, styles.TNDimText)
+		sb.WriteString("\n")
 		sb.WriteString("  " + styles.TNTextSub.Render("When the installer, Podman, or Docker says it is ready:") + "\n")
-		sb.WriteString("    1. Return to this window.\n")
-		sb.WriteString("    2. Press Enter. Omnideck will check everything for you.\n")
+		writeTNWrapped(&sb, w, "    1. ", "       ", "Return to this window.", styles.TNDimText)
+		writeTNWrapped(&sb, w, "    2. ", "       ", "Press Enter. Omnideck will check everything for you.", styles.TNDimText)
 		if plan.URL != "" {
 			fallback := "If the page did not open, press o to try again or open this address yourself:"
 			if plan.DirectDownload {
 				fallback = "If the download did not start, press o to try again or open this address yourself:"
 			}
-			sb.WriteString("\n  " + styles.TNFaintText.Render(fallback) + "\n")
-			sb.WriteString("  " + styles.TNBlueTxt.Render(plan.URL) + "\n")
+			sb.WriteString("\n")
+			writeTNWrapped(&sb, w, "  ", "  ", fallback, styles.TNFaintText)
+			writeTNWrapped(&sb, w, "  ", "  ", plan.URL, styles.TNBlueTxt)
 		}
 		return sb.String()
 	}
 
 	if m.runtimeConfirm {
 		sb.WriteString("\n  " + styles.TNFaintText.Render("STEP 2 OF 2") + "\n")
-		sb.WriteString("  " + styles.TNTextBold.Render("Review what will happen") + "\n\n")
-		sb.WriteString("  " + styles.TNBlueTxt.Render(plan.Action) + "\n")
-		sb.WriteString("  " + styles.TNDimText.Render(plan.Description) + "\n\n")
-		if len(plan.Commands) > 0 {
-			sb.WriteString("  " + styles.TNTextSub.Render("After you press Enter, Omnideck will ask your computer to do these steps:") + "\n")
-		} else if plan.DirectDownload {
-			sb.WriteString("  " + styles.TNTextSub.Render("After you press Enter, Omnideck will start the official download. Then you will:") + "\n")
-		} else {
-			sb.WriteString("  " + styles.TNTextSub.Render("After you press Enter, Omnideck will open the official page. Then you will:") + "\n")
-		}
+		writeTNWrapped(&sb, w, "  ", "  ", plan.Action, styles.TNTextBold)
+		writeTNWrapped(&sb, w, "  ", "  ", "Nothing starts until you press Enter.", styles.TNGreenTxt)
+		sb.WriteString("\n  " + styles.TNTextSub.Render("What happens next") + "\n")
 		for i, step := range plan.Steps {
-			sb.WriteString(fmt.Sprintf("    %d. %s\n", i+1, step))
+			prefix := fmt.Sprintf("    %d. ", i+1)
+			writeTNWrapped(&sb, w, prefix, strings.Repeat(" ", lipgloss.Width(prefix)), step, styles.TNDimText)
 		}
 		if plan.PermissionNote != "" {
-			sb.WriteString("\n  " + styles.TNYellowTxt.Render("About password requests") + "\n")
-			sb.WriteString("  " + styles.TNDimText.Render(plan.PermissionNote) + "\n")
+			sb.WriteString("\n  " + styles.TNYellowTxt.Render("Permission or password") + "\n")
+			writeTNWrapped(&sb, w, "  ", "  ", plan.PermissionNote, styles.TNDimText)
 		}
 		if plan.SafetyNote != "" {
-			sb.WriteString("\n  " + styles.TNYellowTxt.Render("Good to know") + "\n")
-			sb.WriteString("  " + styles.TNDimText.Render(plan.SafetyNote) + "\n")
+			sb.WriteString("\n  " + styles.TNYellowTxt.Render("Before you continue") + "\n")
+			writeTNWrapped(&sb, w, "  ", "  ", plan.SafetyNote, styles.TNDimText)
 		}
-		sb.WriteString("\n  " + styles.TNGreenTxt.Render("Nothing will run until you press Enter.") + "\n")
 		if m.runtimeShowDetails {
 			sb.WriteString("\n  " + styles.TNFaintText.Render("Technical details") + "\n")
 			for _, command := range plan.Commands {
-				sb.WriteString("    " + styles.TNFaintText.Render("$ "+command.Display) + "\n")
+				writeTNWrapped(&sb, w, "    $ ", "      ", command.Display, styles.TNFaintText)
 			}
 			if plan.URL != "" {
-				sb.WriteString("    " + styles.TNFaintText.Render(plan.URL) + "\n")
+				writeTNWrapped(&sb, w, "    ", "    ", plan.URL, styles.TNFaintText)
 			}
 		}
 		return sb.String()
@@ -93,11 +92,11 @@ func (m InstallModel) tnRuntimeSetup(_ int) string {
 
 	sb.WriteString("\n  " + styles.TNFaintText.Render("STEP 1 OF 2") + "\n")
 	sb.WriteString("  " + styles.TNTextBold.Render("Choose Podman or Docker") + "\n")
-	sb.WriteString("  " + styles.TNDimText.Render("Omnideck runs inside a container. The container keeps the agent and its") + "\n")
-	sb.WriteString("  " + styles.TNDimText.Render("software isolated from the rest of your system. Podman or Docker runs") + "\n")
-	sb.WriteString("  " + styles.TNDimText.Render("the container. You only need one of them.") + "\n\n")
+	sb.WriteString("\n  " + styles.TNTextSub.Render("Why this is needed") + "\n")
+	writeTNWrapped(&sb, w, "  ", "  ", "Omnideck runs as a container. This keeps the agent and its software isolated from the rest of your system. Podman or Docker runs that container; you only need one.", styles.TNDimText)
+	sb.WriteString("\n")
 
-	sb.WriteString("  " + styles.TNTextSub.Render("What we found on this computer") + "\n")
+	sb.WriteString("  " + styles.TNTextSub.Render("This computer") + "\n")
 	for _, probe := range m.runtimeProbes {
 		name := "Docker"
 		if probe.Name == "podman" {
@@ -105,36 +104,35 @@ func (m InstallModel) tnRuntimeSetup(_ int) string {
 		}
 		sb.WriteString("    " + styles.TNDimText.Render(padRight(name, 12)) + styles.TNDimText.Render(engineStateForPeople(probe.State)) + "\n")
 	}
-	sb.WriteString("\n  " + styles.TNTextSub.Render("Choose how to continue") + "\n")
+	sb.WriteString("\n  " + styles.TNTextSub.Render("Choose one") + "\n")
 
 	for i, plan := range m.runtimePlans {
-		cursor := "  "
 		name := plan.Action
 		if plan.Recommended {
 			name += " — Recommended"
 		}
+		prefix := "    "
+		style := styles.TNDimText
 		if i == m.runtimeChoice {
-			cursor = styles.TNBlueTxt.Render("▸ ")
-			name = styles.TNTextBold.Render(name)
-		} else {
-			name = styles.TNDimText.Render(name)
+			prefix = "  " + styles.TNBlueTxt.Render("▸ ")
+			style = styles.TNTextBold
 		}
-		sb.WriteString("  " + cursor + name + "\n")
+		writeTNWrapped(&sb, w, prefix, "    ", name, style)
 		if i == m.runtimeChoice {
-			sb.WriteString("       " + styles.TNDimText.Render(plan.Description) + "\n")
+			writeTNWrapped(&sb, w, "      ", "      ", plan.Description, styles.TNDimText)
 			if plan.Recommendation != "" {
-				sb.WriteString("       " + styles.TNGreenTxt.Render(plan.Recommendation) + "\n")
+				writeTNWrapped(&sb, w, "      ", "      ", plan.Recommendation, styles.TNGreenTxt)
 			}
 			if m.runtimeShowDetails {
-				sb.WriteString("       " + styles.TNFaintText.Render("Technical details") + "\n")
+				sb.WriteString("      " + styles.TNFaintText.Render("Technical details") + "\n")
 				for _, command := range plan.Commands {
-					sb.WriteString("         " + styles.TNFaintText.Render("$ "+command.Display) + "\n")
+					writeTNWrapped(&sb, w, "        $ ", "          ", command.Display, styles.TNFaintText)
 				}
 				if plan.URL != "" {
-					sb.WriteString("         " + styles.TNFaintText.Render(plan.URL) + "\n")
+					writeTNWrapped(&sb, w, "        ", "        ", plan.URL, styles.TNFaintText)
 				}
 				if m.runtimeLastError != "" {
-					sb.WriteString("         " + styles.TNRedTxt.Render(m.runtimeLastError) + "\n")
+					writeTNWrapped(&sb, w, "        ", "        ", m.runtimeLastError, styles.TNRedTxt)
 				}
 			}
 		}
@@ -144,12 +142,25 @@ func (m InstallModel) tnRuntimeSetup(_ int) string {
 		if m.runtimeLastError != "" {
 			style = styles.TNRedTxt
 		}
-		sb.WriteString("\n  " + style.Render(m.runtimeMessage) + "\n")
+		sb.WriteString("\n")
+		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeMessage, style)
 	}
 	if m.runtimeBusy {
 		sb.WriteString("\n  " + m.preflightSpinner.View() + " " + styles.TNDimText.Render("Working…") + "\n")
 	}
 	return sb.String()
+}
+
+func writeTNWrapped(sb *strings.Builder, width int, firstPrefix, continuationPrefix, value string, style lipgloss.Style) {
+	firstWidth := max(1, width-lipgloss.Width(firstPrefix))
+	continuationWidth := max(1, width-lipgloss.Width(continuationPrefix))
+	for i, line := range wrapWords(value, firstWidth, continuationWidth) {
+		prefix := continuationPrefix
+		if i == 0 {
+			prefix = firstPrefix
+		}
+		sb.WriteString(prefix + style.Render(line) + "\n")
+	}
 }
 
 func engineStateForPeople(state engine.RuntimeState) string {
@@ -230,7 +241,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 			sb.WriteString("  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(label+r.detail) + "\n")
 		}
 	}
-	if m.preflightReady && len(m.availableEngines) > 1 {
+	if m.preflightReady && m.preferredEngine == "" && len(m.availableEngines) > 1 {
 		sb.WriteString("\n  " + styles.TNTextSub.Render("Both Podman and Docker are ready.") + "\n")
 		sb.WriteString("  " + styles.TNDimText.Render("Press Tab to switch, or Enter to continue with "+m.eng.Name()+".") + "\n")
 	}
@@ -305,7 +316,7 @@ func (m InstallModel) tnConfirm(w int) string {
 	}
 
 	cfg := m.buildConfig()
-	sb.WriteString("  " + styles.TNTextBold.Render("Ready to install Omnideck") + "\n")
+	sb.WriteString("  " + styles.TNTextBold.Render("Ready to set up Omnideck") + "\n")
 	sb.WriteString("  " + styles.TNDimText.Render("Here is what Omnideck will do after you press Enter:") + "\n\n")
 	sb.WriteString("    1. Download the Omnideck app.\n")
 	sb.WriteString("    2. Prepare saved space for your files and settings.\n")
@@ -328,7 +339,7 @@ func (m InstallModel) tnConfirm(w int) string {
 		sb.WriteString(kv("Download", cfg.Image))
 	}
 
-	sb.WriteString("\n  " + styles.TNGreenTxt.Render("Press Enter to install. Nothing starts before then.") + "\n")
+	sb.WriteString("\n  " + styles.TNGreenTxt.Render("Press Enter to start setup. Nothing starts before then.") + "\n")
 
 	_ = w
 	return sb.String()
@@ -345,7 +356,7 @@ func (m InstallModel) tnInstall(_ int) string {
 
 func (m InstallModel) tnDone(_ int) string {
 	var sb strings.Builder
-	sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render("Installed successfully!") + "\n\n")
+	sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render("Omnideck is ready!") + "\n\n")
 
 	sb.WriteString("  " + styles.TNDimText.Render("Open Omnideck in your browser:") + "\n")
 	sb.WriteString("  " + styles.TNBlueTxt.Render("http://localhost:"+m.inputs[inputWebUIPort].Value()) + "\n\n")
@@ -356,13 +367,13 @@ func (m InstallModel) tnDone(_ int) string {
 
 func (m InstallModel) tnError(_ int) string {
 	var sb strings.Builder
-	sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render("Omnideck could not finish installing") + "\n\n")
+	sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render("Omnideck could not finish setup") + "\n\n")
 	if m.errorMsg != "" {
 		sb.WriteString("  It stopped while trying to: " + styles.TNTextSub.Render(m.errorMsg) + "\n")
 	}
 	sb.WriteString("  " + styles.TNDimText.Render("Any saved space already prepared will be reused if you try again.") + "\n\n")
 	sb.WriteString("  " + styles.TNTextSub.Render("What you can do") + "\n")
-	sb.WriteString("    • Press r to review the installation and try again.\n")
+	sb.WriteString("    • Press r to review the setup and try again.\n")
 	sb.WriteString("    • Press b to return without trying again.\n")
 	sb.WriteString("    • Press d to show or hide details for support.\n")
 	if m.errorShowDetails && m.errorDetail != "" {

@@ -77,21 +77,21 @@ func (m DashboardModel) breadcrumb() string {
 	case ScreenInstall:
 		switch m.installModel.Phase {
 		case PhasePreflight:
-			return "Install · Quick check"
+			return "Setup · Quick check"
 		case PhaseRuntimeSetup:
-			return "Install · Container setup"
+			return "Setup · Container setup"
 		case PhaseConfig:
-			return "Install · Settings"
+			return "Setup · Settings"
 		case PhaseConfirm:
-			return "Install · Ready"
+			return "Setup · Review"
 		case PhaseInstall:
-			return "Install · Installing"
+			return "Setup · Working"
 		case PhaseDone:
-			return "Install · Done"
+			return "Setup · Ready"
 		case PhaseError:
-			return "Install · Error"
+			return "Setup · Needs attention"
 		}
-		return "Install"
+		return "Setup"
 	case ScreenUpdate:
 		if inst := m.CurrentInstance(); inst != nil {
 			return "Instances › " + inst.Info.Name + " › Update"
@@ -154,7 +154,7 @@ func (m DashboardModel) footerHints() string {
 	case ScreenInstall:
 		switch m.installModel.Phase {
 		case PhasePreflight:
-			if m.installModel.preflightReady && len(m.installModel.availableEngines) > 1 {
+			if m.installModel.preflightReady && m.installModel.preferredEngine == "" && len(m.installModel.availableEngines) > 1 {
 				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"q", "cancel"}})
 			}
 		case PhaseRuntimeSetup:
@@ -189,7 +189,7 @@ func (m DashboardModel) footerHints() string {
 			}
 			return keyHints([][2]string{{"tab", "next"}, {"shift+tab", "back"}, {"esc", "recommended settings"}})
 		case PhaseConfirm:
-			return keyHints([][2]string{{"enter", "install"}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
+			return keyHints([][2]string{{"enter", "start setup"}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
 		case PhaseDone:
 			return keyHints([][2]string{{"any key", "return"}})
 		case PhaseError:
@@ -285,8 +285,8 @@ func (m DashboardModel) viewDashboard() string {
 	sb.WriteString("  " + titleLeft + safeRepeat(" ", titleGap) + chipsStr + "\n\n")
 
 	if len(m.instances) == 0 {
-		sb.WriteString("  " + styles.TNDimText.Render("No instances installed.") + "\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press ") + styles.TNKeyChip.Render("n") + styles.TNDimText.Render(" to install one.") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("No Omnideck instances are set up yet.") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press ") + styles.TNKeyChip.Render("n") + styles.TNDimText.Render(" to set one up.") + "\n")
 		return padToHeight(sb.String(), h)
 	}
 
@@ -959,10 +959,7 @@ func (m DashboardModel) viewInstall() string {
 		modalH = 8
 	}
 
-	title := styles.TNBoldBlue.Render("◆") + "  " + styles.TNTextBold.Render("Install new instance")
-	hint := styles.TNFaintText.Render("preflight → configure → install")
-	gap := contentW - lipgloss.Width(title) - lipgloss.Width(hint) - 2
-	titleRow := title + safeRepeat(" ", max(1, gap)) + hint
+	titleRow := styles.TNBoldBlue.Render("◆") + "  " + styles.TNTextBold.Render("Setup")
 	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
 
 	innerW := contentW - 4

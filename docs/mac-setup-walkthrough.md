@@ -14,7 +14,7 @@ installer. On an Apple-chip Mac, it recommends Podman.
 Open Terminal and run this as the normal Mac user:
 
 ```sh
-omnideck install
+omnideck
 ```
 
 Do not put `sudo` before the command. Omnideck does not need to run as the Mac
@@ -91,18 +91,18 @@ computer. Press **c** only when custom settings are needed.
 
 ![Final confirmation](screenshots/mac-07-confirm.png)
 
-Press **Enter** to install Omnideck. This is the last confirmation. Ollama is
+Press **Enter** to start setup. This is the last confirmation. Ollama is
 optional, so the warning in the preview does not block setup.
 
 ## 8. Wait while Omnideck is downloaded and started
 
-![Installing Omnideck](screenshots/mac-08-installing.png)
+![Setting up Omnideck](screenshots/mac-08-installing.png)
 
 No input is needed on this screen. The first download can take a few minutes.
 
 ## 9. Open Omnideck
 
-![Installation complete](screenshots/mac-09-done.png)
+![Setup complete](screenshots/mac-09-done.png)
 
 Open `http://localhost:2337` in a browser. Press any key to return to the
 Omnideck dashboard.

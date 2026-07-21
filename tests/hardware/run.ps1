@@ -30,8 +30,10 @@ $CurrentStep = "initialization"
 $StartedAt = [DateTime]::UtcNow
 $TestPassed = $false
 $PreviousRegistriesConfig = $env:CONTAINERS_REGISTRIES_CONF
+$PreviousOmnideckConfigDir = $env:OMNIDECK_CONFIG_DIR
 
 New-Item -ItemType Directory -Force -Path $OutputDirectory, $TempDirectory | Out-Null
+$env:OMNIDECK_CONFIG_DIR = Join-Path $TempDirectory "config"
 Start-Transcript -Path $LogPath -Force | Out-Null
 
 function Test-RuntimeReady([string]$Name) {
@@ -154,10 +156,13 @@ try {
         Invoke-External $Engine @("push", $FixtureImage)
     }
 
-    $CurrentStep = "install"
-    Invoke-Cli @("install", "--plain", "--engine", $Engine, "--image", $FixtureImage, "--port", "$Port", "--memory", "512m", "--shm-size", "64m")
+    $CurrentStep = "setup"
+    Invoke-Cli @("setup", "--plain", "--engine", $Engine, "--image", $FixtureImage, "--port", "$Port", "--memory", "512m", "--shm-size", "64m")
     $ConfigText = Get-Content -Raw $ConfigPath
-    if ($ConfigText -notmatch "(?m)^engine:\s+$([Regex]::Escape($Engine))$") { throw "The saved configuration did not record engine: $Engine." }
+    $SettingsPath = Join-Path $env:OMNIDECK_CONFIG_DIR "settings.yaml"
+    $SettingsText = Get-Content -Raw $SettingsPath
+    if ($SettingsText -notmatch "(?m)^runtime:\s+$([Regex]::Escape($Engine))$") { throw "The shared settings did not record runtime: $Engine." }
+    if ($ConfigText -match "(?m)^engine:") { throw "The instance configuration still contains a per-instance runtime." }
     if ($ConfigText -notmatch "(?m)^container_name:\s+$([Regex]::Escape($Instance))$") { throw "The saved configuration has the wrong container name." }
 
     $CurrentStep = "verify web UI"
@@ -247,6 +252,11 @@ try {
         Remove-Item Env:CONTAINERS_REGISTRIES_CONF -ErrorAction SilentlyContinue
     } else {
         $env:CONTAINERS_REGISTRIES_CONF = $PreviousRegistriesConfig
+    }
+    if ($null -eq $PreviousOmnideckConfigDir) {
+        Remove-Item Env:OMNIDECK_CONFIG_DIR -ErrorAction SilentlyContinue
+    } else {
+        $env:OMNIDECK_CONFIG_DIR = $PreviousOmnideckConfigDir
     }
     if ((Split-Path -Leaf $TempDirectory) -like "omnideck-hardware-*") {
         Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $TempDirectory

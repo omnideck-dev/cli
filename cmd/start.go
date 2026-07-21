@@ -32,7 +32,7 @@ func runStart(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	if !exists {
-		return fmt.Errorf("Container '%s' not found.\nRun: omnideck install", cfg.ContainerName)
+		return fmt.Errorf("Container '%s' not found.\nRun: omnideck setup", cfg.ContainerName)
 	}
 
 	fmt.Printf("Starting %s... ", cfg.ContainerName)
