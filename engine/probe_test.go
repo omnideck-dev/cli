@@ -3,6 +3,8 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -27,6 +29,62 @@ func TestProbeRuntimeMissing(t *testing.T) {
 	result := probeRuntime("podman", "linux")
 	if result.State != RuntimeMissing {
 		t.Fatalf("state = %s, want %s", result.State, RuntimeMissing)
+	}
+}
+
+func TestRefreshRuntimePathFindsPerUserDocker(t *testing.T) {
+	localAppData := t.TempDir()
+	dockerBin := filepath.Join(localAppData, "Programs", "DockerDesktop", "resources", "bin")
+	if err := os.MkdirAll(dockerBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dockerBin, "docker.exe"), []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCALAPPDATA", localAppData)
+	t.Setenv("ProgramFiles", "")
+	t.Setenv("PATH", "")
+
+	refreshRuntimePath("docker", "windows")
+	refreshRuntimePath("docker", "windows")
+
+	entries := filepath.SplitList(os.Getenv("PATH"))
+	count := 0
+	for _, entry := range entries {
+		if strings.EqualFold(filepath.Clean(entry), filepath.Clean(dockerBin)) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("per-user Docker path appears %d times in PATH %q, want once", count, os.Getenv("PATH"))
+	}
+}
+
+func TestRefreshRuntimePathFindsPerUserPodman(t *testing.T) {
+	localAppData := t.TempDir()
+	podmanBin := filepath.Join(localAppData, "Programs", "Podman")
+	if err := os.MkdirAll(podmanBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(podmanBin, "podman.exe"), []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCALAPPDATA", localAppData)
+	t.Setenv("ProgramFiles", "")
+	t.Setenv("PATH", "")
+
+	refreshRuntimePath("podman", "windows")
+	refreshRuntimePath("podman", "windows")
+
+	entries := filepath.SplitList(os.Getenv("PATH"))
+	count := 0
+	for _, entry := range entries {
+		if strings.EqualFold(filepath.Clean(entry), filepath.Clean(podmanBin)) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("per-user Podman path appears %d times in PATH %q, want once", count, os.Getenv("PATH"))
 	}
 }
 

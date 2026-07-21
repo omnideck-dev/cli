@@ -43,10 +43,10 @@ func TestRenderDoctorReportWarnIsNotFail(t *testing.T) {
 
 func TestRenderDoctorReportShowsHint(t *testing.T) {
 	results := []CheckResult{
-		{"Container", CheckFail, "not found", "Run: omnideck install"},
+		{"Container", CheckFail, "not found", "Run: omnideck setup"},
 	}
 	report, _ := RenderDoctorReport(results)
-	if !strings.Contains(report, "omnideck install") {
+	if !strings.Contains(report, "omnideck setup") {
 		t.Error("hint should appear in report")
 	}
 }

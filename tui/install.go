@@ -5,7 +5,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
@@ -53,7 +52,8 @@ type InstallModel struct {
 
 	// Embedded, when true, means this model runs inside DashboardModel.
 	// On done/error it emits WizardExitMsg instead of tea.Quit.
-	Embedded bool
+	Embedded  bool
+	setupOnly bool // repair the container runtime, then return to the dashboard
 
 	// Preflight state.
 	eng              engine.Engine
@@ -96,6 +96,7 @@ type InstallModel struct {
 	installErr        error
 	lastCompletedStep int             // -1 = none; used for rollback on failure
 	existingNames     map[string]bool // container names already in use (cached at init)
+	existingPorts     map[string]bool // browser ports already reserved by Omnideck
 
 	// Image override (from --image flag, not shown in TUI).
 	imageOverride string
@@ -165,10 +166,12 @@ func NewInstallModel(configPath string, initial *config.Config, imageOverride st
 
 	// Cache existing container names to avoid blocking I/O during Update.
 	existingNames := map[string]bool{}
+	existingPorts := map[string]bool{}
 	if instances, err := config.ListInstances(); err == nil {
 		for _, inst := range instances {
 			if inst.Config != nil {
 				existingNames[inst.Config.ContainerName] = true
+				existingPorts[inst.Config.WebUIPortOrDefault()] = true
 			}
 		}
 	}
@@ -181,6 +184,7 @@ func NewInstallModel(configPath string, initial *config.Config, imageOverride st
 		configPath:        configPath,
 		lastCompletedStep: -1,
 		existingNames:     existingNames,
+		existingPorts:     existingPorts,
 		imageOverride:     imageOverride,
 	}
 }
@@ -245,9 +249,9 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.permErr != nil {
 				return m, nil // block advance if new engine has no permission
 			}
-			m.Phase = PhaseConfig
+			return m.afterRuntimeReady()
 		case "tab", "s":
-			if len(m.availableEngines) < 2 {
+			if m.preferredEngine != "" || len(m.availableEngines) < 2 {
 				return m, nil
 			}
 			for i, e := range m.availableEngines {
@@ -315,12 +319,11 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Multiple engines available — pause so user can choose before continuing.
-		if len(m.availableEngines) > 1 {
+		if m.preferredEngine == "" && len(m.availableEngines) > 1 {
 			m.preflightReady = true
 			return m, nil
 		}
-		m.Phase = PhaseConfig
-		return m, nil
+		return m.afterRuntimeReady()
 	}
 	return m, nil
 }
@@ -337,7 +340,7 @@ func (m *InstallModel) configureRuntimeSetup() {
 		for _, plan := range m.runtimePlans {
 			if plan.Runtime == m.preferredEngine {
 				plan.Recommended = true
-				plan.Recommendation = "You asked Omnideck to use " + plan.Title + "."
+				plan.Recommendation = "Omnideck will use " + plan.Title + " for all your installations on this computer."
 				filtered = append(filtered, plan)
 			}
 		}
@@ -420,7 +423,7 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if plan.DirectDownload {
 						m.runtimeMessage = "The official Podman installer should now be downloading. Open it from Downloads, finish the installer, return here, and press Enter so Omnideck can check it."
 					} else {
-						m.runtimeMessage = "Your browser should now be open. Finish the installer there, return here, and press Enter so Omnideck can check it."
+						m.runtimeMessage = "The Microsoft Store or official setup page should now be open. Finish the installation, start the app, then return here and press Enter so Omnideck can check it."
 					}
 					return m, openBrowserCmd(plan.URL)
 				}
@@ -479,14 +482,68 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.engErr = nil
 			m.availableEngines = msg.all
 			m.permErr = nil
-			m.Phase = PhaseConfig
-			return m, nil
+			return m.afterRuntimeReady()
 		}
 		m.engErr = msg.err
 		m.configureRuntimeSetup()
 		m.runtimeMessage = "Podman or Docker is not ready yet. Choose an option below, or check again if you just finished an installer."
 	}
 	return m, nil
+}
+
+func (m InstallModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
+	if m.setupOnly {
+		if m.eng == nil {
+			m.Phase = PhaseError
+			m.errorMsg = "Omnideck could not find a ready container runtime"
+			return m, nil
+		}
+		if err := config.SaveRuntime(m.eng.Name()); err != nil {
+			m.Phase = PhaseError
+			m.errorMsg = "Omnideck could not remember the container runtime"
+			m.errorDetail = err.Error()
+			return m, nil
+		}
+		if m.Embedded {
+			return m, func() tea.Msg { return WizardExitMsg{} }
+		}
+		return m, tea.Quit
+	}
+	m.ensureRecommendedSettingsAvailable()
+	m.Phase = PhaseConfig
+	return m, nil
+}
+
+// ensureRecommendedSettingsAvailable quietly advances default names and ports
+// when another container or app already uses the first suggestion. The user
+// still sees and confirms the final values before setup starts.
+func (m *InstallModel) ensureRecommendedSettingsAvailable() {
+	if m.eng != nil {
+		candidate := strings.TrimSpace(m.inputs[inputContainerName].Value())
+		exists, err := m.eng.ContainerExists(candidate)
+		if err == nil && (exists || m.existingNames[candidate]) {
+			for suffix := 2; suffix < 10000; suffix++ {
+				candidate = "omnideck" + strconv.Itoa(suffix)
+				exists, err = m.eng.ContainerExists(candidate)
+				if err == nil && !exists && !m.existingNames[candidate] {
+					break
+				}
+			}
+		}
+		m.inputs[inputContainerName].SetValue(candidate)
+	}
+
+	port := strings.TrimSpace(m.inputs[inputWebUIPort].Value())
+	if !m.existingPorts[port] && checks.PortAvailable(port) {
+		return
+	}
+	start, err := strconv.Atoi(port)
+	if err != nil {
+		start = 2337
+	}
+	if available, ok := checks.NextAvailablePort(start+1, m.existingPorts); ok {
+		m.inputs[inputWebUIPort].SetValue(available)
+	}
 }
 
 func execRuntimeCommand(command engine.SetupCommand) tea.Cmd {
@@ -517,9 +574,17 @@ func (m InstallModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "q", "ctrl+c", "esc":
 				return m, tea.Quit
 			case "enter", " ":
-				m.Phase = PhaseConfirm
-				m.confirmShowDetails = false
-				m.buildConfirmWarnings()
+				if m.validateAllInputs() {
+					m.Phase = PhaseConfirm
+					m.confirmShowDetails = false
+					m.buildConfirmWarnings()
+				} else {
+					m.configAdvanced = true
+					for i := range m.inputs {
+						m.inputs[i].Blur()
+					}
+					m.inputs[m.inputFocus].Focus()
+				}
 			case "c":
 				m.configAdvanced = true
 				m.inputFocus = 0
@@ -577,6 +642,17 @@ func (m *InstallModel) validateCurrentInput() bool {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
 			return false
 		}
+		if m.eng != nil {
+			exists, err := m.eng.ContainerExists(val)
+			if err != nil {
+				m.inputErrs[m.inputFocus] = "Omnideck could not check whether this name is available"
+				return false
+			}
+			if exists {
+				m.inputErrs[m.inputFocus] = "another container already uses this name; choose a different name"
+				return false
+			}
+		}
 	case inputMemory, inputShmSize:
 		if !validMemSize(val) {
 			m.inputErrs[m.inputFocus] = "must be a number + unit (e.g. 512m, 2g)"
@@ -587,8 +663,28 @@ func (m *InstallModel) validateCurrentInput() bool {
 			m.inputErrs[m.inputFocus] = "must be a number between 1 and 65535"
 			return false
 		}
+		if m.existingPorts[val] {
+			m.inputErrs[m.inputFocus] = "another Omnideck installation already uses this browser address number"
+			return false
+		}
+		if !checks.PortAvailable(val) {
+			m.inputErrs[m.inputFocus] = "another app is already using this browser address number"
+			return false
+		}
 	}
 	m.inputErrs[m.inputFocus] = ""
+	return true
+}
+
+func (m *InstallModel) validateAllInputs() bool {
+	originalFocus := m.inputFocus
+	for i := range m.inputs {
+		m.inputFocus = i
+		if !m.validateCurrentInput() {
+			return false
+		}
+	}
+	m.inputFocus = originalFocus
 	return true
 }
 
@@ -604,22 +700,16 @@ func expandTilde(path string) string {
 	return filepath.Join(home, path[1:])
 }
 
-var memSizeRegex = regexp.MustCompile(`^\d+[mMgGkK]$`)
-
-// containerNameRegex matches valid Docker/Podman container names.
-var containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
-
 func validMemSize(s string) bool {
-	return memSizeRegex.MatchString(s)
+	return checks.ValidMemorySize(s)
 }
 
 func validContainerName(s string) bool {
-	return containerNameRegex.MatchString(s)
+	return checks.ValidContainerName(s)
 }
 
 func validPort(s string) bool {
-	n, err := strconv.Atoi(s)
-	return err == nil && n >= 1 && n <= 65535
+	return checks.ValidPort(s)
 }
 
 func (m *InstallModel) buildConfirmWarnings() {
@@ -656,6 +746,15 @@ func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			m.confirmShowDetails = !m.confirmShowDetails
 		case "i", "enter", " ":
+			if !m.validateAllInputs() {
+				m.Phase = PhaseConfig
+				m.configAdvanced = true
+				for i := range m.inputs {
+					m.inputs[i].Blur()
+				}
+				m.inputs[m.inputFocus].Focus()
+				return m, nil
+			}
 			m.Phase = PhaseInstall
 			m.lastCompletedStep = -1
 			m.errorMsg = ""
@@ -669,9 +768,9 @@ func (m InstallModel) updateConfirm(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 var installStepLabels = []string{
+	"Check that the name and browser address are available",
 	"Prepare space for your files",
 	"Prepare space for Omnideck data",
-	"Check for an earlier Omnideck installation",
 	"Download Omnideck",
 	"Start Omnideck",
 	"Remember these settings",
@@ -701,6 +800,16 @@ func (m InstallModel) updateInstall(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorMsg = installStepLabels[msg.Index]
 		m.errorDetail = msg.Err.Error()
 		m.errorShowDetails = false
+		if msg.Index == 0 {
+			m.Phase = PhaseConfig
+			m.configAdvanced = true
+			_ = m.validateAllInputs()
+			for i := range m.inputs {
+				m.inputs[i].Blur()
+			}
+			m.inputs[m.inputFocus].Focus()
+			return m, cmd
+		}
 		// Attempt rollback: if the container was run (step 4 completed) but
 		// config was not saved (step 5 failed), remove the orphaned container.
 		if m.lastCompletedStep >= 4 {
@@ -755,21 +864,27 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 
 	var workCmd tea.Cmd
 	switch i {
-	case 0: // Create home volume.
+	case 0: // Recheck name and port immediately before making changes.
+		workCmd = StepCmd(i, func() (string, error) {
+			exists, err := eng.ContainerExists(cfg.ContainerName)
+			if err != nil {
+				return "", fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
+			}
+			if exists {
+				return "", fmt.Errorf("another container already uses the name %q; go back and choose a different name", cfg.ContainerName)
+			}
+			if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
+				return "", fmt.Errorf("another app is already using browser address number %s; go back and choose a different number", cfg.WebUIPortOrDefault())
+			}
+			return "available", nil
+		})
+	case 1: // Create home volume.
 		workCmd = StepCmd(i, func() (string, error) {
 			return "", eng.CreateVolume(cfg.HomeVolumeName())
 		})
-	case 1: // Create state volume.
+	case 2: // Create state volume.
 		workCmd = StepCmd(i, func() (string, error) {
 			return "", eng.CreateVolume(cfg.StateVolumeName())
-		})
-	case 2: // Remove existing container.
-		workCmd = StepCmd(i, func() (string, error) {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil || !exists {
-				return "not found, skipped", nil
-			}
-			return "", eng.RemoveContainer(cfg.ContainerName)
 		})
 	case 3: // Pull image.
 		workCmd = StepCmd(i, func() (string, error) {
@@ -800,7 +915,10 @@ func (m *InstallModel) startInstallStep(i int) tea.Cmd {
 	case 5: // Save config.
 		workCmd = StepCmd(i, func() (string, error) {
 			cfg.InstalledAt = time.Now()
-			cfg.Engine = eng.Name()
+			cfg.Engine = ""
+			if err := config.SaveRuntime(eng.Name()); err != nil {
+				return "", err
+			}
 			// Always save to the instances dir keyed by container name.
 			savePath := config.InstancePath(cfg.ContainerName)
 			m.configPath = savePath
@@ -917,7 +1035,7 @@ func (m InstallModel) viewPreflight() string {
 		}
 	}
 
-	if m.preflightReady {
+	if m.preflightReady && m.preferredEngine == "" {
 		out += "\n"
 		if m.permChecking {
 			out += "   " + m.preflightSpinner.View() + "  " + styles.Dim.Render("Checking permissions for "+m.eng.Name()+"...") + "\n"
@@ -982,7 +1100,7 @@ func (m InstallModel) viewConfig() string {
 }
 
 func (m InstallModel) viewConfirm() string {
-	out := styles.Header("OMNIDECK", "Ready to install", m.WindowWidth)
+	out := styles.Header("OMNIDECK", "Ready to set up", m.WindowWidth)
 
 	kv := func(k, v string) string {
 		return "  " + styles.Dim.Render(padRight(k, 18)) + styles.Active.Render(v) + "\n"
@@ -1010,7 +1128,7 @@ func (m InstallModel) viewConfirm() string {
 		out += kv("Download", cfg.Image)
 	}
 
-	out += "\n   " + styles.Accent.Render("[enter]") + styles.Dim.Render(" install    ") +
+	out += "\n   " + styles.Accent.Render("[enter]") + styles.Dim.Render(" start setup    ") +
 		styles.Accent.Render("[b]") + styles.Dim.Render(" back    ") +
 		styles.Accent.Render("[d]") + styles.Dim.Render(" technical details    ") +
 		styles.Accent.Render("[q]") + styles.Dim.Render(" quit")
@@ -1024,7 +1142,7 @@ func (m InstallModel) viewInstall() string {
 }
 
 func (m InstallModel) viewDone() string {
-	out := "\n" + styles.Success.Render("  ✓  Omnideck installed successfully!") + "\n"
+	out := "\n" + styles.Success.Render("  ✓  Omnideck is ready!") + "\n"
 	out += styles.Dim.Render("  ─────────────────────────────────────") + "\n\n"
 
 	out += "  " + styles.Dim.Render("Open Omnideck in your browser:") + "\n"
@@ -1150,12 +1268,12 @@ func (m InstallModel) viewRuntimeSetup() string {
 }
 
 func (m InstallModel) viewError() string {
-	out := "\n" + styles.Error.Render("  ✗  Omnideck could not finish installing") + "\n"
+	out := "\n" + styles.Error.Render("  ✗  Omnideck could not finish setup") + "\n"
 	out += styles.Dim.Render("  ─────────────────────────────────────") + "\n\n"
 	out += "  It stopped while trying to: " + styles.Active.Render(m.errorMsg) + "\n"
 	out += "  " + styles.Dim.Render("Any saved space already prepared will be reused if you try again.") + "\n\n"
 	out += "  What you can do:\n"
-	out += "    • Press r to review the installation and try again.\n"
+	out += "    • Press r to review the setup and try again.\n"
 	out += "    • Press b to return without trying again.\n"
 	out += "    • Press d to show or hide details for support.\n"
 	if m.errorShowDetails && m.errorDetail != "" {

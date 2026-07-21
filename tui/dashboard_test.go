@@ -4,7 +4,72 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/omnideck-dev/cli/config"
 )
+
+func TestSuggestInstallDefaultsForFirstInstance(t *testing.T) {
+	cfg := suggestInstallDefaultsFor(nil)
+	if cfg.ContainerName != "omnideck" || cfg.WebUIPort != "2337" {
+		t.Fatalf("first instance defaults = %s:%s, want omnideck:2337", cfg.ContainerName, cfg.WebUIPort)
+	}
+}
+
+func TestSuggestInstallDefaultsForAdditionalInstance(t *testing.T) {
+	instances := []config.InstanceInfo{
+		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
+		{Name: "omnideck2", Config: &config.Config{ContainerName: "omnideck2", WebUIPort: "2338"}},
+	}
+	cfg := suggestInstallDefaultsFor(instances)
+	if cfg.ContainerName != "omnideck3" || cfg.WebUIPort != "2339" {
+		t.Fatalf("additional instance defaults = %s:%s, want omnideck3:2339", cfg.ContainerName, cfg.WebUIPort)
+	}
+}
+
+func TestInstallScreenUsesFirstRunLanguage(t *testing.T) {
+	m := NewDashboardModelForInstall(nil, nil, "", "")
+	m.width, m.height = 100, 36
+	view := m.viewInstall()
+
+	if !strings.Contains(view, "Setup") {
+		t.Fatalf("first-run title missing:\n%s", view)
+	}
+	if strings.Contains(view, "preflight") || strings.Contains(view, "configure → install") {
+		t.Fatalf("install screen exposes internal phase names:\n%s", view)
+	}
+	if got := m.breadcrumb(); got != "Setup · Quick check" {
+		t.Fatalf("first-run breadcrumb = %q, want Setup · Quick check", got)
+	}
+}
+
+func TestInstallScreenUsesAdditionalInstanceLanguage(t *testing.T) {
+	instances := []config.InstanceInfo{
+		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
+	}
+	m := NewDashboardModelForInstall(nil, instances, "", "")
+	m.width, m.height = 100, 36
+	view := m.viewInstall()
+
+	if !strings.Contains(view, "Setup") {
+		t.Fatalf("additional-instance title missing:\n%s", view)
+	}
+	if got := m.breadcrumb(); got != "Setup · Quick check" {
+		t.Fatalf("additional-instance breadcrumb = %q, want Setup · Quick check", got)
+	}
+}
+
+func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
+	instances := []config.InstanceInfo{
+		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", Engine: "podman", WebUIPort: "2337"}},
+	}
+	m := NewDashboardModelForRuntimeSetup(instances, "podman")
+	m.width, m.height = 100, 36
+	view := m.viewInstall()
+
+	if !strings.Contains(view, "Setup") || strings.Contains(view, "Install new instance") {
+		t.Fatalf("runtime repair screen has the wrong header:\n%s", view)
+	}
+}
 
 // --- parseLogLine ---
 

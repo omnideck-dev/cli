@@ -72,7 +72,7 @@ func (m PickerModel) View() string {
 
 		detail := ""
 		if item.Config != nil {
-			detail = styles.Dim.Render(fmt.Sprintf("  %s · %s", item.Config.Engine, item.Config.ContainerName))
+			detail = styles.Dim.Render(fmt.Sprintf("  %s", item.Config.ContainerName))
 		}
 		out += cursor + nameStyle.Render(item.Name) + detail + "\n"
 	}

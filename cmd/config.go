@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/styles"
 	"github.com/spf13/cobra"
@@ -33,7 +34,7 @@ var configPathCmd = &cobra.Command{
 	RunE:  runConfigPath,
 }
 
-var validConfigKeys = []string{"container_name", "home_volume", "state_volume", "shm_size"}
+var validConfigKeys = []string{"home_volume", "state_volume", "shm_size"}
 
 func init() {
 	configCmd.AddCommand(configShowCmd, configSetCmd, configPathCmd)
@@ -45,6 +46,10 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 		return err
 	}
 	cfg := LoadedConfig
+	runtimeName := RuntimeName
+	if runtimeName == "" {
+		runtimeName = cfg.Engine
+	}
 
 	kv := lipgloss.NewStyle().Width(18)
 	val := lipgloss.NewStyle()
@@ -56,7 +61,7 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  %s %s\n", kv.Render("home_volume:"), val.Render(cfg.HomeVolumeName()))
 	fmt.Printf("  %s %s\n", kv.Render("state_volume:"), val.Render(cfg.StateVolumeName()))
 	fmt.Printf("  %s %s\n", kv.Render("shm_size:"), val.Render(cfg.ShmSize))
-	fmt.Printf("  %s %s\n", kv.Render("engine:"), val.Render(cfg.Engine))
+	fmt.Printf("  %s %s\n", kv.Render("runtime:"), val.Render(runtimeName))
 	fmt.Printf("  %s %s\n", kv.Render("image:"), val.Render(cfg.Image))
 	fmt.Printf("  %s %s\n", kv.Render("installed_at:"), val.Render(cfg.InstalledAt.Format("2006-01-02 15:04:05 UTC")))
 	fmt.Println()
@@ -69,14 +74,21 @@ func runConfigSet(_ *cobra.Command, args []string) error {
 	}
 	key, value := args[0], args[1]
 
+	if key == "container_name" {
+		return fmt.Errorf("an Omnideck name cannot be changed after setup; create another installation if you need a different name")
+	}
 	if !isValidConfigKey(key) {
 		return fmt.Errorf("invalid key %q\nValid keys: %v", key, validConfigKeys)
+	}
+	if (key == "home_volume" || key == "state_volume") && value != "" && !checks.ValidContainerName(value) {
+		return fmt.Errorf("%s must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens", key)
+	}
+	if key == "shm_size" && !checks.ValidMemorySize(value) {
+		return fmt.Errorf("shm_size must be a number and unit, such as 512m or 2g")
 	}
 
 	cfg := LoadedConfig
 	switch key {
-	case "container_name":
-		cfg.ContainerName = value
 	case "home_volume":
 		cfg.HomeVolume = value
 	case "state_volume":

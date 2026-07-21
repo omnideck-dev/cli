@@ -30,11 +30,14 @@ var (
 	LoadedConfig *config.Config
 	// ConfigPath is the resolved config file path used.
 	ConfigPath string
+	// RuntimeName is the runtime shared by every Omnideck instance. The Engine field on
+	// older instance configs is used only as a migration fallback.
+	RuntimeName string
 
 	rootCmd = &cobra.Command{
 		Use:   "omnideck",
 		Short: "Manage the Omnideck container application",
-		Long: `omnideck installs and manages the Omnideck containerized AI application.
+		Long: `omnideck sets up and manages the Omnideck containerized AI application.
 It wraps Docker/Podman operations with a polished TUI interface.`,
 		PersistentPreRun: persistentPreRun,
 	}
@@ -68,14 +71,81 @@ func init() {
 			return nil
 		}
 		if isInteractive() {
-			return runLauncher()
+			instances, listErr := config.ListInstances()
+			probes := engine.ProbeAll()
+			preferredEngine := configuredEngineName(LoadedConfig, instances)
+			readyEngine := selectReadyEngine(engine.ReadyEngines(probes), preferredEngine)
+			switch chooseInteractiveStart(LoadedConfig, instances, listErr, readyEngine != nil) {
+			case interactiveStartInstall:
+				return runInstall(nil, nil)
+			case interactiveStartRuntimeSetup:
+				return runRuntimeSetup(instances)
+			}
+			return runLauncher(readyEngine)
 		}
 		return cmd.Help()
 	}
 }
 
+type interactiveStart int
+
+const (
+	interactiveStartLauncher interactiveStart = iota
+	interactiveStartInstall
+	interactiveStartRuntimeSetup
+)
+
+// chooseInteractiveStart decides where a bare interactive command begins.
+// Listing errors and legacy-only configs fall back to the launcher so a
+// filesystem or migration problem is not mistaken for a brand-new setup.
+func chooseInteractiveStart(loaded *config.Config, instances []config.InstanceInfo, listErr error, runtimeReady bool) interactiveStart {
+	if listErr != nil {
+		return interactiveStartLauncher
+	}
+	if loaded == nil && len(instances) == 0 {
+		return interactiveStartInstall
+	}
+	if len(instances) > 0 && !runtimeReady {
+		return interactiveStartRuntimeSetup
+	}
+	return interactiveStartLauncher
+}
+
+func configuredEngineName(loaded *config.Config, instances []config.InstanceInfo) string {
+	if RuntimeName != "" {
+		return RuntimeName
+	}
+	if loaded != nil && loaded.Engine != "" {
+		return loaded.Engine
+	}
+	for _, instance := range instances {
+		if instance.Config != nil && instance.Config.Engine != "" {
+			return instance.Config.Engine
+		}
+	}
+	return ""
+}
+
+func selectReadyEngine(ready []engine.Engine, preferred string) engine.Engine {
+	if preferred != "" {
+		for _, candidate := range ready {
+			if candidate.Name() == preferred {
+				return candidate
+			}
+		}
+		return nil
+	}
+	if len(ready) > 0 {
+		return ready[0]
+	}
+	return nil
+}
+
 // engineFromConfig returns an Engine based on the config engine name.
 func engineFromConfig(name string) (engine.Engine, error) {
+	if RuntimeName != "" {
+		name = RuntimeName
+	}
 	switch name {
 	case "docker":
 		return &engine.DockerEngine{}, nil
@@ -90,7 +160,7 @@ func engineFromConfig(name string) (engine.Engine, error) {
 // Commands that require an installed instance should call this.
 func requireConfig() error {
 	if LoadedConfig == nil {
-		return fmt.Errorf("Omnideck is not installed.\nRun: omnideck install")
+		return fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")
 	}
 	return nil
 }
@@ -118,7 +188,7 @@ func requireConfigMulti() error {
 		ConfigPath = chosen.Path
 		return nil
 	}
-	return fmt.Errorf("Omnideck is not installed.\nRun: omnideck install")
+	return fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")
 }
 
 // errAborted is returned when the user cancels an interactive prompt.
@@ -129,6 +199,15 @@ var errAborted = fmt.Errorf("")
 func persistentPreRun(cmd *cobra.Command, args []string) {
 	styles.NoColor(noColor)
 	debug.SetEnabled(debugFlag)
+	RuntimeName = ""
+	if err := config.MigrateLegacyDir(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Omnideck could not copy settings from their previous location: %v\n", err)
+	}
+	if settings, err := config.LoadSettings(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Omnideck settings are unreadable: %v\n", err)
+	} else {
+		RuntimeName = settings.Runtime
+	}
 
 	// Priority: --config > --name > auto-detect from instances dir > legacy path
 	switch {
@@ -176,11 +255,46 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 	if ConfigPath == "" {
 		ConfigPath = config.InstancePath("omnideck")
 	}
+
+	// Migrate the old per-instance runtime field when every existing config
+	// agrees. Mixed legacy configs keep their old behavior until the user can
+	// resolve them explicitly; Omnideck never silently changes their runtime.
+	if RuntimeName == "" {
+		instances, _ := config.ListInstances()
+		if legacyRuntime, ok := oneLegacyRuntime(LoadedConfig, instances); ok {
+			if err := config.SaveRuntime(legacyRuntime); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: Omnideck could not save its runtime choice: %v\n", err)
+			} else {
+				RuntimeName = legacyRuntime
+			}
+		}
+	}
+}
+
+func oneLegacyRuntime(loaded *config.Config, instances []config.InstanceInfo) (string, bool) {
+	seen := map[string]bool{}
+	if loaded != nil && config.ValidRuntime(loaded.Engine) {
+		seen[loaded.Engine] = true
+	}
+	for _, instance := range instances {
+		if instance.Config != nil && config.ValidRuntime(instance.Config.Engine) {
+			seen[instance.Config.Engine] = true
+		}
+	}
+	if len(seen) != 1 {
+		return "", false
+	}
+	for name := range seen {
+		return name, true
+	}
+	return "", false
 }
 
 // runLauncher shows the lightweight menu TUI and dispatches to the chosen command.
-func runLauncher() error {
-	eng, _ := engine.Detect()
+func runLauncher(eng engine.Engine) error {
+	if eng == nil {
+		eng, _ = engine.Detect()
+	}
 	action, ok := tui.RunMenu(versionStr, LoadedConfig, eng)
 	if !ok {
 		return nil

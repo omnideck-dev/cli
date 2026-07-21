@@ -5,7 +5,6 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
-	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/tui"
 	"github.com/spf13/cobra"
 )
@@ -19,7 +18,7 @@ all installed instances. Shows live CPU/memory stats, logs, config, and health c
 Key bindings (Dashboard):
   ↑↓      move selection
   enter   inspect instance
-  n       install new instance
+  n       set up another instance
   u       update selected instance
   d       run doctor checks
   r       refresh stats
@@ -33,7 +32,11 @@ func init() {
 
 // runTUI launches the interactive dashboard.
 func runTUI(_ *cobra.Command, _ []string) error {
-	eng, err := engine.Detect()
+	legacyRuntime := ""
+	if LoadedConfig != nil {
+		legacyRuntime = LoadedConfig.Engine
+	}
+	eng, err := engineFromConfig(legacyRuntime)
 	if err != nil {
 		return fmt.Errorf("no container engine available: %w", err)
 	}

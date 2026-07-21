@@ -15,8 +15,8 @@ The scripts currently verify:
 
 - CLI build, version, and help
 - explicit Docker or Podman selection
-- non-interactive install
-- saved runtime and instance configuration
+- non-interactive setup
+- shared runtime setting and instance configuration
 - web UI port mapping
 - status and logs
 - volume persistence

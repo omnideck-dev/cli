@@ -219,23 +219,33 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 		return
 	}
 	if plan.Runtime == "podman" && host.OS == "windows" {
-		plan.Description = "Install Podman Desktop, a free alternative to Docker Desktop."
+		plan.Description = "Download Podman's official Windows installer."
 		plan.Steps = []string{
-			"Open Podman Desktop's official download page.",
-			"Download the Windows installer and follow the instructions on screen.",
-			"Start Podman Desktop, return to Omnideck, and check again.",
+			"Wait for the official Podman installer download to finish.",
+			"Open the installer from Downloads and keep the recommended Just for me choice.",
+			"Return to Omnideck and check again. Omnideck will finish Podman's one-time setup.",
 		}
-		plan.PermissionNote = "Windows may ask whether the installer is allowed to make changes to this computer. If your account cannot approve that message, ask the person who manages the computer. Omnideck does not see or store any password."
+		plan.DirectDownload = true
+		plan.PermissionNote = "Installing Podman just for your account does not require an administrator. Windows may require an administrator and a restart if WSL, the Windows container feature Podman uses, is not enabled yet."
 		return
 	}
 	if plan.Runtime == "docker" && (host.OS == "windows" || host.WSL) {
-		plan.Description = "Open Docker Desktop's official download page and follow its Windows installer."
-		plan.Steps = []string{
-			"Open Docker's official download page.",
-			"When the installer asks who Docker is for, keep the recommended Per-user choice.",
-			"Start Docker Desktop, return to Omnideck, and check again.",
+		if host.OS == "windows" && host.Arch == "arm64" {
+			plan.Description = "Install Docker Desktop from Docker's official Windows page."
+			plan.Steps = []string{
+				"Open Docker's official Windows installation page.",
+				"Download the ARM installer and follow the instructions on screen.",
+				"Open Docker Desktop, return to Omnideck, and check again.",
+			}
+		} else {
+			plan.Description = "Install Docker Desktop from its official Microsoft Store page."
+			plan.Steps = []string{
+				"Open Docker Desktop in Microsoft Store.",
+				"Select Install and wait for it to finish.",
+				"Open Docker Desktop, return to Omnideck, and check again.",
+			}
 		}
-		plan.PermissionNote = "Most people can install Docker Desktop for their own account. Windows may ask whether the installer is allowed to make changes to this computer. If your account cannot approve that message, ask the person who manages the computer."
+		plan.PermissionNote = "Installing Docker Desktop itself normally does not require an administrator. Windows may still ask for permission if it needs to turn on WSL, the Windows feature Docker uses to run containers."
 		return
 	}
 	if plan.Runtime == "docker" && host.OS == "darwin" {
@@ -389,8 +399,13 @@ func missingPlan(plan SetupPlan, host HostPlatform) SetupPlan {
 			}
 			plan.Manual = true
 		case "windows":
-			plan.Description = "Install Podman Desktop, a free alternative"
-			plan.URL = "https://podman-desktop.io/docs/installation/windows-install"
+			plan.Description = "Install Podman with its official Windows installer"
+			arch := "amd64"
+			if host.Arch == "arm64" {
+				arch = "arm64"
+			}
+			plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-windows-" + arch + ".exe"
+			plan.DirectDownload = true
 			plan.Manual = true
 		}
 		return plan
@@ -418,8 +433,10 @@ func missingPlan(plan SetupPlan, host HostPlatform) SetupPlan {
 
 func startDockerDesktopCommand() SetupCommand {
 	return SetupCommand{
-		Name:    "powershell.exe",
-		Args:    []string{"-NoProfile", "-Command", `Start-Process "$Env:ProgramFiles\Docker\Docker\Docker Desktop.exe"`},
+		Name: "powershell.exe",
+		Args: []string{"-NoProfile", "-Command", `$paths = @("$Env:LOCALAPPDATA\Programs\DockerDesktop\Docker Desktop.exe", "$Env:ProgramFiles\Docker\Docker\Docker Desktop.exe"); ` +
+			`$app = $paths | Where-Object { Test-Path $_ } | Select-Object -First 1; ` +
+			`if (-not $app) { throw "Docker Desktop was not found" }; Start-Process $app`},
 		Display: "Start Docker Desktop",
 	}
 }
@@ -486,10 +503,13 @@ func titleName(name string) string {
 
 func dockerInstallURL(host HostPlatform) string {
 	if host.WSL {
-		return "https://docs.docker.com/desktop/setup/install/windows-install/"
+		return "ms-windows-store://pdp/?ProductId=XP8CBJ40XLBWKX"
 	}
 	switch host.OS {
 	case "windows":
+		if host.Arch != "arm64" {
+			return "ms-windows-store://pdp/?ProductId=XP8CBJ40XLBWKX"
+		}
 		return "https://docs.docker.com/desktop/setup/install/windows-install/"
 	case "darwin":
 		return "https://docs.docker.com/desktop/setup/install/mac-install/"

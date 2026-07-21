@@ -143,7 +143,7 @@ func resolveUninstallTarget() (*config.Config, string, error) {
 
 	switch len(instances) {
 	case 0:
-		return nil, "", fmt.Errorf("Omnideck is not installed.\nRun: omnideck install")
+		return nil, "", fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")
 	case 1:
 		return instances[0].Config, instances[0].Path, nil
 	default:

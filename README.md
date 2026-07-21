@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-7C3AED)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-6B7280)](#install)
 
-CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/omnideck) — a containerized AI assistant. Wraps Docker or Podman with a Bubble Tea TUI and guided install wizard.
+CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/omnideck) — a containerized AI assistant. Wraps Docker or Podman with a Bubble Tea TUI and guided setup.
 
 ---
 
@@ -15,7 +15,7 @@ CLI for installing, managing, and monitoring [Omnideck](https://github.com/omnid
 
 ## Features
 
-- **Guided install wizard** — diagnoses, installs, starts, or repairs Podman or Docker before configuring Omnideck
+- **Guided setup** — diagnoses, installs, starts, or repairs Podman or Docker before configuring Omnideck
 - **Smart memory defaults** — suggests container RAM limits based on your system (20% of host RAM, 1–8 GB)
 - **Update in place** — pulls the latest image and recreates the container, preserving config
 - **Multi-instance** — run more than one Omnideck container on different ports from a single binary
@@ -50,7 +50,7 @@ recommends the easiest default for the platform:
 | Linux | Podman | Free, lightweight, and designed to run without giving a background app full control of the computer |
 | macOS with an Apple chip (M1 or newer) | Podman's official installer | Free, with an installer provided by the Podman project |
 | macOS with an Intel chip | Docker Desktop | Docker still provides a current Intel Mac installer; Podman's newest Mac installer is Apple-chip only |
-| Windows 10/11 | Docker Desktop | The most guided Windows setup; Podman Desktop remains a visible free alternative |
+| Windows 10/11 | Docker Desktop | The most guided Windows setup; Podman's official Windows installer remains a visible free alternative |
 | Linux running inside Windows (WSL) | Docker Desktop | Reuses Docker managed by Windows instead of installing a second copy inside Linux |
 
 The interactive wizard can ask your computer's built-in tools to install or
@@ -69,7 +69,7 @@ Run `omnideck` as your normal user. Do not put `sudo` before it or choose
 | Linux | The computer's app installer may ask for the user's account password while it installs Podman or starts Docker. The account must be allowed to install software. |
 | macOS | Omnideck runs normally. The official Podman or Docker installer may ask for the user's Mac password while it adds Podman or Docker. |
 | Windows with Docker Desktop | Keep the installer's recommended **Per-user** choice. That normally needs no special permission. Windows may need approval from the person who manages the computer the first time it turns on the built-in Linux feature Docker uses. |
-| Windows with Podman Desktop | The person who manages the computer must approve turning on the built-in Windows feature Podman uses. |
+| Windows with Podman | The recommended **Just for me** install needs no administrator. Windows may require an administrator and a restart if WSL is not enabled yet. |
 
 ---
 
@@ -106,8 +106,8 @@ omnideck --version
 ## Quickstart
 
 ```sh
-# 1. Install Omnideck (interactive wizard)
-omnideck install
+# 1. Start Omnideck. First use opens guided setup automatically.
+omnideck
 
 # 2. Check everything is healthy
 omnideck doctor
@@ -117,9 +117,10 @@ omnideck doctor
 ```
 
 The wizard diagnoses or sets up Podman or Docker, checks Ollama reachability,
-suggests memory limits sized for your machine, and starts the container. In
-`--plain` mode the CLI prints the exact recommended commands or official URL but
-does not change the host, which keeps CI/CD behavior non-interactive.
+suggests memory limits sized for your machine, and starts the container. With
+`--plain`, a ready runtime performs the same container setup without the TUI. If
+the runtime is missing, it prints the recommended commands or official URL and
+exits without installing host software.
 
 See the [screen-by-screen macOS walkthrough](docs/mac-setup-walkthrough.md) for
 the exact fresh-install flow and user-facing text.
@@ -136,7 +137,7 @@ omnideck <command> [flags]
 
 | Command | Description |
 |---|---|
-| `install` | Interactive TUI wizard — install or update an existing instance |
+| `setup` | Set up one additional Omnideck instance (`install` remains an alias) |
 | `update` | Pull the latest image and recreate the container |
 | `start` | Start a stopped container |
 | `stop` | Gracefully stop the running container |
@@ -152,21 +153,21 @@ omnideck <command> [flags]
 ### Global flags
 
 ```
---config string   Config file path (default: ~/.config/omnideck-cli/config.yaml)
+--config string   Use a specific config file instead of the saved instance picker
 --name string     Instance name (e.g. omnideck, omnideck2)
 --no-color        Disable color output
 --debug           Print raw engine commands and stderr
 --version         Print version and exit
 ```
 
-### Install flags
+### Setup flags
 
 ```
---engine string   Container engine to use: docker or podman (default: auto-detect, prefers podman)
+--engine string   Initial container runtime: docker or podman (all instances use the same runtime)
 --image string    Override the container image (for testing alternate builds)
 ```
 
-`--engine` is useful on machines where both Docker and Podman are installed but only one is configured correctly. The interactive wizard also lets you switch engines from the preflight screen (`[tab]` to toggle).
+`--engine` can select the runtime during the first setup. After that, Omnideck uses the saved shared runtime for every instance and will not silently switch existing installations.
 
 ### Examples
 
@@ -178,14 +179,14 @@ omnideck logs --follow --tail 100
 omnideck --name omnideck2 status
 omnideck --name omnideck2 stop
 
-# Force Docker when both engines are installed
-omnideck install --engine docker
+# Choose Docker during the first setup
+omnideck setup --engine docker
 
 # Test an alternate image without changing the default
-omnideck install --image ghcr.io/example/omnideck:dev
+omnideck setup --image ghcr.io/example/omnideck:dev
 
-# Non-interactive install for CI/CD
-omnideck install --plain --engine docker --port 2337
+# Non-interactive setup for CI/CD
+omnideck setup --plain --engine docker --port 2337
 
 # Uninstall a specific instance
 omnideck --name omnideck2 uninstall
@@ -193,7 +194,7 @@ omnideck --name omnideck2 uninstall
 
 ### Multiple instances
 
-If Omnideck is already installed, `omnideck install` asks whether to update the existing instance or install a new one. New instances get a unique container name (`omnideck2`, `omnideck3`, …), separate named volumes, and an incremented port.
+Choose **Setup** from the dashboard, or run `omnideck setup`, to create exactly one additional instance. Each setup suggests a unique container name (`omnideck2`, `omnideck3`, …), separate named volumes, and the next available browser port. Names and ports are checked before Omnideck changes anything; unrelated containers are never replaced.
 
 Commands that need an instance (e.g. `start`, `status`) show a picker when more than one instance exists, or accept `--name` to skip the prompt.
 
@@ -201,11 +202,16 @@ Commands that need an instance (e.g. `start`, `status`) show a picker when more 
 
 ## Configuration
 
-Config files live at:
+Config files use the conventional per-user location for each operating system:
 
-```
-~/.config/omnideck-cli/instances/<container-name>.yaml
-```
+| Operating system | Config directory |
+|---|---|
+| Linux | `$XDG_CONFIG_HOME/omnideck-cli`, or `~/.config/omnideck-cli` |
+| macOS | `~/Library/Application Support/omnideck-cli` |
+| Windows | `%AppData%\omnideck-cli` |
+
+Each installation is stored under `instances/<container-name>.yaml` in that directory.
+Existing alpha configuration under `~/.config/omnideck-cli` is copied automatically when needed; existing files in the conventional location are never overwritten.
 
 ```yaml
 container_name: omnideck
@@ -214,14 +220,20 @@ state_volume: omnideck-state
 memory: 3g
 shm_size: 1536m
 web_ui_port: "2337"
-engine: docker
 image: ghcr.io/omnideck-dev/omnideck:main
 installed_at: 2025-01-15T10:30:00Z
 ```
 
+The runtime shared by every instance is stored separately:
+
+```yaml
+# <config directory>/settings.yaml
+runtime: docker
+```
+
 **`home_volume`** is mounted into the container at `/home/omnideck`. Empty or missing means `{container_name}-home`.
 **`state_volume`** is mounted into the container at `/var/lib/omnideck`. Empty or missing means `{container_name}-state`.
-**`memory`** and **`shm_size`** are set by the wizard based on your system RAM and can be adjusted here or during install.
+**`memory`** and **`shm_size`** are set during setup based on your system RAM and can be adjusted later.
 
 ---
 

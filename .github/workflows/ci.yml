@@ -28,9 +28,9 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
@@ -44,23 +44,29 @@ jobs:
         shell: bash
         run: go build -o /dev/null .
 
-  # ── darwin/amd64 compile check ─────────────────────────────────
-  # Verifies the Intel macOS build still compiles without depending on
-  # a scarce native Intel runner. Pure-Go (no cgo), so cross-compiling
-  # from Linux is equivalent for build-breakage detection.
+  # ── Compile checks for platforms without hosted native runners ──
   cross-build:
-    name: cross-build (darwin/amd64)
+    name: cross-build (${{ matrix.goos }}/${{ matrix.goarch }})
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: darwin
+            goarch: amd64
+          - goos: windows
+            goarch: arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
 
-      - name: Build darwin/amd64
+      - name: Build ${{ matrix.goos }}/${{ matrix.goarch }}
         env:
-          GOOS: darwin
-          GOARCH: amd64
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
         run: go build -o /dev/null .

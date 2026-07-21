@@ -54,13 +54,13 @@ func TestWindowsRecommendsDockerDesktop(t *testing.T) {
 	if !plans[1].Recommended || plans[1].Runtime != "docker" {
 		t.Fatalf("recommended plan = %#v, want Docker", plans[1])
 	}
-	if !strings.Contains(plans[1].URL, "windows-install") {
-		t.Fatalf("URL = %q", plans[1].URL)
+	if !strings.Contains(plans[1].URL, "ms-windows-store://") || !strings.Contains(plans[1].URL, "XP8CBJ40XLBWKX") {
+		t.Fatalf("Windows Docker setup should open its official Store listing, URL = %q", plans[1].URL)
 	}
-	if len(plans[0].Steps) != 3 || !strings.Contains(plans[0].Description, "free alternative") {
+	if len(plans[0].Steps) != 3 || !plans[0].DirectDownload || !strings.Contains(plans[0].URL, "podman-installer-windows-amd64.exe") {
 		t.Fatalf("Podman alternative must have its own plain walkthrough: %#v", plans[0])
 	}
-	if len(plans[1].Steps) != 3 || !strings.Contains(plans[1].PermissionNote, "allowed to make changes") {
+	if len(plans[1].Steps) != 3 || !strings.Contains(plans[1].PermissionNote, "administrator") {
 		t.Fatalf("Docker recommendation must explain its Windows setup: %#v", plans[1])
 	}
 }
@@ -115,8 +115,26 @@ func TestWSLRecommendsDockerDesktop(t *testing.T) {
 	if !plans[1].Recommended || !strings.Contains(plans[1].Description, "Docker Desktop") {
 		t.Fatalf("expected Docker Desktop recommendation under WSL, got %#v", plans[1])
 	}
-	if !strings.Contains(plans[1].URL, "windows-install") {
-		t.Fatalf("URL = %q", plans[1].URL)
+	if !strings.Contains(plans[1].URL, "ms-windows-store://") {
+		t.Fatalf("WSL Docker setup should open Microsoft Store, URL = %q", plans[1].URL)
+	}
+}
+
+func TestWindowsARMUsesDockerInstallerInsteadOfX64StoreListing(t *testing.T) {
+	url := dockerInstallURL(HostPlatform{OS: "windows", Arch: "arm64"})
+	if !strings.Contains(url, "windows-install") {
+		t.Fatalf("Windows ARM URL = %q, want Docker's installer page", url)
+	}
+}
+
+func TestStartDockerDesktopChecksPerUserAndAllUserLocations(t *testing.T) {
+	command := startDockerDesktopCommand()
+	args := strings.Join(command.Args, " ")
+	if !strings.Contains(args, `LOCALAPPDATA\Programs\DockerDesktop`) {
+		t.Fatalf("start command does not check the per-user Docker location: %s", args)
+	}
+	if !strings.Contains(args, `ProgramFiles\Docker\Docker`) {
+		t.Fatalf("start command does not check the all-users Docker location: %s", args)
 	}
 }
 

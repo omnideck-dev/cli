@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/omnideck-dev/cli/engine"
 )
 
@@ -224,6 +225,82 @@ func TestUpdatePreflightEngineError(t *testing.T) {
 	}
 }
 
+func TestSetupOnlyReturnsToDashboardWhenRuntimeIsReady(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.Embedded = true
+	m.setupOnly = true
+	m.eng = &mockEngine{}
+
+	newModel, cmd := m.afterRuntimeReady()
+	nm := newModel.(InstallModel)
+	if nm.Phase == PhaseConfig {
+		t.Fatal("runtime repair must not continue into new-instance settings")
+	}
+	if cmd == nil {
+		t.Fatal("runtime repair should return to the dashboard")
+	}
+	if _, ok := cmd().(WizardExitMsg); !ok {
+		t.Fatal("runtime repair should emit WizardExitMsg")
+	}
+}
+
+func TestContainerNameCollisionIsRejected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.eng = &mockEngine{containerExists: true}
+	m.inputFocus = inputContainerName
+	m.inputs[inputContainerName].SetValue("omnideck")
+
+	if m.validateCurrentInput() {
+		t.Fatal("a container name already used by the runtime must be rejected")
+	}
+	if !strings.Contains(m.inputErrs[inputContainerName], "another container") {
+		t.Fatalf("collision error = %q", m.inputErrs[inputContainerName])
+	}
+}
+
+func TestExistingBrowserPortIsRejected(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.inputFocus = inputWebUIPort
+	m.inputs[inputWebUIPort].SetValue("2337")
+	m.existingPorts["2337"] = true
+
+	if m.validateCurrentInput() {
+		t.Fatal("a browser port already used by Omnideck must be rejected")
+	}
+	if !strings.Contains(m.inputErrs[inputWebUIPort], "another Omnideck") {
+		t.Fatalf("port collision error = %q", m.inputErrs[inputWebUIPort])
+	}
+}
+
+func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	docker := &mockEngine{name: "docker"}
+	podman := &mockEngine{name: "podman"}
+	m.preflightReady = true
+	m.preferredEngine = "docker"
+	m.eng = docker
+	m.availableEngines = []engine.Engine{docker, podman}
+
+	newModel, cmd := m.updatePreflight(tea.KeyMsg{Type: tea.KeyTab})
+	nm := newModel.(InstallModel)
+	if cmd != nil || nm.eng.Name() != "docker" {
+		t.Fatalf("per-instance switch changed runtime to %s", nm.eng.Name())
+	}
+}
+
+func TestRecommendedNameSkipsUnrelatedContainer(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.eng = &mockEngine{containerNames: map[string]bool{"omnideck": true}}
+	m.ensureRecommendedSettingsAvailable()
+	if got := m.inputs[inputContainerName].Value(); got != "omnideck2" {
+		t.Fatalf("suggested name = %q, want omnideck2", got)
+	}
+}
+
 func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
 	m := NewInstallModel("/tmp/test.yaml", nil, "")
 	m.runtimeProbes = []engine.ProbeResult{
@@ -269,8 +346,31 @@ func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 		t.Fatal("the first Enter should open the setup review")
 	}
 	view := nm.tnRuntimeSetup(100)
-	if !strings.Contains(view, "Review what will happen") || !strings.Contains(view, "About password requests") {
+	if !strings.Contains(view, "What happens next") || !strings.Contains(view, "Permission or password") {
 		t.Fatalf("review must explain steps and password requests:\n%s", view)
+	}
+}
+
+func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
+	const width = 56
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.Phase = PhaseRuntimeSetup
+	m.runtimeConfirm = true
+	m.runtimePlans = []engine.SetupPlan{{
+		Action: "Install Docker Desktop for this computer",
+		Steps: []string{
+			"Open Docker's official download page and choose the installer recommended for this computer.",
+			"When the installer asks who Docker is for, keep the recommended Per-user choice.",
+		},
+		PermissionNote: "Windows may ask whether the installer is allowed to make changes to this computer. If your account cannot approve that message, ask the person who manages the computer.",
+		SafetyNote:     "Docker Desktop can require a paid subscription at larger companies, so ask your company before installing it on a work computer.",
+	}}
+
+	view := m.tnRuntimeSetup(width)
+	for _, line := range strings.Split(view, "\n") {
+		if got := lipgloss.Width(line); got > width {
+			t.Fatalf("rendered line is %d columns wide, want at most %d:\n%q\n\n%s", got, width, line, view)
+		}
 	}
 }
 
@@ -296,12 +396,13 @@ func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
 	}
 	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	nm := newModel.(InstallModel)
-	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(view, detail) {
+	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields(detail), "")) {
 		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
 	}
 }
 
 func TestRecommendedSettingsAreOneStep(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 	m := NewInstallModel("/tmp/test.yaml", nil, "")
 	m.Phase = PhaseConfig
 

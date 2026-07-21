@@ -515,15 +515,20 @@ func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Capture old name before saveCfgFields mutates the in-memory config.
 		oldName := inst.Info.Config.ContainerName
+		oldPort := inst.Info.Config.WebUIPortOrDefault()
 		needsRestart := false
 		for _, f := range m.cfgFields {
 			if !f.Changed {
 				continue
 			}
 			switch f.Key {
-			case "container_name", "memory", "shm_size", "web_ui_port", "image":
+			case "container_name", "home_volume", "state_volume", "memory", "shm_size", "web_ui_port", "image":
 				needsRestart = true
 			}
+		}
+		if err := m.validateCfgFields(); err != nil {
+			m.toast = "Cannot save: " + err.Error()
+			return m, clearToastCmd()
 		}
 		if err := m.saveCfgFields(); err != nil {
 			m.toast = "Save failed: " + err.Error()
@@ -535,7 +540,7 @@ func (m DashboardModel) updateConfig(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if needsRestart {
 			m.toast = "Applying config…"
-			return m, applyConfigCmd(oldName, inst.Info.Config, m.eng, m.selected)
+			return m, applyConfigCmd(oldName, oldPort, inst.Info.Config, m.eng, m.selected)
 		}
 		m.toast = "Config saved"
 		return m, clearToastCmd()

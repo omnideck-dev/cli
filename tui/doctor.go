@@ -68,7 +68,7 @@ func RunDoctorChecks(cfg *config.Config, eng engine.Engine) []CheckResult {
 	runCheck(2, func() CheckResult {
 		if cfg == nil {
 			return CheckResult{"Container", CheckFail, "no config found",
-				"Run: omnideck install"}
+				"Run: omnideck setup"}
 		}
 		if eng == nil {
 			return CheckResult{"Container", CheckWarn, "skipped — no engine found", ""}
@@ -76,7 +76,7 @@ func RunDoctorChecks(cfg *config.Config, eng engine.Engine) []CheckResult {
 		status, err := eng.ContainerStatus(cfg.ContainerName)
 		if err != nil {
 			return CheckResult{"Container", CheckFail, fmt.Sprintf("'%s' not found", cfg.ContainerName),
-				"Run: omnideck install"}
+				"Run: omnideck setup"}
 		}
 		if status == "running" {
 			return CheckResult{"Container", CheckPass, cfg.ContainerName + " — " + status, ""}
@@ -205,7 +205,7 @@ func volumeCheck(label, name string, eng engine.Engine) CheckResult {
 		return CheckResult{label, CheckWarn, name + " — could not check", err.Error()}
 	}
 	if !exists {
-		return CheckResult{label, CheckFail, name + " — not found", "Run: omnideck install"}
+		return CheckResult{label, CheckFail, name + " — not found", "Run: omnideck setup"}
 	}
 	return CheckResult{label, CheckPass, name + " — exists", ""}
 }
