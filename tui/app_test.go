@@ -27,8 +27,8 @@ func TestSuggestInstallDefaultsForAdditionalInstance(t *testing.T) {
 	}
 }
 
-func TestInstallScreenUsesFirstRunLanguage(t *testing.T) {
-	m := NewDashboardModelForSetup(nil, nil, "", "")
+func TestSetupScreenUsesFirstRunLanguage(t *testing.T) {
+	m := NewAppModelForSetup(nil, nil, "", "")
 	if m.setupModel.setupMode != SetupFirstRun {
 		t.Fatalf("setup mode = %d, want first run", m.setupModel.setupMode)
 	}
@@ -46,11 +46,11 @@ func TestInstallScreenUsesFirstRunLanguage(t *testing.T) {
 	}
 }
 
-func TestInstallScreenUsesAdditionalInstanceLanguage(t *testing.T) {
+func TestSetupScreenUsesAdditionalInstanceLanguage(t *testing.T) {
 	instances := []config.InstanceInfo{
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
 	}
-	m := NewDashboardModelForSetup(nil, instances, "", "")
+	m := NewAppModelForSetup(nil, instances, "", "")
 	if m.setupModel.setupMode != SetupAdditionalInstance {
 		t.Fatalf("setup mode = %d, want additional instance", m.setupModel.setupMode)
 	}
@@ -69,7 +69,7 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 	instances := []config.InstanceInfo{
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", Engine: "podman", WebUIPort: "2337"}},
 	}
-	m := NewDashboardModelForRuntimeSetup(instances, "podman")
+	m := NewAppModelForRuntimeSetup(instances, "podman")
 	if m.setupModel.setupMode != SetupRuntimeRepair {
 		t.Fatalf("setup mode = %d, want runtime repair", m.setupModel.setupMode)
 	}
@@ -109,14 +109,14 @@ func TestHeaderUsesPlainInstanceStatusWithoutClock(t *testing.T) {
 		})
 	}
 
-	m := NewDashboardModel(nil, nil)
+	m := NewAppModel(nil, nil)
 	m.width = 100
 	header := m.renderHeader()
 	if !strings.Contains(header, "No instances yet") || strings.Contains(header, "13:15:22") {
 		t.Fatalf("dashboard header should show useful status without a clock:\n%s", header)
 	}
 
-	m.screen = ScreenSetup
+	m.router.Replace(RouteSetup)
 	header = m.renderHeader()
 	if strings.Contains(header, "No instances yet") || strings.Contains(header, "running") {
 		t.Fatalf("setup header should stay focused on setup:\n%s", header)

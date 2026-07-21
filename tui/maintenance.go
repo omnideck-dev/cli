@@ -102,20 +102,20 @@ func (m MaintenanceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "enter":
 				return m.begin()
 			case "b", "esc", "q", "ctrl+c":
-				return m.exit()
+				return m.exit(WorkflowCanceled)
 			}
 		case MaintenanceStageApplying:
 			// Engine operations are allowed to finish so the instance is never
 			// abandoned halfway through a replacement.
 			return m, nil
 		case MaintenanceStageComplete:
-			return m.exit()
+			return m.exit(WorkflowCompleted)
 		case MaintenanceStageFailed:
 			switch msg.String() {
 			case "r":
 				return m.begin()
 			case "b", "enter", "esc", "q", "ctrl+c":
-				return m.exit()
+				return m.exit(WorkflowCanceled)
 			}
 		}
 	case StepDoneMsg:
@@ -151,9 +151,9 @@ func (m MaintenanceModel) begin() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(m.spinnerModel.Init(), m.startMaintenanceStep(0))
 }
 
-func (m MaintenanceModel) exit() (tea.Model, tea.Cmd) {
+func (m MaintenanceModel) exit(outcome WorkflowOutcome) (tea.Model, tea.Cmd) {
 	if m.Embedded {
-		return m, func() tea.Msg { return WorkflowExitMsg{} }
+		return m, func() tea.Msg { return WorkflowExitMsg{Outcome: outcome} }
 	}
 	return m, tea.Quit
 }
@@ -216,22 +216,22 @@ func (m MaintenanceModel) failureText() string {
 	return "The update could not be completed"
 }
 
-// TNView renders maintenance inside the dashboard modal.
+// TNView renders maintenance inside the application screen.
 func (m MaintenanceModel) TNView(_ int) string {
 	var sb strings.Builder
 	switch m.Stage {
 	case MaintenanceStageReview:
 		sb.WriteString("\n  " + styles.TNTextBold.Render(m.reviewText()) + "\n\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press Enter to "+m.actionVerb()+", or b to go back without changing anything.") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press Enter to "+m.actionVerb()+", or Esc to go back without changing anything.") + "\n")
 	case MaintenanceStageComplete:
 		sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render(m.completeText()) + "\n\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press any key to return to the dashboard.") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press any key to return to the previous screen.") + "\n")
 	case MaintenanceStageFailed:
 		sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(m.failureText()) + "\n\n")
 		if m.errorMsg != "" {
 			sb.WriteString("     " + styles.TNDimText.Render(m.errorMsg) + "\n\n")
 		}
-		sb.WriteString("  " + styles.TNDimText.Render("Press r to try again, or b to return to the dashboard.") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press r to try again, or Esc to return to the previous screen.") + "\n")
 	case MaintenanceStageApplying:
 		sb.WriteString("\n")
 		for _, step := range m.spinnerModel.Steps {
@@ -244,11 +244,11 @@ func (m MaintenanceModel) TNView(_ int) string {
 func (m MaintenanceModel) View() string {
 	switch m.Stage {
 	case MaintenanceStageReview:
-		return styles.Header("OMNIDECK", m.title(), m.WindowWidth) + "\n  " + m.reviewText() + "\n\n" + styles.Dim.Render("  Press Enter to "+m.actionVerb()+", or b to cancel.")
+		return styles.Header("OMNIDECK", m.title(), m.WindowWidth) + "\n  " + m.reviewText() + "\n\n" + styles.Dim.Render("  Press Enter to "+m.actionVerb()+", or Esc to cancel.")
 	case MaintenanceStageComplete:
 		return "\n" + styles.Success.Render("  ✓  "+m.completeText()) + "\n\n" + styles.Dim.Render("  Press any key to exit.")
 	case MaintenanceStageFailed:
-		return "\n" + styles.Error.Render("  ✗  "+m.failureText()) + "\n\n  " + m.errorMsg + "\n\n" + styles.Dim.Render("  Press r to try again, or b to exit.")
+		return "\n" + styles.Error.Render("  ✗  "+m.failureText()) + "\n\n  " + m.errorMsg + "\n\n" + styles.Dim.Render("  Press r to try again, or Esc to exit.")
 	default:
 		return styles.Header("OMNIDECK", m.title()+" in progress", m.WindowWidth) + m.spinnerModel.View()
 	}

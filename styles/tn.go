@@ -7,43 +7,43 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Tokyo Night palette — used exclusively by the v2 dashboard TUI.
+// Tokyo Night palette used by the interactive terminal application.
 // These are intentional fixed hex values matching the design spec.
 var (
-	TNBg     = lipgloss.Color("#16161e")
-	TNBgAlt  = lipgloss.Color("#191b26")
-	TNBgSel  = lipgloss.Color("#23263a")
-	TNBorder = lipgloss.Color("#242838")
+	TNBg      = lipgloss.Color("#16161e")
+	TNBgAlt   = lipgloss.Color("#191b26")
+	TNBgSel   = lipgloss.Color("#23263a")
+	TNBorder  = lipgloss.Color("#242838")
 	TNBorder2 = lipgloss.Color("#2a2e44")
-	TNFg     = lipgloss.Color("#d6dcf5")
-	TNFgMid  = lipgloss.Color("#a9b1d6")
-	TNFgSub  = lipgloss.Color("#c0caf5")
-	TNMuted  = lipgloss.Color("#565f89")
-	TNDimClr = lipgloss.Color("#4d5573")
-	TNFaint  = lipgloss.Color("#414868")
-	TNBlue   = lipgloss.Color("#7aa2f7")
-	TNPurple = lipgloss.Color("#bb9af7")
-	TNGreen  = lipgloss.Color("#9ece6a")
-	TNYellow = lipgloss.Color("#e0af68")
-	TNRed    = lipgloss.Color("#f7768e")
-	TNCyan   = lipgloss.Color("#7dcfff")
-	TNOrange = lipgloss.Color("#ff9e64")
+	TNFg      = lipgloss.Color("#d6dcf5")
+	TNFgMid   = lipgloss.Color("#a9b1d6")
+	TNFgSub   = lipgloss.Color("#c0caf5")
+	TNMuted   = lipgloss.Color("#565f89")
+	TNDimClr  = lipgloss.Color("#4d5573")
+	TNFaint   = lipgloss.Color("#414868")
+	TNBlue    = lipgloss.Color("#7aa2f7")
+	TNPurple  = lipgloss.Color("#bb9af7")
+	TNGreen   = lipgloss.Color("#9ece6a")
+	TNYellow  = lipgloss.Color("#e0af68")
+	TNRed     = lipgloss.Color("#f7768e")
+	TNCyan    = lipgloss.Color("#7dcfff")
+	TNOrange  = lipgloss.Color("#ff9e64")
 )
 
-// Pre-built Lip Gloss styles for the dashboard.
+// Pre-built Lip Gloss styles for the interactive terminal application.
 var (
-	TNText       = lipgloss.NewStyle().Foreground(TNFg)
-	TNTextBold   = lipgloss.NewStyle().Foreground(TNFg).Bold(true)
-	TNTextMid    = lipgloss.NewStyle().Foreground(TNFgMid)
-	TNTextSub    = lipgloss.NewStyle().Foreground(TNFgSub)
-	TNDimText    = lipgloss.NewStyle().Foreground(TNMuted)
-	TNFaintText  = lipgloss.NewStyle().Foreground(TNFaint)
-	TNBlueTxt    = lipgloss.NewStyle().Foreground(TNBlue)
-	TNGreenTxt   = lipgloss.NewStyle().Foreground(TNGreen)
-	TNRedTxt     = lipgloss.NewStyle().Foreground(TNRed)
-	TNYellowTxt  = lipgloss.NewStyle().Foreground(TNYellow)
-	TNCyanTxt    = lipgloss.NewStyle().Foreground(TNCyan)
-	TNPurpleTxt  = lipgloss.NewStyle().Foreground(TNPurple)
+	TNText      = lipgloss.NewStyle().Foreground(TNFg)
+	TNTextBold  = lipgloss.NewStyle().Foreground(TNFg).Bold(true)
+	TNTextMid   = lipgloss.NewStyle().Foreground(TNFgMid)
+	TNTextSub   = lipgloss.NewStyle().Foreground(TNFgSub)
+	TNDimText   = lipgloss.NewStyle().Foreground(TNMuted)
+	TNFaintText = lipgloss.NewStyle().Foreground(TNFaint)
+	TNBlueTxt   = lipgloss.NewStyle().Foreground(TNBlue)
+	TNGreenTxt  = lipgloss.NewStyle().Foreground(TNGreen)
+	TNRedTxt    = lipgloss.NewStyle().Foreground(TNRed)
+	TNYellowTxt = lipgloss.NewStyle().Foreground(TNYellow)
+	TNCyanTxt   = lipgloss.NewStyle().Foreground(TNCyan)
+	TNPurpleTxt = lipgloss.NewStyle().Foreground(TNPurple)
 
 	TNBoldBlue   = lipgloss.NewStyle().Foreground(TNBlue).Bold(true)
 	TNBoldGreen  = lipgloss.NewStyle().Foreground(TNGreen).Bold(true)
@@ -68,15 +68,9 @@ var (
 
 	// TNPanelAccent is the center/focus panel with a blue accent border (simulated glow).
 	TNPanelAccent = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(TNBlue).
-		Background(TNBgAlt)
-
-	// TNModal is a rounded-border modal overlay panel.
-	TNModal = lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(TNBorder2).
-		Background(TNBgAlt)
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(TNBlue).
+			Background(TNBgAlt)
 
 	// TNHeaderBar is the single-line app header bar.
 	TNHeaderBar = lipgloss.NewStyle().

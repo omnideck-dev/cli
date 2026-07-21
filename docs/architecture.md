@@ -13,23 +13,42 @@ main.go
        ├─ first use ──────> tui/ Setup
        ├─ runtime broken ─> tui/ Setup (runtime-repair mode)
        ├─ instance broken > tui/ Doctor > tui/ Maintenance (repair mode)
-       └─ returning user ─> tui/ Dashboard
-                                ├─ Setup (additional instance)
-                                ├─ Settings apply
-                                ├─ Doctor
-                                └─ Maintenance (update or repair)
+       └─ returning user ─> tui/ AppModel
+                                ├─ Dashboard screen
+                                ├─ Logs screen
+                                ├─ Settings screen
+                                ├─ Doctor screen
+                                ├─ Setup workflow screen
+                                └─ Maintenance workflow screen
 
-workflow/                 Shared Omnideck operations
-  └─ engine/              Raw Docker and Podman commands and host setup plans
+workflow/                 Shared lifecycle, settings, and diagnosis operations
+engine/                   Raw Docker and Podman commands and host setup plans
 
 config/                   Platform-native persisted settings
 checks/                   Host checks and input validation
 styles/                   Terminal presentation primitives
 ```
 
-`cmd/root.go` makes only the high-level entry decision. The Dashboard is the
-single interactive shell for returning users; there is no separate launcher
-with duplicate start, stop, status, logs, or Doctor implementations.
+`cmd/root.go` makes only the high-level entry decision. `AppModel` is the one
+interactive application shell; there is no separate launcher with duplicate
+start, stop, status, logs, or Doctor implementations.
+
+## TUI navigation
+
+`AppModel` owns shared instance state and a small stack-based `Router`. The
+Dashboard is the root screen. Logs, Settings, Doctor, Setup, and Maintenance
+are full screens. Pushing a screen records its caller, so Back returns to the
+actual previous screen—for example, Repair opened by Doctor returns to Doctor
+for another health check.
+
+Setup and Maintenance remain independent Bubble Tea workflow models hosted by
+the application shell. Their exit messages distinguish completion from
+cancellation: a root-level cancel exits the TUI, while a completed first setup
+continues to the Dashboard.
+
+Short blocking decisions use `ConfirmDialog`. A dialog captures input before
+the active screen and defaults to the safe choice. Substantial journeys must
+not be implemented as dialogs.
 
 ## State machines
 
@@ -39,7 +58,7 @@ being in Setup's runtime-selection state.
 
 | Workflow | States or modes |
 | --- | --- |
-| Dashboard | Dashboard, Logs, Settings, Doctor, Setup, Maintenance |
+| Application router | Dashboard, Logs, Settings, Doctor, Setup, Maintenance routes |
 | Setup | Quick check, Runtime, Settings, Review, Applying, Complete, Failed |
 | Runtime setup | Choose, Review, Working, Waiting |
 | Settings | Editing, Applying |
@@ -64,6 +83,8 @@ be an error. `workflow/` provides the application semantics used everywhere:
   previous container configuration if the replacement fails.
 - `NewInstanceDefaults` owns unique name and browser-port suggestions.
 - `ApplySetting` owns the editable settings surface and syntax validation.
+- `Diagnose` owns Doctor's runtime, instance, volume, and host checks for both
+  the interactive screen and the plain `omnideck doctor` report.
 
 Commands and TUI screens should call these operations rather than calling raw
 start/stop/remove methods or rebuilding `engine.RunOptions` themselves.

@@ -36,13 +36,21 @@ omnideck-cli/
 │   ├── config.go
 │   └── uninstall.go
 ├── tui/
-│   ├── dashboard.go         # Single interactive shell and top-level screens
-│   ├── setup.go             # First-use, additional-instance, and runtime setup
+│   ├── app.go               # Application shell and shared instance state
+│   ├── app_update.go        # Global messages and route dispatch
+│   ├── app_view.go          # Shared frame and route rendering
+│   ├── router.go            # Stack-based screen navigation
+│   ├── dialog.go            # Short blocking confirmations only
+│   ├── screen_*_update.go   # Input handling for one routed screen
+│   ├── screen_*_view.go     # Presentation for one routed screen
+│   ├── screen_*.go          # Screen state and asynchronous commands
+│   ├── setup*.go            # First-use, additional-instance, and runtime setup stages
 │   ├── maintenance.go       # Review-first update and repair workflow
-│   ├── doctor.go            # Diagnosis and guided repair actions
+│   ├── doctor_report.go     # Plain report rendering for `omnideck doctor`
 │   └── spinner.go           # Spinner + fading message component
 ├── workflow/
 │   ├── container.go         # Idempotent lifecycle and transactional recreate
+│   ├── diagnostics.go       # Shared Doctor diagnosis and guided actions
 │   ├── instances.go         # Unique new-instance defaults
 │   └── settings.go          # Shared settings validation/mutation
 ├── engine/
@@ -121,7 +129,10 @@ which keeps tests small and prevents accidental coupling.
 ## TUI and Workflow Conventions
 
 - All TUI programs use `tea.NewProgram(model, tea.WithAltScreen())`
-- The dashboard is the one interactive shell for returning users; do not add a second launcher with duplicate actions
+- `AppModel` is the one interactive shell; the Dashboard is only its root screen
+- Logs, Settings, Doctor, Setup, and Maintenance are full screens managed by `Router`
+- Back navigation must pop the router so nested workflows return to their caller
+- Use `ConfirmDialog` only for short blocking decisions; substantial journeys are screens
 - Setup, runtime setup, settings, Doctor, and Maintenance have separate typed states; do not add a shared phase enum
 - Constructors receive `SetupRequest` or `MaintenanceRequest`; callers should not construct a model and mutate it into another journey
 - Setup and Maintenance use a **spinner + fading messages** pattern (see `tui/spinner.go`)

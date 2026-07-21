@@ -11,7 +11,7 @@ import (
 )
 
 // TNView renders setup in Tokyo Night style.
-// Called by DashboardModel.viewSetup() when Embedded == true.
+// Called by AppModel.viewSetup() when Embedded == true.
 func (m SetupModel) TNView(w, _ int) string {
 	switch m.Stage {
 	case SetupStageQuickCheck:
@@ -50,7 +50,7 @@ func (m SetupModel) tnRuntimeSetup(w int) string {
 		if m.runtimeSetupStage == runtimeSetupWorking {
 			sb.WriteString("  " + m.quickCheckSpinner.View() + " " + styles.TNDimText.Render("Checking again…") + "\n")
 		} else {
-			writeTNWrapped(&sb, w, "  ", "  ", "Press R to check again. You can also press Q to leave setup.", styles.TNGreenTxt)
+			writeTNWrapped(&sb, w, "  ", "  ", "Press Enter to check again, or Esc to leave setup.", styles.TNGreenTxt)
 		}
 		return sb.String()
 	}
@@ -346,7 +346,7 @@ func (m SetupModel) tnSettings(w int) string {
 	sb.WriteString("\n  ")
 	sb.WriteString(styles.TNKeyChip.Render("tab") + " " + styles.TNDimText.Render("next") + "  ")
 	sb.WriteString(styles.TNKeyChip.Render("shift+tab") + " " + styles.TNDimText.Render("back") + "  ")
-	sb.WriteString(styles.TNKeyChip.Render("esc") + " " + styles.TNDimText.Render("cancel"))
+	sb.WriteString(styles.TNKeyChip.Render("esc") + " " + styles.TNDimText.Render("use recommended settings"))
 	sb.WriteString("\n")
 
 	_ = maxFieldW
@@ -425,7 +425,7 @@ func (m SetupModel) tnFailed(_ int) string {
 	sb.WriteString("  " + styles.TNDimText.Render("Any saved space already prepared will be reused if you try again.") + "\n\n")
 	sb.WriteString("  " + styles.TNTextSub.Render("What you can do") + "\n")
 	sb.WriteString("    • Press r to review the setup and try again.\n")
-	sb.WriteString("    • Press b to return without trying again.\n")
+	sb.WriteString("    • Press Esc to return without trying again.\n")
 	sb.WriteString("    • Press d to show or hide details for support.\n")
 	if m.errorShowDetails && m.errorDetail != "" {
 		sb.WriteString("\n  " + styles.TNFaintText.Render("Details for support") + "\n")

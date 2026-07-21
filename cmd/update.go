@@ -43,7 +43,7 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 		}
 	}
 
-	model := tui.NewDashboardModelForUpdate(eng, instances, cfg, selectedIdx)
+	model := tui.NewAppModelForUpdate(eng, instances, cfg, selectedIdx)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err

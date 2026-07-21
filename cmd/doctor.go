@@ -5,6 +5,7 @@ import (
 
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/tui"
+	"github.com/omnideck-dev/cli/workflow"
 	"github.com/spf13/cobra"
 )
 
@@ -34,7 +35,7 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 	}
 	detectedEng, _ := engineFromConfig(engName)
 
-	results := tui.RunDoctorChecks(LoadedConfig, detectedEng)
+	results := workflow.Diagnose(LoadedConfig, detectedEng)
 	report, allPass := tui.RenderDoctorReport(results)
 	fmt.Print(report)
 

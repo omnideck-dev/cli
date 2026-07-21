@@ -1,4 +1,4 @@
-package tui
+package workflow
 
 import (
 	"fmt"
@@ -10,7 +10,6 @@ import (
 	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
-	"github.com/omnideck-dev/cli/styles"
 )
 
 // CheckStatus describes whether a Doctor result needs the user's attention.
@@ -35,7 +34,7 @@ const (
 )
 
 // CheckResult is one plain-language Doctor result. Action fields are used by
-// the dashboard; Hint remains useful in the non-interactive report.
+// the interactive Doctor screen; Hint remains useful in the plain report.
 type CheckResult struct {
 	Label       string
 	Status      CheckStatus
@@ -46,20 +45,15 @@ type CheckResult struct {
 	ActionValue string
 }
 
-// RunDoctorChecks diagnoses the selected instance. Runtime health comes from
+// Diagnose checks the selected instance. Runtime health comes from
 // the same probes and setup plans as guided Setup, so the two flows cannot
 // disagree about what is installed or how to make it ready.
-func RunDoctorChecks(cfg *config.Config, eng engine.Engine) []CheckResult {
-	results, _ := diagnoseDoctorWithProbes(cfg, eng, engine.ProbeAll())
+func Diagnose(cfg *config.Config, eng engine.Engine) []CheckResult {
+	results, _ := DiagnoseWithProbes(cfg, eng, engine.ProbeAll())
 	return results
 }
 
-func runDoctorChecksWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.ProbeResult) []CheckResult {
-	results, _ := diagnoseDoctorWithProbes(cfg, eng, probes)
-	return results
-}
-
-func diagnoseDoctorWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.ProbeResult) ([]CheckResult, engine.Engine) {
+func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.ProbeResult) ([]CheckResult, engine.Engine) {
 	runtimeResult, usableEngine := doctorRuntimeCheck(eng, probes)
 	results := []CheckResult{runtimeResult}
 
@@ -94,14 +88,35 @@ func diagnoseDoctorWithProbes(cfg *config.Config, eng engine.Engine, probes []en
 	results = append(results, containerResult)
 	results = append(results, doctorBrowserCheck(cfg, running))
 	results = append(results,
-		volumeCheck("Saved files", cfg.HomeVolumeName(), usableEngine),
-		volumeCheck("Saved app data", cfg.StateVolumeName(), usableEngine),
+		CheckVolume("Saved files", cfg.HomeVolumeName(), usableEngine),
+		CheckVolume("Saved app data", cfg.StateVolumeName(), usableEngine),
 		doctorImageCheck(cfg, usableEngine),
 		doctorMemoryCheck(),
 		doctorOllamaCheck(),
 		CheckResult{Label: "This computer", Status: CheckInfo, Detail: friendlyOS(runtime.GOOS) + " · " + runtime.GOARCH},
 	)
 	return results, usableEngine
+}
+
+// CheckVolume reports whether one of an instance's persisted volumes is still
+// available without attempting to create or replace it.
+func CheckVolume(label, name string, eng engine.Engine) CheckResult {
+	if eng == nil {
+		return CheckResult{Label: label, Status: CheckInfo, Detail: "Not checked until the container runtime is ready"}
+	}
+	exists, err := eng.VolumeExists(name)
+	if err != nil {
+		return CheckResult{Label: label, Status: CheckWarn, Detail: "Could not check " + name, Hint: err.Error()}
+	}
+	if !exists {
+		return CheckResult{
+			Label:  label,
+			Status: CheckFail,
+			Detail: name + " was not found",
+			Hint:   "Do not create a replacement if this instance had important data. Use this name when asking for support.",
+		}
+	}
+	return CheckResult{Label: label, Status: CheckPass, Detail: name + " exists"}
 }
 
 func doctorRuntimeCheck(eng engine.Engine, probes []engine.ProbeResult) (CheckResult, engine.Engine) {
@@ -290,86 +305,26 @@ func doctorOllamaCheck() CheckResult {
 	return CheckResult{Label: "Local AI (optional)", Status: CheckPass, Detail: "Ollama is reachable at " + host}
 }
 
-// RenderDoctorReport renders a static report for `omnideck doctor`.
-func RenderDoctorReport(results []CheckResult) (string, bool) {
-	allPass := true
-	problems := 0
-	out := "\n" + styles.Title.Render("  Omnideck Doctor") + "\n"
-	out += "  " + styles.Dim.Render("────────────────────────────────────────") + "\n\n"
-
-	for _, result := range results {
-		var icon, labelStyle, detailStyle string
-		switch result.Status {
-		case CheckPass:
-			icon = styles.CheckMark
-			labelStyle = styles.Success.Render(result.Label)
-			detailStyle = styles.Dim.Render(result.Detail)
-		case CheckFail:
-			icon = styles.CrossMark
-			labelStyle = styles.Error.Render(result.Label)
-			detailStyle = styles.Error.Render(result.Detail)
-			allPass = false
-			problems++
-		case CheckWarn:
-			icon = styles.Warning.Render("!")
-			labelStyle = styles.Warning.Render(result.Label)
-			detailStyle = styles.Warning.Render(result.Detail)
-		case CheckInfo:
-			icon = styles.Dim.Render("·")
-			labelStyle = styles.Dim.Render(result.Label)
-			detailStyle = styles.Dim.Render(result.Detail)
-		}
-
-		out += fmt.Sprintf("  %s  %-26s %s\n", icon, labelStyle, detailStyle)
-		if result.Hint != "" && result.Status != CheckPass {
-			out += fmt.Sprintf("       %s\n", styles.Dim.Render("→ "+result.Hint))
-		}
-		if command := doctorActionCommand(result); command != "" {
-			out += fmt.Sprintf("       %s\n", styles.Dim.Render("Next: "+command))
-		}
-	}
-
-	out += "\n"
-	if problems == 0 {
-		out += "  " + styles.Success.Render("Everything required for Omnideck is working.") + "\n"
-	} else if problems == 1 {
-		out += "  " + styles.Error.Render("Doctor found 1 problem that needs attention.") + "\n"
-	} else {
-		out += "  " + styles.Error.Render(fmt.Sprintf("Doctor found %d problems that need attention.", problems)) + "\n"
-	}
-	return out, allPass
-}
-
-func doctorActionCommand(result CheckResult) string {
-	switch result.Action {
-	case DoctorActionRuntimeSetup:
-		return "run `omnideck` to open guided container setup"
-	case DoctorActionStartInstance:
-		return "run `omnideck start --name " + result.ActionValue + "`"
-	case DoctorActionSetupInstance:
-		return "run `omnideck setup`"
-	case DoctorActionRepairInstance:
-		return "run `omnideck` and choose Doctor, then Repair this installation"
+func runtimeNameForPeople(name string) string {
+	switch name {
+	case "docker":
+		return "Docker"
+	case "podman":
+		return "Podman"
 	default:
-		return ""
+		return name
 	}
 }
 
-func volumeCheck(label, name string, eng engine.Engine) CheckResult {
-	if eng == nil {
-		return CheckResult{Label: label, Status: CheckInfo, Detail: "Not checked until the container runtime is ready"}
+func friendlyOS(goos string) string {
+	switch goos {
+	case "darwin":
+		return "macOS"
+	case "windows":
+		return "Windows"
+	case "linux":
+		return "Linux"
+	default:
+		return goos
 	}
-	exists, err := eng.VolumeExists(name)
-	if err != nil {
-		return CheckResult{Label: label, Status: CheckWarn, Detail: "Could not check " + name, Hint: err.Error()}
-	}
-	if !exists {
-		return CheckResult{
-			Label:  label,
-			Status: CheckFail,
-			Detail: name + " was not found",
-			Hint:   "Do not create a replacement if this instance had important data. Use this name when asking for support.",
-		}
-	}
-	return CheckResult{Label: label, Status: CheckPass, Detail: name + " exists"}
 }
