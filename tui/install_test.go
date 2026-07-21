@@ -396,7 +396,7 @@ func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
 	}
 	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	nm := newModel.(InstallModel)
-	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(view, detail) {
+	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields(detail), "")) {
 		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
 	}
 }

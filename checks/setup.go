@@ -27,14 +27,14 @@ func ValidPort(value string) bool {
 	return err == nil && port >= 1 && port <= 65535
 }
 
-// PortAvailable checks whether a local browser address can be reserved. The
-// listener is closed immediately; the container runtime performs the final,
-// authoritative check when it starts the container.
+// PortAvailable checks whether the IPv4 browser address used by Omnideck can
+// be reserved. The listener is closed immediately; the container runtime
+// performs the final, authoritative check when it starts the container.
 func PortAvailable(value string) bool {
 	if !ValidPort(value) {
 		return false
 	}
-	listener, err := net.Listen("tcp", ":"+value)
+	listener, err := net.Listen("tcp4", "0.0.0.0:"+value)
 	if err != nil {
 		return false
 	}
