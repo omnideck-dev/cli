@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/omnideck-dev/cli/styles"
 )
 
@@ -14,7 +15,7 @@ func (m AppModel) View() string {
 	if m.dialog != nil {
 		body = renderDialogArea(*m.dialog, m.width, m.contentHeight())
 	}
-	return m.renderHeader() + body + m.renderFooter()
+	return m.renderHeader() + body + "\n" + m.renderFooter()
 }
 
 // --- Layout constants ---
@@ -58,12 +59,15 @@ func (m AppModel) renderHeader() string {
 		right = dot + styles.TNDimText.Render(" "+label)
 	}
 
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(right) - 2
+	innerWidth := max(1, m.width-styles.TNHeaderBar.GetHorizontalFrameSize())
+	gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
 	line := left + safeRepeat(" ", gap) + right
-	return styles.TNHeaderBar.Width(m.width).Render(line) + "\n"
+	line = ansi.Truncate(line, innerWidth, "")
+	line += safeRepeat(" ", innerWidth-lipgloss.Width(line))
+	return styles.TNHeaderBar.Render(line) + "\n"
 }
 
 type headerStatusTone int
@@ -165,12 +169,19 @@ func (m AppModel) breadcrumb() string {
 func (m AppModel) renderFooter() string {
 	hints := m.footerHints()
 	right := styles.TNFaintText.Render("omnideck tui")
-	gap := m.width - lipgloss.Width(hints) - lipgloss.Width(right) - 2
+	innerWidth := max(1, m.width-styles.TNFooterBar.GetHorizontalFrameSize())
+	if lipgloss.Width(hints)+lipgloss.Width(right)+1 > innerWidth {
+		right = ""
+	}
+	hints = ansi.Truncate(hints, max(1, innerWidth-lipgloss.Width(right)-1), "")
+	gap := innerWidth - lipgloss.Width(hints) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
 	}
 	line := hints + safeRepeat(" ", gap) + right
-	return styles.TNFooterBar.Width(m.width).Render(line)
+	line = ansi.Truncate(line, innerWidth, "")
+	line += safeRepeat(" ", innerWidth-lipgloss.Width(line))
+	return styles.TNFooterBar.Render(line)
 }
 
 func (m AppModel) footerHints() string {
@@ -186,11 +197,11 @@ func (m AppModel) footerHints() string {
 		}
 		if m.isExpanded() {
 			return keyHints([][2]string{
-				{"↑↓", "move"}, {"enter", "collapse"}, {"tab", "chip"}, {"l", "logs"}, {"s", "toggle"}, {"esc", "collapse"},
+				{"↑↓", "move"}, {"tab", "actions"}, {"enter", "open/collapse"}, {"esc", "collapse"},
 			})
 		}
 		return keyHints([][2]string{
-			{"↑↓", "move"}, {"enter", "expand"}, {"l", "logs"}, {"s", "toggle"}, {"u", "update"}, {"n", "new"}, {"d", "doctor"}, {"q", "quit"},
+			{"↑↓", "move"}, {"enter", "open"}, {"n", "new"}, {"d", "doctor"}, {"q", "quit"},
 		})
 	case RouteLogs:
 		if m.logSearchMode {
@@ -198,11 +209,11 @@ func (m AppModel) footerHints() string {
 		}
 		if m.logSearchQuery != "" {
 			return keyHints([][2]string{
-				{"↑↓", "scroll"}, {"pg↑↓", "page"}, {"/", "edit filter"}, {"esc", "clear filter"}, {"y", "copy"}, {"r", "refresh"},
+				{"↑↓", "scroll"}, {"esc", "clear filter"}, {"/", "edit filter"}, {"y", "copy"}, {"r", "refresh"},
 			})
 		}
 		return keyHints([][2]string{
-			{"↑↓", "scroll"}, {"pg↑↓", "page"}, {"home/end", "top/bot"}, {"/", "search"}, {"y", "copy"}, {"r", "refresh"}, {"esc", "back"},
+			{"↑↓", "scroll"}, {"pg↑↓", "page"}, {"esc", "back"}, {"/", "search"}, {"y", "copy"}, {"r", "refresh"},
 		})
 	case RouteSettings:
 		if m.settingsStage == settingsStageApplying {
@@ -218,11 +229,11 @@ func (m AppModel) footerHints() string {
 		if m.doctorStage == doctorStageActing {
 			return keyHints([][2]string{{"working", "please wait"}})
 		}
-		hints := [][2]string{{"r", "check again"}}
+		hints := [][2]string{{"esc", "back"}, {"r", "check again"}}
 		if m.doctorStage == doctorStageResults && m.doctorFocus >= 0 && m.doctorFocus < len(m.doctorResults) {
 			hints = append([][2]string{{"↑↓", "choose action"}, {"enter", m.doctorResults[m.doctorFocus].ActionLabel}}, hints...)
 		}
-		return keyHints(append(hints, [2]string{"esc", "back"}))
+		return keyHints(hints)
 	case RouteSetup:
 		switch m.setupModel.Stage {
 		case SetupStageQuickCheck:
@@ -243,7 +254,7 @@ func (m AppModel) footerHints() string {
 				return keyHints(hints)
 			}
 			if m.setupModel.runtimeSetupStage == runtimeSetupWaiting {
-				hints := [][2]string{{"enter", "check again"}}
+				hints := [][2]string{{"enter", "check again"}, {"esc", "back"}, {"q", "cancel"}}
 				if len(m.setupModel.runtimePlans) > 0 && m.setupModel.runtimePlans[m.setupModel.runtimeChoice].URL != "" {
 					label := "open page again"
 					if m.setupModel.runtimePlans[m.setupModel.runtimeChoice].DirectDownload {
@@ -251,7 +262,7 @@ func (m AppModel) footerHints() string {
 					}
 					hints = append(hints, [2]string{"o", label})
 				}
-				return keyHints(append(hints, [2]string{"esc", "back"}, [2]string{"q", "cancel"}))
+				return keyHints(hints)
 			}
 			if m.setupModel.runtimeSetupStage == runtimeSetupReview {
 				action := "start these steps"
@@ -263,7 +274,7 @@ func (m AppModel) footerHints() string {
 				}
 				return keyHints([][2]string{{"enter", action}, {"esc", "back"}, {"d", "technical details"}, {"q", "cancel"}})
 			}
-			hints := [][2]string{{"enter", "review"}, {"d", "technical details"}, {"r", "check again"}}
+			hints := [][2]string{{"enter", "review"}}
 			if len(m.setupModel.runtimePlans) > 1 {
 				hints = append([][2]string{{"↑↓", "choose"}}, hints...)
 			}
@@ -272,6 +283,7 @@ func (m AppModel) footerHints() string {
 			} else {
 				hints = append(hints, [2]string{"esc / q", "cancel"})
 			}
+			hints = append(hints, [2]string{"d", "technical details"}, [2]string{"r", "check again"})
 			return keyHints(hints)
 		case SetupStageSettings:
 			if !m.setupModel.settingsAdvanced {
@@ -279,7 +291,7 @@ func (m AppModel) footerHints() string {
 			}
 			return keyHints([][2]string{{"tab", "next"}, {"shift+tab", "back"}, {"esc", "recommended settings"}})
 		case SetupStageReview:
-			return keyHints([][2]string{{"enter", "start setup"}, {"esc", "back"}, {"d", "technical details"}, {"q", "cancel"}})
+			return keyHints([][2]string{{"enter", "start setup"}, {"esc", "back"}, {"q", "cancel"}, {"d", "technical details"}})
 		case SetupStageComplete:
 			return keyHints([][2]string{{"any key", "return"}})
 		case SetupStageFailed:
@@ -336,12 +348,12 @@ func (m AppModel) renderBody() string {
 }
 
 // renderScreen fills the application content area. Substantial journeys use a
-// full screen; overlays are reserved for short confirmation dialogs.
+// full screen; short blocking decisions use the separate dialog layer.
 func (m AppModel) renderScreen(body string) string {
 	style := lipgloss.NewStyle().Background(styles.TNBgAlt).Padding(1, 2)
-	w := max(1, m.width-style.GetHorizontalFrameSize())
-	h := max(1, m.contentHeight()-style.GetVerticalFrameSize())
-	return style.Width(w).Height(h).Render(body)
+	w := max(1, m.width)
+	h := max(1, m.contentHeight())
+	return style.Width(w).Height(h).MaxWidth(w).MaxHeight(h).Render(body)
 }
 
 // --- Helpers ---

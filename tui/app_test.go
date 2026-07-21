@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/x/ansi"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/workflow"
 )
 
@@ -33,7 +35,7 @@ func TestSetupScreenUsesFirstRunLanguage(t *testing.T) {
 		t.Fatalf("setup mode = %d, want first run", m.setupModel.setupMode)
 	}
 	m.width, m.height = 100, 36
-	view := m.viewSetup()
+	view := m.View()
 
 	if !strings.Contains(view, "Setup") {
 		t.Fatalf("first-run title missing:\n%s", view)
@@ -55,7 +57,7 @@ func TestSetupScreenUsesAdditionalInstanceLanguage(t *testing.T) {
 		t.Fatalf("setup mode = %d, want additional instance", m.setupModel.setupMode)
 	}
 	m.width, m.height = 100, 36
-	view := m.viewSetup()
+	view := m.View()
 
 	if !strings.Contains(view, "Setup") {
 		t.Fatalf("additional-instance title missing:\n%s", view)
@@ -74,10 +76,43 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 		t.Fatalf("setup mode = %d, want runtime repair", m.setupModel.setupMode)
 	}
 	m.width, m.height = 100, 36
-	view := m.viewSetup()
+	view := m.View()
 
 	if !strings.Contains(view, "Setup") || strings.Contains(view, "Install new instance") {
 		t.Fatalf("runtime repair screen has the wrong header:\n%s", view)
+	}
+}
+
+func TestSetupViewFitsAStandardTerminalAndKeepsItsFooter(t *testing.T) {
+	m := NewAppModelForSetup(nil, nil, "", "")
+	m.width, m.height = 80, 24
+	m.setupModel.hostPlatform = engine.HostPlatform{OS: "linux", DistroID: "debian", Arch: "amd64"}
+	m.setupModel.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.setupModel.configureRuntimeSetup()
+
+	view := m.View()
+	plain := ansi.Strip(view)
+	if height := strings.Count(view, "\n") + 1; height != 24 {
+		t.Fatalf("setup view height = %d, want 24:\n%s", height, plain)
+	}
+	if !strings.Contains(plain, "cancel") || !strings.Contains(plain, "review") {
+		t.Fatalf("setup footer is missing primary actions:\n%s", plain)
+	}
+
+	m.setupModel.runtimeChoice = 1
+	m.setupModel.runtimeSetupStage = runtimeSetupReview
+	view = m.View()
+	plain = ansi.Strip(view)
+	if height := strings.Count(view, "\n") + 1; height != 24 {
+		t.Fatalf("runtime review height = %d, want 24:\n%s", height, plain)
+	}
+	for _, action := range []string{"Nothing starts until you press Enter", "back", "cancel"} {
+		if !strings.Contains(plain, action) {
+			t.Fatalf("runtime review is missing %q:\n%s", action, plain)
+		}
 	}
 }
 
