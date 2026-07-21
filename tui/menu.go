@@ -415,11 +415,17 @@ func menuCmdDoctor(cfg *config.Config, eng engine.Engine) menuActionDoneMsg {
 		case CheckWarn:
 			icon = styles.TNYellowTxt.Render("!")
 			labelS = styles.TNYellowTxt.Render(r.Label)
+		case CheckInfo:
+			icon = styles.TNFaintText.Render("·")
+			labelS = styles.TNDimText.Render(r.Label)
 		}
 		detail := styles.TNFaintText.Render(r.Detail)
 		lines = append(lines, "  "+icon+"  "+padRightStyled(labelS, 26)+"  "+detail)
 		if r.Hint != "" && r.Status != CheckPass {
 			lines = append(lines, "       "+styles.TNDimText.Render("→ "+r.Hint))
+		}
+		if command := doctorActionCommand(r); command != "" {
+			lines = append(lines, "       "+styles.TNDimText.Render("Next: "+command))
 		}
 	}
 	return menuActionDoneMsg{lines: lines}

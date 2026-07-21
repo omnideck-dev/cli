@@ -44,6 +44,33 @@ type memoryCheckResult struct {
 
 type allPreflightDone struct{}
 
+// SetupMode names the user journey that owns this state machine. Keeping the
+// mode explicit prevents runtime recovery from accidentally continuing into
+// the new-instance screens.
+type SetupMode int
+
+const (
+	SetupFirstRun SetupMode = iota
+	SetupAdditionalInstance
+	SetupRuntimeRepair
+)
+
+type runtimeSetupEntry int
+
+const (
+	runtimeSetupFromCheck runtimeSetupEntry = iota
+	runtimeSetupFromFirstRunChoice
+)
+
+type runtimeSetupStage int
+
+const (
+	runtimeSetupChoose runtimeSetupStage = iota
+	runtimeSetupReview
+	runtimeSetupWorking
+	runtimeSetupWaiting
+)
+
 // --- Install model ---
 
 // InstallModel is the top-level Bubble Tea model for the install wizard.
@@ -53,7 +80,7 @@ type InstallModel struct {
 	// Embedded, when true, means this model runs inside DashboardModel.
 	// On done/error it emits WizardExitMsg instead of tea.Quit.
 	Embedded  bool
-	setupOnly bool // repair the container runtime, then return to the dashboard
+	setupMode SetupMode
 
 	// Preflight state.
 	eng                  engine.Engine
@@ -70,18 +97,17 @@ type InstallModel struct {
 	preflightDone        int // count of completed checks
 
 	// Runtime setup state.
-	runtimeProbes        []engine.ProbeResult
-	runtimePlans         []engine.SetupPlan
-	runtimeChoice        int
-	runtimeCommandIndex  int
-	runtimeBusy          bool
-	runtimeConfirm       bool
-	runtimeWaiting       bool
-	runtimeShowDetails   bool
-	runtimeMessage       string
-	runtimeLastError     string
-	preferredEngine      string
-	runtimeFromPreflight bool
+	runtimeProbes       []engine.ProbeResult
+	runtimePlans        []engine.SetupPlan
+	runtimeChoice       int
+	runtimeCommandIndex int
+	runtimeSetupStage   runtimeSetupStage
+	runtimeShowDetails  bool
+	runtimeMessage      string
+	runtimeLastError    string
+	preferredEngine     string
+	runtimeSetupEntry   runtimeSetupEntry
+	hostPlatform        engine.HostPlatform
 
 	// Config inputs.
 	inputs         []textinput.Model
@@ -178,8 +204,14 @@ func NewInstallModel(configPath string, initial *config.Config, imageOverride st
 		}
 	}
 
+	setupMode := SetupFirstRun
+	if len(existingNames) > 0 {
+		setupMode = SetupAdditionalInstance
+	}
+
 	return InstallModel{
 		BaseModel:         BaseModel{Phase: PhasePreflight},
+		setupMode:         setupMode,
 		inputs:            inputs,
 		inputErrs:         make([]string, inputCount),
 		preflightSpinner:  sp,
@@ -188,6 +220,7 @@ func NewInstallModel(configPath string, initial *config.Config, imageOverride st
 		existingNames:     existingNames,
 		existingPorts:     existingPorts,
 		imageOverride:     imageOverride,
+		hostPlatform:      engine.DetectHostPlatform(),
 	}
 }
 
@@ -250,7 +283,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter", " ":
 			if m.preflightAlternative != "" {
 				m.preferredEngine = m.preflightAlternative
-				m.runtimeFromPreflight = true
+				m.runtimeSetupEntry = runtimeSetupFromFirstRunChoice
 				m.configureRuntimeSetup()
 				return m, nil
 			}
@@ -321,6 +354,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case allPreflightDone:
 		if m.engErr != nil {
+			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
 			return m, nil
 		}
@@ -332,6 +366,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
+			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
 			return m, nil
 		}
@@ -350,7 +385,7 @@ func (m InstallModel) updatePreflight(msg tea.Msg) (tea.Model, tea.Cmd) {
 // explicitly chosen during a fresh setup. Existing instances stay on their one
 // shared runtime so their containers and volumes are never silently stranded.
 func (m InstallModel) setupAlternativeRuntime() string {
-	if m.setupOnly || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
+	if m.setupMode != SetupFirstRun || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
 		return ""
 	}
 	for _, probe := range m.runtimeProbes {
@@ -363,11 +398,14 @@ func (m InstallModel) setupAlternativeRuntime() string {
 
 func (m *InstallModel) configureRuntimeSetup() {
 	m.Phase = PhaseRuntimeSetup
-	m.runtimeConfirm = false
-	m.runtimeWaiting = false
+	m.runtimeSetupStage = runtimeSetupChoose
 	m.runtimeShowDetails = false
 	m.runtimeLastError = ""
-	m.runtimePlans = engine.BuildSetupPlans(m.runtimeProbes, engine.DetectHostPlatform())
+	host := m.hostPlatform
+	if host.OS == "" {
+		host = engine.DetectHostPlatform()
+	}
+	m.runtimePlans = engine.BuildSetupPlans(m.runtimeProbes, host)
 	if m.preferredEngine != "" {
 		filtered := m.runtimePlans[:0]
 		for _, plan := range m.runtimePlans {
@@ -403,13 +441,30 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if m.runtimeBusy || len(m.runtimePlans) == 0 {
+		if m.runtimeSetupStage == runtimeSetupWorking {
+			return m, nil
+		}
+		if len(m.runtimePlans) == 0 {
+			switch msg.String() {
+			case "r", "enter", " ":
+				m.runtimeSetupStage = runtimeSetupWorking
+				m.runtimeMessage = "Checking again…"
+				return m, runEngineCheckFor(m.preferredEngine)
+			case "b", "esc":
+				if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
+					m.runtimeSetupEntry = runtimeSetupFromCheck
+					m.preferredEngine = ""
+					m.preflightAlternative = ""
+					m.Phase = PhasePreflight
+					m.preflightReady = true
+					m.runtimeMessage = ""
+				}
+			}
 			return m, nil
 		}
 		if msg.String() == "esc" {
-			if m.runtimeConfirm || m.runtimeWaiting {
-				m.runtimeConfirm = false
-				m.runtimeWaiting = false
+			if m.runtimeSetupStage == runtimeSetupReview || m.runtimeSetupStage == runtimeSetupWaiting {
+				m.runtimeSetupStage = runtimeSetupChoose
 				m.runtimeMessage = ""
 				return m, nil
 			}
@@ -418,14 +473,14 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		}
-		if m.runtimeWaiting {
+		if m.runtimeSetupStage == runtimeSetupWaiting {
 			switch msg.String() {
 			case "r", "enter", " ":
-				m.runtimeBusy = true
+				m.runtimeSetupStage = runtimeSetupWorking
 				m.runtimeMessage = "Checking whether Podman or Docker is ready…"
 				return m, runEngineCheckFor(m.preferredEngine)
 			case "b":
-				m.runtimeWaiting = false
+				m.runtimeSetupStage = runtimeSetupChoose
 				m.runtimeMessage = ""
 			case "o":
 				plan := m.runtimePlans[m.runtimeChoice]
@@ -435,29 +490,24 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
-		if m.runtimeConfirm {
+		if m.runtimeSetupStage == runtimeSetupReview {
 			switch msg.String() {
 			case "b":
-				m.runtimeConfirm = false
+				m.runtimeSetupStage = runtimeSetupChoose
 				m.runtimeShowDetails = false
 			case "d":
 				m.runtimeShowDetails = !m.runtimeShowDetails
 			case "enter", " ":
 				plan := m.runtimePlans[m.runtimeChoice]
 				if len(plan.Commands) > 0 {
-					m.runtimeBusy = true
+					m.runtimeSetupStage = runtimeSetupWorking
 					m.runtimeCommandIndex = 0
 					m.runtimeMessage = "Starting the first step…"
 					return m, execRuntimeCommand(plan.Commands[0])
 				}
 				if plan.URL != "" {
-					m.runtimeConfirm = false
-					m.runtimeWaiting = true
-					if plan.DirectDownload {
-						m.runtimeMessage = "The official Podman installer should now be downloading. Open it from Downloads, finish the installer, return here, and press Enter so Omnideck can check it."
-					} else {
-						m.runtimeMessage = "The Microsoft Store or official setup page should now be open. Finish the installation, start the app, then return here and press Enter so Omnideck can check it."
-					}
+					m.runtimeSetupStage = runtimeSetupWaiting
+					m.runtimeMessage = runtimeWaitingMessage(plan)
 					return m, openBrowserCmd(plan.URL)
 				}
 			}
@@ -475,8 +525,8 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			m.runtimeShowDetails = !m.runtimeShowDetails
 		case "b":
-			if m.runtimeFromPreflight {
-				m.runtimeFromPreflight = false
+			if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
+				m.runtimeSetupEntry = runtimeSetupFromCheck
 				m.preferredEngine = ""
 				m.preflightAlternative = ""
 				m.Phase = PhasePreflight
@@ -485,20 +535,22 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.runtimeLastError = ""
 			}
 		case "r":
-			m.runtimeBusy = true
+			m.runtimeSetupStage = runtimeSetupWorking
 			m.runtimeMessage = "Checking whether Podman or Docker is ready…"
 			return m, runEngineCheckFor(m.preferredEngine)
 		case "enter", " ":
-			m.runtimeConfirm = true
+			m.runtimeSetupStage = runtimeSetupReview
 			m.runtimeShowDetails = false
 			m.runtimeMessage = ""
 		}
 	case runtimeCommandDone:
 		if msg.err != nil {
-			m.runtimeBusy = false
-			m.runtimeConfirm = false
+			m.runtimeSetupStage = runtimeSetupChoose
 			m.runtimeLastError = msg.err.Error()
-			m.runtimeMessage = "That step did not finish. You can try again or choose the other option. Press d if you want to see the technical error."
+			m.runtimeMessage = "That step did not finish. You can review it and try again. Press d if you want to see the technical error."
+			if len(m.runtimePlans) > 1 {
+				m.runtimeMessage = "That step did not finish. You can try again or choose the other option. Press d if you want to see the technical error."
+			}
 			return m, nil
 		}
 		plan := m.runtimePlans[m.runtimeChoice]
@@ -509,16 +561,14 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, execRuntimeCommand(command)
 		}
 		if plan.RequiresRestart {
-			m.runtimeBusy = false
-			m.runtimeConfirm = false
-			m.runtimeWaiting = true
+			m.runtimeSetupStage = runtimeSetupWaiting
 			m.runtimeMessage = plan.Title + " is starting. Wait until it says it is ready, then return here and press Enter."
 			return m, nil
 		}
 		m.runtimeMessage = "That step finished. Checking that everything is ready…"
 		return m, runEngineCheckFor(m.preferredEngine)
 	case engineCheckResult:
-		m.runtimeBusy = false
+		m.runtimeSetupStage = runtimeSetupChoose
 		m.runtimeProbes = msg.probes
 		if msg.eng != nil {
 			m.eng = msg.eng
@@ -529,13 +579,58 @@ func (m InstallModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.engErr = msg.err
 		m.configureRuntimeSetup()
-		m.runtimeMessage = "Podman or Docker is not ready yet. Choose an option below, or check again if you just finished an installer."
+		m.runtimeMessage = runtimeNotReadyMessage(m.runtimePlans, m.preferredEngine)
 	}
 	return m, nil
 }
 
+func runtimeWaitingMessage(plan engine.SetupPlan) string {
+	name := plan.Title
+	if plan.DirectDownload {
+		return "The official " + name + " installer should now be downloading. Open it from Downloads, finish the installer, then return here."
+	}
+	switch plan.State {
+	case engine.RuntimePermissionDenied, engine.RuntimeBroken:
+		return "The official " + name + " help page should now be open. Follow the guidance there, then return here."
+	case engine.RuntimeUnsupportedVersion:
+		return "The official Docker update instructions should now be open. Update Docker and make sure it is running, then return here."
+	case engine.RuntimeStopped, engine.RuntimeMachineStopped:
+		return "The official " + name + " help page should now be open. Follow its instructions to start " + name + ", then return here."
+	default:
+		return "The official " + name + " installation page should now be open. Finish the installation and make sure " + name + " is running, then return here."
+	}
+}
+
+func runtimeNotReadyMessage(plans []engine.SetupPlan, preferred string) string {
+	if len(plans) == 0 {
+		name := "Podman or Docker"
+		if preferred != "" {
+			name = runtimeNameForPeople(preferred)
+		}
+		return "Omnideck still cannot use " + name + ". Make sure it is installed and running, then check again."
+	}
+	if len(plans) > 1 {
+		return "Neither Podman nor Docker is ready yet. Choose one of the setup options below, or check again if you just finished a step."
+	}
+	plan := plans[0]
+	switch plan.State {
+	case engine.RuntimeMissing:
+		return "Omnideck still cannot find " + plan.Title + ". Make sure the installation finished, then open " + plan.Title + " and wait until it is running. You can review the installation step below or check again."
+	case engine.RuntimeStopped, engine.RuntimeMachineStopped:
+		return plan.Title + " is installed, but it is not running yet. Review the start step below or check again after you start it."
+	case engine.RuntimeMachineMissing:
+		return "Podman is installed, but its one-time setup is not finished. Review the step below to finish it."
+	case engine.RuntimePermissionDenied:
+		return plan.Title + " is installed, but your account cannot use it yet. Review the help step below."
+	case engine.RuntimeUnsupportedVersion:
+		return "Docker is installed, but it must be updated before Omnideck can use it. Review the update step below."
+	default:
+		return plan.Title + " is installed, but it still needs attention. Review the help step below or check again."
+	}
+}
+
 func (m InstallModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
-	if m.setupOnly {
+	if m.setupMode == SetupRuntimeRepair {
 		if m.eng == nil {
 			m.Phase = PhaseError
 			m.errorMsg = "Omnideck could not find a ready container runtime"
@@ -1019,7 +1114,7 @@ func (m InstallModel) viewPreflight() string {
 
 	engDone := m.eng != nil || m.engErr != nil
 	if engDone && m.eng != nil {
-		rows = append(rows, row{"Podman or Docker", m.eng.Name() + " is ready", true, true, false})
+		rows = append(rows, row{"Podman or Docker", runtimeNameForPeople(m.eng.Name()) + " is ready", true, true, false})
 	} else if engDone {
 		rows = append(rows, row{"Podman or Docker", "setup needed", false, true, false})
 	} else {
@@ -1081,9 +1176,9 @@ func (m InstallModel) viewPreflight() string {
 	if m.preflightReady && m.preferredEngine == "" {
 		out += "\n"
 		if m.permChecking {
-			out += "   " + m.preflightSpinner.View() + "  " + styles.Dim.Render("Checking permissions for "+m.eng.Name()+"...") + "\n"
+			out += "   " + m.preflightSpinner.View() + "  " + styles.Dim.Render("Checking whether your account can use "+runtimeNameForPeople(m.eng.Name())+"...") + "\n"
 		} else if m.permErr != nil {
-			out += "   " + styles.CrossMark + "  " + styles.Error.Render("Your account cannot use "+m.eng.Name()+" yet. Choose the other option to continue.") + "\n"
+			out += "   " + styles.CrossMark + "  " + styles.Error.Render("Your account cannot use "+runtimeNameForPeople(m.eng.Name())+" yet. Choose the other option to continue.") + "\n"
 		}
 		if len(m.availableEngines) > 1 {
 			other := m.availableEngines[0]
@@ -1093,8 +1188,8 @@ func (m InstallModel) viewPreflight() string {
 					break
 				}
 			}
-			out += "\n   " + styles.Accent.Render("[tab]") + styles.Dim.Render(" switch to "+other.Name()+"    ") +
-				styles.Accent.Render("[enter]") + styles.Dim.Render(" continue with "+m.eng.Name()) + "\n"
+			out += "\n   " + styles.Accent.Render("[tab]") + styles.Dim.Render(" switch to "+runtimeNameForPeople(other.Name())+"    ") +
+				styles.Accent.Render("[enter]") + styles.Dim.Render(" continue with "+runtimeNameForPeople(m.eng.Name())) + "\n"
 		} else if alternative := m.setupAlternativeRuntime(); alternative != "" {
 			currentName := runtimeNameForPeople(m.eng.Name())
 			alternativeName := runtimeNameForPeople(alternative)
@@ -1164,7 +1259,7 @@ func (m InstallModel) viewConfirm() string {
 	out += "    1. Download the Omnideck app.\n"
 	out += "    2. Prepare saved space for your files and settings.\n"
 	out += "    3. Start Omnideck at http://localhost:" + m.inputs[inputWebUIPort].Value() + ".\n\n"
-	out += kv("Runs with", m.eng.Name())
+	out += kv("Runs with", runtimeNameForPeople(m.eng.Name()))
 	out += kv("Name", m.inputs[inputContainerName].Value())
 	out += kv("Memory", m.inputs[inputMemory].Value())
 
@@ -1208,13 +1303,29 @@ func (m InstallModel) viewDone() string {
 func (m InstallModel) viewRuntimeSetup() string {
 	out := styles.Header("OMNIDECK", "Container setup", m.WindowWidth)
 	if len(m.runtimePlans) == 0 {
-		return out + "  " + styles.Error.Render("Omnideck could not find a setup option for this computer.")
+		name := "Podman or Docker"
+		if m.preferredEngine != "" {
+			name = runtimeNameForPeople(m.preferredEngine)
+		}
+		out += "  " + styles.Active.Render("Omnideck still cannot use "+name) + "\n\n"
+		message := m.runtimeMessage
+		if message == "" {
+			message = "Omnideck could not determine another safe setup step. Make sure the app is installed, open it, and wait until it says it is running."
+		}
+		out += "  " + styles.Dim.Render(message) + "\n\n"
+		if m.runtimeSetupStage == runtimeSetupWorking {
+			out += "  " + m.preflightSpinner.View() + " " + styles.Dim.Render("Checking again…") + "\n"
+		} else {
+			out += "  " + styles.Success.Render("Press R to check again. You can also press Q to leave setup.") + "\n"
+		}
+		return out
 	}
 	plan := m.runtimePlans[m.runtimeChoice]
-	if m.runtimeWaiting {
+	if m.runtimeSetupStage == runtimeSetupWaiting {
 		out += "  " + styles.Active.Render("Finish this step, then come back here") + "\n\n"
 		out += "  " + styles.Dim.Render(m.runtimeMessage) + "\n\n"
-		out += "  1. Return to this window when the installer, Podman, or Docker says it is ready.\n"
+		out += "  After you finish the step on the other screen:\n"
+		out += "  1. Return to this window.\n"
 		out += "  2. Press Enter. Omnideck will check everything for you.\n"
 		if plan.URL != "" {
 			fallback := "If the page did not open, press o to try again or open this address yourself:"
@@ -1236,7 +1347,7 @@ func (m InstallModel) viewRuntimeSetup() string {
 		out += "\n  " + styles.Dim.Render(hints) + "\n"
 		return out
 	}
-	if m.runtimeConfirm {
+	if m.runtimeSetupStage == runtimeSetupReview {
 		out += "  " + styles.Dim.Render("STEP 2 OF 2") + "\n"
 		out += "  " + styles.Active.Render("Review what will happen") + "\n\n"
 		out += "  " + styles.Accent.Render(plan.Action) + "\n"
@@ -1281,7 +1392,11 @@ func (m InstallModel) viewRuntimeSetup() string {
 	}
 
 	out += "  " + styles.Dim.Render("STEP 1 OF 2") + "\n"
-	out += "  " + styles.Active.Render("Choose Podman or Docker") + "\n"
+	setupHeading := "Choose Podman or Docker"
+	if len(m.runtimePlans) == 1 {
+		setupHeading = "Set up " + m.runtimePlans[0].Title
+	}
+	out += "  " + styles.Active.Render(setupHeading) + "\n"
 	out += "  " + styles.Dim.Render("Omnideck runs inside a container. The container keeps the agent and its software") + "\n"
 	out += "  " + styles.Dim.Render("isolated from the rest of your system. Podman or Docker runs the container. You only need one.") + "\n\n"
 	out += "  " + styles.Active.Render("What we found") + "\n"
@@ -1292,7 +1407,11 @@ func (m InstallModel) viewRuntimeSetup() string {
 		}
 		out += "    " + styles.Dim.Render(padRight(name, 12)+engine.RuntimeStateLabel(probe.State)) + "\n"
 	}
-	out += "\n  " + styles.Active.Render("Choose how to continue") + "\n"
+	optionHeading := "Choose how to continue"
+	if len(m.runtimePlans) == 1 {
+		optionHeading = "Next step"
+	}
+	out += "\n  " + styles.Active.Render(optionHeading) + "\n"
 	for i, option := range m.runtimePlans {
 		cursor := "  "
 		label := option.Action
@@ -1316,8 +1435,11 @@ func (m InstallModel) viewRuntimeSetup() string {
 	if m.runtimeMessage != "" {
 		out += "\n  " + styles.Dim.Render(m.runtimeMessage) + "\n"
 	}
-	hints := "↑/↓ — choose    Enter — review    d — technical details    r — check again"
-	if m.runtimeFromPreflight {
+	hints := "Enter — review    d — technical details    r — check again"
+	if len(m.runtimePlans) > 1 {
+		hints = "↑/↓ — choose    " + hints
+	}
+	if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 		hints += "    b — back"
 	}
 	out += "\n  " + styles.Dim.Render(hints) + "\n"
@@ -1367,8 +1489,21 @@ func runEngineCheckFor(preferred string) tea.Cmd {
 		if len(usable) == 0 {
 			return engineCheckResult{probes: probes, err: fmt.Errorf("neither Podman nor Docker is ready")}
 		}
-		return engineCheckResult{eng: usable[0], all: usable, probes: probes}
+		return engineCheckResult{eng: readyEngineForSetup(usable, engine.DetectHostPlatform()), all: usable, probes: probes}
 	}
+}
+
+func readyEngineForSetup(ready []engine.Engine, host engine.HostPlatform) engine.Engine {
+	recommended := engine.RecommendedRuntime(host)
+	for _, candidate := range ready {
+		if candidate.Name() == recommended {
+			return candidate
+		}
+	}
+	if len(ready) > 0 {
+		return ready[0]
+	}
+	return nil
 }
 
 func runPermissionCheck(eng engine.Engine) tea.Cmd {

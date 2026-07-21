@@ -88,7 +88,12 @@ type instanceLogsMsg struct {
 	idx   int
 	lines []LogLine
 }
-type doctorResultsMsg []CheckResult
+type doctorResultsMsg struct {
+	results []CheckResult
+	eng     engine.Engine
+}
+
+type doctorActionDoneMsg struct{ err error }
 
 // containerToggleDoneMsg is returned by toggleContainer after the stop/start completes.
 type containerToggleDoneMsg instanceStatsMsg
@@ -132,6 +137,8 @@ type DashboardModel struct {
 	doctorResults []CheckResult
 	doctorDone    bool
 	doctorSpinner spinner.Model
+	doctorFocus   int
+	doctorMessage string
 
 	// Logs screen
 	logScroll      int
@@ -185,6 +192,11 @@ func NewDashboardModelForInstall(eng engine.Engine, instances []config.InstanceI
 	cfg := suggestInstallDefaultsFor(instances)
 	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, imageOverride)
 	im.Embedded = true
+	if len(instances) == 0 {
+		im.setupMode = SetupFirstRun
+	} else {
+		im.setupMode = SetupAdditionalInstance
+	}
 	im.preferredEngine = preferredEngine
 	m.installModel = im
 	m.screen = ScreenInstall
@@ -203,7 +215,7 @@ func NewDashboardModelForRuntimeSetup(instances []config.InstanceInfo, preferred
 	}
 	im := NewInstallModel(configPath, cfg, "")
 	im.Embedded = true
-	im.setupOnly = true
+	im.setupMode = SetupRuntimeRepair
 	im.preferredEngine = preferredEngine
 	m.installModel = im
 	m.screen = ScreenInstall
@@ -341,7 +353,8 @@ func (m DashboardModel) runDoctorCmd() tea.Cmd {
 	}
 	eng := m.eng
 	return func() tea.Msg {
-		return doctorResultsMsg(RunDoctorChecks(cfg, eng))
+		results, usableEngine := diagnoseDoctorWithProbes(cfg, eng, engine.ProbeAll())
+		return doctorResultsMsg{results: results, eng: usableEngine}
 	}
 }
 
@@ -455,6 +468,11 @@ func (m DashboardModel) startEmbeddedInstall() (DashboardModel, tea.Cmd) {
 	cfg := suggestInstallDefaults()
 	im := NewInstallModel(config.InstancePath(cfg.ContainerName), cfg, "")
 	im.Embedded = true
+	if len(m.instances) == 0 {
+		im.setupMode = SetupFirstRun
+	} else {
+		im.setupMode = SetupAdditionalInstance
+	}
 	if m.eng != nil {
 		im.preferredEngine = m.eng.Name()
 	}

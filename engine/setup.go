@@ -31,6 +31,7 @@ type SetupCommand struct {
 // SetupPlan describes one guided path to make a runtime usable.
 type SetupPlan struct {
 	Runtime           string
+	State             RuntimeState
 	Title             string
 	Action            string
 	Description       string
@@ -222,11 +223,12 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 		plan.Description = "Download Podman's official Windows installer."
 		plan.Steps = []string{
 			"Wait for the official Podman installer download to finish.",
-			"Open the installer from Downloads and keep the recommended Just for me choice.",
+			"Open the .msi installer from Downloads and keep the recommended Just for me choice.",
 			"Return to Omnideck and check again. Omnideck will finish Podman's one-time setup.",
 		}
 		plan.DirectDownload = true
-		plan.PermissionNote = "Installing Podman just for your account does not require an administrator. Windows may require an administrator and a restart if WSL, the Windows container feature Podman uses, is not enabled yet."
+		plan.PermissionNote = "Installing Podman just for your account does not require an administrator. Podman also needs Windows 11 and either WSL 2 or Hyper-V. Turning on either Windows feature requires an administrator and may require a restart."
+		plan.SafetyNote = "The Podman installer does not turn on WSL 2 or Hyper-V. If neither feature is already available, ask the person who manages this computer to enable one before Omnideck finishes Podman setup."
 		return
 	}
 	if plan.Runtime == "docker" && (host.OS == "windows" || host.WSL) {
@@ -283,6 +285,7 @@ func probeState(probes []ProbeResult, name string) RuntimeState {
 func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	plan := SetupPlan{
 		Runtime:     probe.Name,
+		State:       probe.State,
 		Title:       titleName(probe.Name),
 		Description: RuntimeStateLabel(probe.State),
 	}
@@ -404,7 +407,7 @@ func missingPlan(plan SetupPlan, host HostPlatform) SetupPlan {
 			if host.Arch == "arm64" {
 				arch = "arm64"
 			}
-			plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-windows-" + arch + ".exe"
+			plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-windows-" + arch + ".msi"
 			plan.DirectDownload = true
 			plan.Manual = true
 		}

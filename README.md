@@ -19,7 +19,7 @@ CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnid
 - **Smart memory defaults** — suggests container RAM limits based on your system (20% of host RAM, 1–8 GB)
 - **Update in place** — pulls the latest image and recreates the container, preserving config
 - **Multi-instance** — run more than one Omnideck container on different ports from a single binary
-- **Health check** — `doctor` runs parallel checks and prints a full pass/warn/fail report
+- **Actionable health check** — `doctor` identifies the root problem, explains what it affects, and can open the same guided fix used by Setup
 - **Docker + Podman** — auto-detected; SELinux, volume ownership, and Ollama host differences handled per OS
 - **Backup on uninstall** — optionally archives data directories to a `.tar.gz` before removal
 - **`--no-color`** — safe to pipe; exits non-zero on actual failures, not on warnings
@@ -69,7 +69,7 @@ Run `omnideck` as your normal user. Do not put `sudo` before it or choose
 | Linux | The computer's app installer may ask for the user's account password while it installs Podman or starts Docker. The account must be allowed to install software. |
 | macOS | Omnideck runs normally. The official Podman or Docker installer may ask for the user's Mac password while it adds Podman or Docker. |
 | Windows with Docker Desktop | Keep the installer's recommended **Per-user** choice. That normally needs no special permission. Windows may need approval from the person who manages the computer the first time it turns on the built-in Linux feature Docker uses. |
-| Windows with Podman | The recommended **Just for me** install needs no administrator. Windows may require an administrator and a restart if WSL is not enabled yet. |
+| Windows with Podman | The recommended **Just for me** install needs no administrator. Podman requires Windows 11 and either WSL 2 or Hyper-V; enabling one of those Windows features requires an administrator and may require a restart. |
 
 ---
 
@@ -123,7 +123,9 @@ the runtime is missing, it prints the recommended commands or official URL and
 exits without installing host software.
 
 See the [screen-by-screen macOS walkthrough](docs/mac-setup-walkthrough.md) for
-the exact fresh-install flow and user-facing text.
+the exact fresh-install flow and user-facing text. The
+[setup flow matrix](docs/setup-flow-matrix.md) records the first-run,
+returning, repair, and additional-instance transitions shared across platforms.
 
 ---
 
@@ -144,7 +146,7 @@ omnideck <command> [flags]
 | `restart` | Stop then start |
 | `status` | Print a status table (container, dirs, Ollama, web UI port) |
 | `logs` | Tail container logs |
-| `doctor` | Run parallel health checks and print a report |
+| `doctor` | Check runtime, instance, browser, storage, memory, and optional local AI; offer safe next steps |
 | `config show` | Pretty-print the saved config |
 | `config set <key> <value>` | Update a single config key |
 | `config path` | Print the config file path |

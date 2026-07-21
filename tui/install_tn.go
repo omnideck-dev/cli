@@ -36,17 +36,31 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 	var sb strings.Builder
 	if len(m.runtimePlans) == 0 {
 		sb.WriteString("\n")
-		writeTNWrapped(&sb, w, "  ", "  ", "Omnideck could not find a setup option for this computer.", styles.TNRedTxt)
-		writeTNWrapped(&sb, w, "  ", "  ", "Press q to leave, then visit https://podman.io/docs/installation for help.", styles.TNDimText)
+		name := "Podman or Docker"
+		if m.preferredEngine != "" {
+			name = runtimeNameForPeople(m.preferredEngine)
+		}
+		writeTNWrapped(&sb, w, "  ", "  ", "Omnideck still cannot use "+name, styles.TNTextBold)
+		message := m.runtimeMessage
+		if message == "" {
+			message = "Omnideck could not determine another safe setup step. Make sure the app is installed, open it, and wait until it says it is running."
+		}
+		writeTNWrapped(&sb, w, "  ", "  ", message, styles.TNDimText)
+		sb.WriteString("\n")
+		if m.runtimeSetupStage == runtimeSetupWorking {
+			sb.WriteString("  " + m.preflightSpinner.View() + " " + styles.TNDimText.Render("Checking again…") + "\n")
+		} else {
+			writeTNWrapped(&sb, w, "  ", "  ", "Press R to check again. You can also press Q to leave setup.", styles.TNGreenTxt)
+		}
 		return sb.String()
 	}
 	plan := m.runtimePlans[m.runtimeChoice]
 
-	if m.runtimeWaiting {
+	if m.runtimeSetupStage == runtimeSetupWaiting {
 		sb.WriteString("\n  " + styles.TNTextBold.Render("Finish this step, then come back here") + "\n\n")
 		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeMessage, styles.TNDimText)
 		sb.WriteString("\n")
-		sb.WriteString("  " + styles.TNTextSub.Render("When the installer, Podman, or Docker says it is ready:") + "\n")
+		sb.WriteString("  " + styles.TNTextSub.Render("After you finish the step on the other screen:") + "\n")
 		writeTNWrapped(&sb, w, "    1. ", "       ", "Return to this window.", styles.TNDimText)
 		writeTNWrapped(&sb, w, "    2. ", "       ", "Press Enter. Omnideck will check everything for you.", styles.TNDimText)
 		if plan.URL != "" {
@@ -61,7 +75,7 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 		return sb.String()
 	}
 
-	if m.runtimeConfirm {
+	if m.runtimeSetupStage == runtimeSetupReview {
 		sb.WriteString("\n  " + styles.TNFaintText.Render("STEP 2 OF 2") + "\n")
 		writeTNWrapped(&sb, w, "  ", "  ", plan.Action, styles.TNTextBold)
 		writeTNWrapped(&sb, w, "  ", "  ", "Nothing starts until you press Enter.", styles.TNGreenTxt)
@@ -91,7 +105,11 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 	}
 
 	sb.WriteString("\n  " + styles.TNFaintText.Render("STEP 1 OF 2") + "\n")
-	sb.WriteString("  " + styles.TNTextBold.Render("Choose Podman or Docker") + "\n")
+	setupHeading := "Choose Podman or Docker"
+	if len(m.runtimePlans) == 1 {
+		setupHeading = "Set up " + m.runtimePlans[0].Title
+	}
+	sb.WriteString("  " + styles.TNTextBold.Render(setupHeading) + "\n")
 	sb.WriteString("\n  " + styles.TNTextSub.Render("Why this is needed") + "\n")
 	writeTNWrapped(&sb, w, "  ", "  ", "Omnideck runs as a container. This keeps the agent and its software isolated from the rest of your system. Podman or Docker runs that container; you only need one.", styles.TNDimText)
 	sb.WriteString("\n")
@@ -104,7 +122,11 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 		}
 		sb.WriteString("    " + styles.TNDimText.Render(padRight(name, 12)) + styles.TNDimText.Render(engineStateForPeople(probe.State)) + "\n")
 	}
-	sb.WriteString("\n  " + styles.TNTextSub.Render("Choose one") + "\n")
+	optionHeading := "Choose one"
+	if len(m.runtimePlans) == 1 {
+		optionHeading = "Next step"
+	}
+	sb.WriteString("\n  " + styles.TNTextSub.Render(optionHeading) + "\n")
 
 	for i, plan := range m.runtimePlans {
 		name := plan.Action
@@ -145,7 +167,7 @@ func (m InstallModel) tnRuntimeSetup(w int) string {
 		sb.WriteString("\n")
 		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeMessage, style)
 	}
-	if m.runtimeBusy {
+	if m.runtimeSetupStage == runtimeSetupWorking {
 		sb.WriteString("\n  " + m.preflightSpinner.View() + " " + styles.TNDimText.Render("Working…") + "\n")
 	}
 	return sb.String()
@@ -192,7 +214,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 
 	engDone := m.eng != nil || m.engErr != nil
 	if engDone && m.eng != nil {
-		rows = append(rows, checkRow{"Podman or Docker", m.eng.Name() + " is ready", true, true, false})
+		rows = append(rows, checkRow{"Podman or Docker", runtimeNameForPeople(m.eng.Name()) + " is ready", true, true, false})
 	} else if engDone {
 		rows = append(rows, checkRow{"Podman or Docker", "setup needed", false, true, false})
 	} else {
@@ -243,7 +265,7 @@ func (m InstallModel) tnPreflight(_ int) string {
 	}
 	if m.preflightReady && m.preferredEngine == "" && len(m.availableEngines) > 1 {
 		sb.WriteString("\n  " + styles.TNTextSub.Render("Both Podman and Docker are ready.") + "\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press Tab to switch, or Enter to continue with "+m.eng.Name()+".") + "\n")
+		sb.WriteString("  " + styles.TNDimText.Render("Press Tab to switch, or Enter to continue with "+runtimeNameForPeople(m.eng.Name())+".") + "\n")
 	} else if m.preflightReady && m.preferredEngine == "" {
 		if alternative := m.setupAlternativeRuntime(); alternative != "" {
 			currentName := runtimeNameForPeople(m.eng.Name())
@@ -341,7 +363,7 @@ func (m InstallModel) tnConfirm(w int) string {
 
 	engName := "Unknown"
 	if m.eng != nil {
-		engName = m.eng.Name()
+		engName = runtimeNameForPeople(m.eng.Name())
 	}
 
 	cfg := m.buildConfig()

@@ -28,6 +28,9 @@ func TestSuggestInstallDefaultsForAdditionalInstance(t *testing.T) {
 
 func TestInstallScreenUsesFirstRunLanguage(t *testing.T) {
 	m := NewDashboardModelForInstall(nil, nil, "", "")
+	if m.installModel.setupMode != SetupFirstRun {
+		t.Fatalf("setup mode = %d, want first run", m.installModel.setupMode)
+	}
 	m.width, m.height = 100, 36
 	view := m.viewInstall()
 
@@ -47,6 +50,9 @@ func TestInstallScreenUsesAdditionalInstanceLanguage(t *testing.T) {
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
 	}
 	m := NewDashboardModelForInstall(nil, instances, "", "")
+	if m.installModel.setupMode != SetupAdditionalInstance {
+		t.Fatalf("setup mode = %d, want additional instance", m.installModel.setupMode)
+	}
 	m.width, m.height = 100, 36
 	view := m.viewInstall()
 
@@ -63,6 +69,9 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", Engine: "podman", WebUIPort: "2337"}},
 	}
 	m := NewDashboardModelForRuntimeSetup(instances, "podman")
+	if m.installModel.setupMode != SetupRuntimeRepair {
+		t.Fatalf("setup mode = %d, want runtime repair", m.installModel.setupMode)
+	}
 	m.width, m.height = 100, 36
 	view := m.viewInstall()
 

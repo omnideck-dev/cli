@@ -2,8 +2,10 @@ package tui
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -229,7 +231,7 @@ func TestSetupOnlyReturnsToDashboardWhenRuntimeIsReady(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := NewInstallModel("/tmp/test.yaml", nil, "")
 	m.Embedded = true
-	m.setupOnly = true
+	m.setupMode = SetupRuntimeRepair
 	m.eng = &mockEngine{}
 
 	newModel, cmd := m.afterRuntimeReady()
@@ -289,6 +291,29 @@ func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
 	nm := newModel.(InstallModel)
 	if cmd != nil || nm.eng.Name() != "docker" {
 		t.Fatalf("per-instance switch changed runtime to %s", nm.eng.Name())
+	}
+}
+
+func TestReadyRuntimeDefaultMatchesThePlatformRecommendation(t *testing.T) {
+	docker := &mockEngine{name: "docker"}
+	podman := &mockEngine{name: "podman"}
+	ready := []engine.Engine{podman, docker}
+	tests := []struct {
+		name string
+		host engine.HostPlatform
+		want string
+	}{
+		{"Windows", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "docker"},
+		{"Intel Mac", engine.HostPlatform{OS: "darwin", Arch: "amd64"}, "docker"},
+		{"Apple chip Mac", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "podman"},
+		{"Linux", engine.HostPlatform{OS: "linux", Arch: "amd64"}, "podman"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := readyEngineForSetup(ready, tt.host); got == nil || got.Name() != tt.want {
+				t.Fatalf("ready engine = %v, want %s", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -384,7 +409,7 @@ func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("the first Enter must only open the review; it must not run setup")
 	}
-	if !nm.runtimeConfirm {
+	if nm.runtimeSetupStage != runtimeSetupReview {
 		t.Fatal("the first Enter should open the setup review")
 	}
 	view := nm.tnRuntimeSetup(100)
@@ -397,7 +422,7 @@ func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
 	const width = 56
 	m := NewInstallModel("/tmp/test.yaml", nil, "")
 	m.Phase = PhaseRuntimeSetup
-	m.runtimeConfirm = true
+	m.runtimeSetupStage = runtimeSetupReview
 	m.runtimePlans = []engine.SetupPlan{{
 		Action: "Install Docker Desktop for this computer",
 		Steps: []string{
@@ -440,6 +465,241 @@ func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
 	nm := newModel.(InstallModel)
 	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields(detail), "")) {
 		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
+	}
+}
+
+func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	tests := []struct {
+		name    string
+		host    engine.HostPlatform
+		runtime string
+	}{
+		{"Windows Docker", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "docker"},
+		{"Windows Podman", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "podman"},
+		{"macOS Docker", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "docker"},
+		{"macOS Podman", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "podman"},
+		{"Linux Docker", engine.HostPlatform{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker"},
+		{"Linux Podman", engine.HostPlatform{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			other := "docker"
+			if tt.runtime == "docker" {
+				other = "podman"
+			}
+			m := NewInstallModel("/tmp/test.yaml", nil, "")
+			m.hostPlatform = tt.host
+			m.preferredEngine = tt.runtime
+			m.runtimeProbes = []engine.ProbeResult{
+				{Name: tt.runtime, State: engine.RuntimeMissing},
+				{Name: other, State: engine.RuntimeReady},
+			}
+			m.configureRuntimeSetup()
+
+			if len(m.runtimePlans) != 1 {
+				t.Fatalf("plan count = %d, want one explicitly selected runtime: %#v", len(m.runtimePlans), m.runtimePlans)
+			}
+			plan := m.runtimePlans[0]
+			view := m.tnRuntimeSetup(88)
+			if !strings.Contains(view, "Set up "+plan.Title) || !strings.Contains(view, "Why this is needed") || !strings.Contains(view, "Next step") {
+				t.Fatalf("first screen is incomplete:\n%s", view)
+			}
+			if strings.Contains(view, "Choose one") {
+				t.Fatalf("one selected runtime must not be presented as multiple choices:\n%s", view)
+			}
+
+			newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+			m = newModel.(InstallModel)
+			if cmd != nil || m.runtimeSetupStage != runtimeSetupReview {
+				t.Fatal("first Enter must only open the review")
+			}
+			review := m.tnRuntimeSetup(88)
+			if !strings.Contains(review, plan.Action) || !strings.Contains(review, "What happens next") || !strings.Contains(review, "Nothing starts until you press Enter") {
+				t.Fatalf("review screen is incomplete:\n%s", review)
+			}
+
+			newModel, cmd = m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+			m = newModel.(InstallModel)
+			if cmd == nil {
+				t.Fatal("second Enter must perform the reviewed action")
+			}
+			if len(plan.Commands) > 0 && m.runtimeSetupStage != runtimeSetupWorking {
+				t.Fatal("command setup should show a working state")
+			}
+			if plan.URL != "" {
+				if m.runtimeSetupStage != runtimeSetupWaiting {
+					t.Fatal("page or download setup should show a return-and-recheck state")
+				}
+				waiting := m.tnRuntimeSetup(88)
+				if !strings.Contains(waiting, "After you finish the step on the other screen") || !strings.Contains(waiting, "Press Enter") {
+					t.Fatalf("waiting screen is incomplete:\n%s", waiting)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsDockerInstallRecheckTransitionsToStartThenSettings(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.preferredEngine = "docker"
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(InstallModel)
+	newModel, _ = m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(InstallModel)
+	if m.runtimeSetupStage != runtimeSetupWaiting {
+		t.Fatal("Docker Store setup should wait for the user to return")
+	}
+
+	newModel, _ = m.updateRuntimeSetup(engineCheckResult{
+		probes: []engine.ProbeResult{
+			{Name: "podman", State: engine.RuntimeMissing},
+			{Name: "docker", State: engine.RuntimeStopped},
+		},
+		err: fmt.Errorf("docker is not ready"),
+	})
+	m = newModel.(InstallModel)
+	if len(m.runtimePlans) != 1 || m.runtimePlans[0].State != engine.RuntimeStopped {
+		t.Fatalf("post-install plan = %#v, want Start Docker", m.runtimePlans)
+	}
+	view := m.tnRuntimeSetup(88)
+	if !strings.Contains(view, "Start Docker") || !strings.Contains(view, "not running yet") || strings.Contains(view, "Choose an option below") {
+		t.Fatalf("post-install recheck guidance is wrong:\n%s", view)
+	}
+
+	docker := &mockEngine{name: "docker"}
+	newModel, _ = m.updateRuntimeSetup(engineCheckResult{
+		eng: docker,
+		all: []engine.Engine{docker},
+		probes: []engine.ProbeResult{
+			{Name: "podman", State: engine.RuntimeMissing},
+			{Name: "docker", State: engine.RuntimeReady},
+		},
+	})
+	m = newModel.(InstallModel)
+	if m.Phase != PhaseConfig {
+		t.Fatalf("ready Docker should continue to settings, phase = %d", m.Phase)
+	}
+}
+
+func TestWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.preferredEngine = "podman"
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	newModel, _ := m.updateRuntimeSetup(engineCheckResult{
+		probes: []engine.ProbeResult{
+			{Name: "podman", State: engine.RuntimeMachineMissing},
+			{Name: "docker", State: engine.RuntimeMissing},
+		},
+		err: fmt.Errorf("podman is not ready"),
+	})
+	m = newModel.(InstallModel)
+	if len(m.runtimePlans) != 1 || m.runtimePlans[0].State != engine.RuntimeMachineMissing {
+		t.Fatalf("post-install plan = %#v, want Podman one-time setup", m.runtimePlans)
+	}
+	view := m.tnRuntimeSetup(88)
+	if !strings.Contains(view, "Finish setting up Podman") || !strings.Contains(view, "one-time setup is not finished") {
+		t.Fatalf("Podman post-install guidance is wrong:\n%s", view)
+	}
+}
+
+func TestRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	m := NewInstallModel("/tmp/test.yaml", nil, "")
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.preferredEngine = "docker"
+	// A partial or unexpected probe result must never leave the user trapped.
+	m.runtimeProbes = []engine.ProbeResult{{Name: "podman", State: engine.RuntimeMissing}}
+	m.configureRuntimeSetup()
+
+	if len(m.runtimePlans) != 0 {
+		t.Fatalf("test requires the defensive empty-plan state, got %#v", m.runtimePlans)
+	}
+	view := m.tnRuntimeSetup(72)
+	if strings.Contains(view, "Choose an option below") || !strings.Contains(view, "Press R to check again") {
+		t.Fatalf("empty setup state gives unusable guidance:\n%s", view)
+	}
+	newModel, cmd := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(InstallModel)
+	if cmd == nil || m.runtimeSetupStage != runtimeSetupWorking {
+		t.Fatal("Enter must recheck even when no setup option could be built")
+	}
+}
+
+func TestRuntimeWaitingCopyMatchesTheAction(t *testing.T) {
+	installer := runtimeWaitingMessage(engine.SetupPlan{Title: "Podman", State: engine.RuntimeMissing, DirectDownload: true})
+	if !strings.Contains(installer, "installer") || strings.Contains(installer, "help page") {
+		t.Fatalf("installer message = %q", installer)
+	}
+	help := runtimeWaitingMessage(engine.SetupPlan{Title: "Docker", State: engine.RuntimePermissionDenied})
+	if !strings.Contains(help, "help page") || strings.Contains(help, "Finish the installation") {
+		t.Fatalf("help message = %q", help)
+	}
+}
+
+func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	for index, runtimeName := range []string{"docker", "podman"} {
+		t.Run(runtimeName, func(t *testing.T) {
+			listener, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+			_ = listener.Close()
+
+			m := NewInstallModel("/tmp/test.yaml", nil, "")
+			m.eng = &mockEngine{name: runtimeName}
+			m.inputs[inputContainerName].SetValue(fmt.Sprintf("omnideck-%s-%d", runtimeName, index))
+			m.inputs[inputWebUIPort].SetValue(port)
+			newModel, _ := m.afterRuntimeReady()
+			m = newModel.(InstallModel)
+			if m.Phase != PhaseConfig || !strings.Contains(m.tnConfig(88), "Recommended settings are ready") {
+				t.Fatalf("ready %s did not reach settings", runtimeName)
+			}
+
+			newModel, _ = m.updateConfig(tea.KeyMsg{Type: tea.KeyEnter})
+			m = newModel.(InstallModel)
+			confirm := m.tnConfirm(88)
+			if m.Phase != PhaseConfirm || !strings.Contains(confirm, "Runs with") || !strings.Contains(confirm, runtimeNameForPeople(runtimeName)) {
+				t.Fatalf("%s review is incomplete:\n%s", runtimeName, confirm)
+			}
+
+			newModel, cmd := m.updateConfirm(tea.KeyMsg{Type: tea.KeyEnter})
+			m = newModel.(InstallModel)
+			if cmd == nil || m.Phase != PhaseInstall {
+				t.Fatalf("%s did not enter working screen", runtimeName)
+			}
+			working := m.tnInstall(88)
+			for _, label := range installStepLabels {
+				if !strings.Contains(working, label) {
+					t.Fatalf("%s working screen is missing %q:\n%s", runtimeName, label, working)
+				}
+			}
+			for step := range installStepLabels {
+				newModel, _ = m.updateInstall(StepDoneMsg{Index: step})
+				m = newModel.(InstallModel)
+			}
+			if m.Phase != PhaseDone || !strings.Contains(m.tnDone(88), "Omnideck is ready") {
+				t.Fatalf("%s did not reach the ready screen", runtimeName)
+			}
+		})
 	}
 }
 

@@ -60,6 +60,29 @@ func TestRefreshRuntimePathFindsPerUserDocker(t *testing.T) {
 	}
 }
 
+func TestWindowsDetectsDockerDesktopBeforeItsCLIIsReady(t *testing.T) {
+	localAppData := t.TempDir()
+	desktopDir := filepath.Join(localAppData, "Programs", "DockerDesktop")
+	if err := os.MkdirAll(desktopDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	desktopPath := filepath.Join(desktopDir, "Docker Desktop.exe")
+	if err := os.WriteFile(desktopPath, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LOCALAPPDATA", localAppData)
+	t.Setenv("ProgramFiles", "")
+	t.Setenv("PATH", "")
+	originalLookPath := probeLookPath
+	probeLookPath = func(string) (string, error) { return "", errors.New("not found") }
+	t.Cleanup(func() { probeLookPath = originalLookPath })
+
+	result := probeRuntime("docker", "windows")
+	if result.State != RuntimeStopped || result.Path != desktopPath {
+		t.Fatalf("Docker Desktop result = %#v, want installed but stopped", result)
+	}
+}
+
 func TestRefreshRuntimePathFindsPerUserPodman(t *testing.T) {
 	localAppData := t.TempDir()
 	podmanBin := filepath.Join(localAppData, "Programs", "Podman")

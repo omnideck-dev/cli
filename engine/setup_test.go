@@ -57,7 +57,7 @@ func TestWindowsRecommendsDockerDesktop(t *testing.T) {
 	if !strings.Contains(plans[1].URL, "ms-windows-store://") || !strings.Contains(plans[1].URL, "XP8CBJ40XLBWKX") {
 		t.Fatalf("Windows Docker setup should open its official Store listing, URL = %q", plans[1].URL)
 	}
-	if len(plans[0].Steps) != 3 || !plans[0].DirectDownload || !strings.Contains(plans[0].URL, "podman-installer-windows-amd64.exe") {
+	if len(plans[0].Steps) != 3 || !plans[0].DirectDownload || !strings.Contains(plans[0].URL, "podman-installer-windows-amd64.msi") {
 		t.Fatalf("Podman alternative must have its own plain walkthrough: %#v", plans[0])
 	}
 	if len(plans[1].Steps) != 3 || !strings.Contains(plans[1].PermissionNote, "administrator") {
@@ -194,5 +194,86 @@ func TestDockerURLMapsUbuntuDerivatives(t *testing.T) {
 	url := dockerInstallURL(HostPlatform{OS: "linux", DistroID: "pop"})
 	if url != "https://docs.docker.com/engine/install/ubuntu/" {
 		t.Fatalf("URL = %q", url)
+	}
+}
+
+func TestEverySupportedRuntimeStateHasACompleteNextStep(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    HostPlatform
+		runtime string
+		state   RuntimeState
+	}{
+		{"Windows Docker missing", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimeMissing},
+		{"Windows Docker stopped", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimeStopped},
+		{"Windows Docker permission", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimePermissionDenied},
+		{"Windows Docker broken", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimeBroken},
+		{"Windows Podman missing", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeMissing},
+		{"Windows Podman machine missing", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeMachineMissing},
+		{"Windows Podman machine stopped", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeMachineStopped},
+		{"Windows Podman permission", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimePermissionDenied},
+		{"Windows Podman broken", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeBroken},
+		{"Mac Docker missing", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimeMissing},
+		{"Mac Docker stopped", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimeStopped},
+		{"Mac Docker permission", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimePermissionDenied},
+		{"Mac Docker broken", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimeBroken},
+		{"Mac Podman missing", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeMissing},
+		{"Mac Podman machine missing", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeMachineMissing},
+		{"Mac Podman machine stopped", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeMachineStopped},
+		{"Mac Podman permission", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimePermissionDenied},
+		{"Mac Podman broken", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeBroken},
+		{"Linux Docker missing", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeMissing},
+		{"Linux Docker stopped", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeStopped},
+		{"Linux Docker permission", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimePermissionDenied},
+		{"Linux Docker old", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeUnsupportedVersion},
+		{"Linux Docker broken", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeBroken},
+		{"Linux Podman missing", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimeMissing},
+		{"Linux Podman stopped", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimeStopped},
+		{"Linux Podman permission", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimePermissionDenied},
+		{"Linux Podman broken", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimeBroken},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			other := "docker"
+			if tt.runtime == "docker" {
+				other = "podman"
+			}
+			plans := BuildSetupPlans([]ProbeResult{
+				{Name: tt.runtime, State: tt.state},
+				{Name: other, State: RuntimeReady},
+			}, tt.host)
+			if len(plans) != 1 {
+				t.Fatalf("plan count = %d, want 1: %#v", len(plans), plans)
+			}
+			plan := plans[0]
+			if plan.Runtime != tt.runtime || plan.State != tt.state {
+				t.Fatalf("plan identity = %s/%s, want %s/%s", plan.Runtime, plan.State, tt.runtime, tt.state)
+			}
+			if plan.Title == "" || plan.Action == "" || plan.Description == "" || len(plan.Steps) == 0 {
+				t.Fatalf("user walkthrough is incomplete: %#v", plan)
+			}
+			if len(plan.Commands) == 0 && plan.URL == "" {
+				t.Fatalf("plan has no safe action: %#v", plan)
+			}
+			for _, command := range plan.Commands {
+				if command.Name == "" || command.Display == "" {
+					t.Fatalf("command is incomplete: %#v", command)
+				}
+			}
+			if plan.URL != "" && !strings.Contains(plan.URL, "://") {
+				t.Fatalf("URL is not actionable: %q", plan.URL)
+			}
+		})
+	}
+}
+
+func TestWindowsPodmanInstallerMatchesOfficialReleaseAssets(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		plans := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMissing}}, HostPlatform{OS: "windows", Arch: arch})
+		want := "podman-installer-windows-" + arch + ".msi"
+		if len(plans) != 1 || !strings.HasSuffix(plans[0].URL, want) {
+			t.Fatalf("%s installer = %#v, want suffix %q", arch, plans, want)
+		}
 	}
 }

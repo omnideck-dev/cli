@@ -97,6 +97,10 @@ On these systems, Ollama may be silently unreachable.
 
 ## 6a. Guided Runtime Bootstrap
 
+The user journeys, runtime stages, and primary platform choices are documented
+in [docs/setup-flow-matrix.md](docs/setup-flow-matrix.md). Keep that matrix and
+the table-driven setup tests in sync when adding a runtime state or platform.
+
 Validate the new no-runtime and repair paths before promoting the preview:
 
 | Host | Initial state | Expected default/action |

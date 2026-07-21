@@ -205,7 +205,11 @@ func (m DashboardModel) footerHints() string {
 			{"↑↓", "move"}, {"enter", "edit"}, {"ctrl+s", "save"}, {"esc", "close"},
 		})
 	case ScreenDoctor:
-		return keyHints([][2]string{{"esc", "close"}})
+		hints := [][2]string{{"r", "check again"}}
+		if m.doctorDone && m.doctorFocus >= 0 && m.doctorFocus < len(m.doctorResults) {
+			hints = append([][2]string{{"↑↓", "choose action"}, {"enter", m.doctorResults[m.doctorFocus].ActionLabel}}, hints...)
+		}
+		return keyHints(append(hints, [2]string{"esc", "close"}))
 	case ScreenInstall:
 		switch m.installModel.Phase {
 		case PhasePreflight:
@@ -213,10 +217,17 @@ func (m DashboardModel) footerHints() string {
 				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"q", "cancel"}})
 			}
 		case PhaseRuntimeSetup:
-			if m.installModel.runtimeBusy {
+			if m.installModel.runtimeSetupStage == runtimeSetupWorking {
 				return keyHints([][2]string{{"working", "please wait"}})
 			}
-			if m.installModel.runtimeWaiting {
+			if len(m.installModel.runtimePlans) == 0 {
+				hints := [][2]string{{"r / enter", "check again"}}
+				if m.installModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
+					hints = append(hints, [2]string{"b", "back"})
+				}
+				return keyHints(append(hints, [2]string{"q", "cancel"}))
+			}
+			if m.installModel.runtimeSetupStage == runtimeSetupWaiting {
 				hints := [][2]string{{"enter", "check again"}}
 				if len(m.installModel.runtimePlans) > 0 && m.installModel.runtimePlans[m.installModel.runtimeChoice].URL != "" {
 					label := "open page again"
@@ -227,7 +238,7 @@ func (m DashboardModel) footerHints() string {
 				}
 				return keyHints(append(hints, [2]string{"b", "back"}, [2]string{"q", "cancel"}))
 			}
-			if m.installModel.runtimeConfirm {
+			if m.installModel.runtimeSetupStage == runtimeSetupReview {
 				action := "start these steps"
 				if len(m.installModel.runtimePlans) > 0 && len(m.installModel.runtimePlans[m.installModel.runtimeChoice].Commands) == 0 {
 					action = "open official page"
@@ -237,8 +248,11 @@ func (m DashboardModel) footerHints() string {
 				}
 				return keyHints([][2]string{{"enter", action}, {"b", "back"}, {"d", "technical details"}, {"q", "cancel"}})
 			}
-			hints := [][2]string{{"↑↓", "choose"}, {"enter", "review"}, {"d", "technical details"}, {"r", "check again"}}
-			if m.installModel.runtimeFromPreflight {
+			hints := [][2]string{{"enter", "review"}, {"d", "technical details"}, {"r", "check again"}}
+			if len(m.installModel.runtimePlans) > 1 {
+				hints = append([][2]string{{"↑↓", "choose"}}, hints...)
+			}
+			if m.installModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
 				hints = append(hints, [2]string{"b", "back"})
 			}
 			return keyHints(append(hints, [2]string{"q", "cancel"}))
@@ -961,39 +975,92 @@ func (m DashboardModel) viewConfig() string {
 func (m DashboardModel) viewDoctor() string {
 	w := m.width
 
-	header := styles.TNCyanTxt.Render("✚") + "  " + styles.TNTextBold.Render("Doctor") + "  " + styles.TNFaintText.Render("system diagnostics")
-	sep := styles.TNFaintText.Render(strings.Repeat("─", 50))
-
-	var bodyLines []string
-	if !m.doctorDone {
-		bodyLines = append(bodyLines, m.doctorSpinner.View()+" "+styles.TNDimText.Render("Running diagnostics…"))
-	} else {
-		for _, r := range m.doctorResults {
-			var icon, labelS string
-			switch r.Status {
-			case CheckPass:
-				icon = styles.TNGreenTxt.Render("✓")
-				labelS = styles.TNTextMid.Render(r.Label)
-			case CheckFail:
-				icon = styles.TNRedTxt.Render("✗")
-				labelS = styles.TNRedTxt.Render(r.Label)
-			case CheckWarn:
-				icon = styles.TNYellowTxt.Render("!")
-				labelS = styles.TNYellowTxt.Render(r.Label)
-			}
-			detail := styles.TNFaintText.Render(tnTruncate(r.Detail, 40))
-			row := icon + "  " + padRightStyled(labelS, 26) + "  " + detail
-			bodyLines = append(bodyLines, row)
-			if r.Hint != "" && r.Status != CheckPass {
-				bodyLines = append(bodyLines, "     "+styles.TNDimText.Render("→ "+tnTruncate(r.Hint, 60)))
-			}
-		}
-	}
-
-	innerW := 58
+	innerW := 72
 	if w-24 < innerW {
 		innerW = w - 24
 	}
+	if innerW < 36 {
+		innerW = 36
+	}
+	header := styles.TNCyanTxt.Render("✚") + "  " + styles.TNTextBold.Render("Doctor") + "  " + styles.TNFaintText.Render("checks what Omnideck needs")
+	sep := styles.TNFaintText.Render(strings.Repeat("─", innerW))
+
+	var bodyLines []string
+	if !m.doctorDone {
+		message := "Checking Omnideck…"
+		if m.doctorMessage != "" {
+			message = m.doctorMessage
+		}
+		bodyLines = append(bodyLines, m.doctorSpinner.View()+" "+styles.TNDimText.Render(message))
+	} else {
+		problems, warnings := 0, 0
+		for _, result := range m.doctorResults {
+			if result.Status == CheckFail {
+				problems++
+			} else if result.Status == CheckWarn {
+				warnings++
+			}
+		}
+		summary := "Everything required is working"
+		summaryStyle := styles.TNGreenTxt
+		if problems == 1 {
+			summary = "1 problem needs attention"
+			summaryStyle = styles.TNRedTxt
+		} else if problems > 1 {
+			summary = fmt.Sprintf("%d problems need attention", problems)
+			summaryStyle = styles.TNRedTxt
+		} else if warnings == 1 {
+			summary += " · 1 helpful note"
+		} else if warnings > 1 {
+			summary += fmt.Sprintf(" · %d helpful notes", warnings)
+		}
+		bodyLines = append(bodyLines, summaryStyle.Render(summary), "")
+
+		for i, result := range m.doctorResults {
+			var icon string
+			lineStyle := styles.TNDimText
+			switch result.Status {
+			case CheckPass:
+				icon = styles.TNGreenTxt.Render("✓")
+				lineStyle = styles.TNTextMid
+			case CheckFail:
+				icon = styles.TNRedTxt.Render("✗")
+				lineStyle = styles.TNRedTxt
+			case CheckWarn:
+				icon = styles.TNYellowTxt.Render("!")
+				lineStyle = styles.TNYellowTxt
+			case CheckInfo:
+				icon = styles.TNFaintText.Render("·")
+			}
+			cursor := "  "
+			if i == m.doctorFocus {
+				cursor = styles.TNBlueTxt.Render("▸ ")
+			}
+			prefix := cursor + icon + "  "
+			continuation := "     "
+			for lineIndex, line := range wrapWords(result.Label+" — "+result.Detail, max(1, innerW-lipgloss.Width(prefix)), max(1, innerW-lipgloss.Width(continuation))) {
+				linePrefix := continuation
+				if lineIndex == 0 {
+					linePrefix = prefix
+				}
+				bodyLines = append(bodyLines, linePrefix+lineStyle.Render(line))
+			}
+			if result.Hint != "" && (result.Status == CheckFail || result.Status == CheckWarn) {
+				for _, line := range wrapWords("What you can do: "+result.Hint, max(1, innerW-5), max(1, innerW-5)) {
+					bodyLines = append(bodyLines, "     "+styles.TNFaintText.Render(line))
+				}
+			}
+			if i == m.doctorFocus && result.Action != DoctorActionNone {
+				for _, line := range wrapWords("Press Enter to "+strings.ToLower(result.ActionLabel)+".", max(1, innerW-5), max(1, innerW-5)) {
+					bodyLines = append(bodyLines, "     "+styles.TNGreenTxt.Render(line))
+				}
+			}
+		}
+		if m.doctorMessage != "" {
+			bodyLines = append(bodyLines, "", styles.TNRedTxt.Render(m.doctorMessage))
+		}
+	}
+
 	inner := header + "\n" + sep + "\n" + strings.Join(bodyLines, "\n")
 	modal := styles.TNModal.Width(innerW).Padding(1, 2).Render(inner)
 

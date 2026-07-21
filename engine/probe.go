@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -65,12 +64,18 @@ func prepareRuntimeCommand(name string) {
 func probeAllForOS(goos string) []ProbeResult {
 	names := []string{"podman", "docker"}
 	results := make([]ProbeResult, len(names))
+	// Refresh PATH before starting concurrent commands. An installer can finish
+	// while Omnideck is open, and serial updates avoid two probes overwriting
+	// each other's newly discovered Windows path.
+	for _, name := range names {
+		refreshRuntimePath(name, goos)
+	}
 	var wg sync.WaitGroup
 	for i, name := range names {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results[i] = probeRuntime(name, goos)
+			results[i] = probeRuntimeOnCurrentPath(name, goos)
 		}()
 	}
 	wg.Wait()
@@ -96,10 +101,21 @@ func ReadyEngines(probes []ProbeResult) []Engine {
 }
 
 func probeRuntime(name, goos string) ProbeResult {
-	result := ProbeResult{Name: name, State: RuntimeMissing}
 	refreshRuntimePath(name, goos)
+	return probeRuntimeOnCurrentPath(name, goos)
+}
+
+func probeRuntimeOnCurrentPath(name, goos string) ProbeResult {
+	result := ProbeResult{Name: name, State: RuntimeMissing}
 	path, err := probeLookPath(name)
 	if err != nil {
+		if goos == "windows" && name == "docker" {
+			if appPath := installedDockerDesktopPath(); appPath != "" {
+				result.Path = appPath
+				result.State = RuntimeStopped
+				result.Detail = "Docker Desktop is installed, but its command is not ready yet."
+			}
+		}
 		return result
 	}
 	result.Path = path
@@ -140,6 +156,22 @@ func probeRuntime(name, goos string) ProbeResult {
 		result.Detail = infoErr.Error()
 	}
 	return result
+}
+
+func installedDockerDesktopPath() string {
+	var candidates []string
+	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+		candidates = append(candidates, filepath.Join(localAppData, "Programs", "DockerDesktop", "Docker Desktop.exe"))
+	}
+	if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+		candidates = append(candidates, filepath.Join(programFiles, "Docker", "Docker", "Docker Desktop.exe"))
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return ""
 }
 
 // refreshRuntimePath makes software installed while Omnideck is already open
@@ -310,7 +342,9 @@ func RuntimeStateLabel(state RuntimeState) string {
 		return "Installed, but your account cannot use it"
 	case RuntimeUnsupportedVersion:
 		return "Installed, but too old for Omnideck"
+	case RuntimeBroken:
+		return "Installed, but needs attention"
 	default:
-		return fmt.Sprintf("Installed, but needs attention (%s)", state)
+		return "Installed, but needs attention"
 	}
 }
