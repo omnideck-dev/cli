@@ -44,7 +44,7 @@ omnideck-cli/
 │   ├── ollama.go            # TCP dial check, OS-aware host
 │   └── memory.go            # Linux: /proc/meminfo  Mac: sysctl
 ├── config/
-│   └── config.go            # Load/save ~/.config/omnideck-cli/config.yaml
+│   └── config.go            # Load/save OS-native per-user configuration
 └── styles/
     └── styles.go            # Lip Gloss palette and shared renderers
 ```
@@ -56,7 +56,7 @@ omnideck-cli/
 - **Binary name:** `omnideck`
 - **Repo name:** `omnideck-cli`
 - **Module path:** `github.com/omnideck-dev/cli`
-- **Config file:** `~/.config/omnideck-cli/config.yaml`
+- **Config directory:** OS-native user config directory under `omnideck-cli`
 - **Container image:** `ghcr.io/omnideck-dev/omnideck:main`
 - **Default container name:** `omnideck`
 - **Default shared dir:** `~/Omnideck`

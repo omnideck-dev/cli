@@ -46,14 +46,147 @@ type InstanceInfo struct {
 // instancesDirOverride is set in tests to avoid touching the real config dir.
 var instancesDirOverride string
 
-// Dir returns the directory containing Omnideck's machine-wide settings and
-// instance configurations. OMNIDECK_CONFIG_DIR is intended for isolated test
-// and automation runs.
+var userConfigDir = os.UserConfigDir
+var userHomeDir = os.UserHomeDir
+
+// Dir returns the platform-native directory containing Omnideck's shared
+// settings and instance configurations. OMNIDECK_CONFIG_DIR is intended for
+// isolated test and automation runs.
 func Dir() string {
 	if override := os.Getenv("OMNIDECK_CONFIG_DIR"); override != "" {
 		return expandHome(override)
 	}
-	return expandHome("~/.config/omnideck-cli")
+	if base, err := userConfigDir(); err == nil && base != "" {
+		return filepath.Join(base, "omnideck-cli")
+	}
+	return legacyDir()
+}
+
+// MigrateLegacyDir copies configuration from the original cross-platform
+// ~/.config location when the OS now provides a different conventional
+// location. Existing files in the new location always win, and the originals
+// are left in place so a migration can never remove a user's configuration.
+func MigrateLegacyDir() error {
+	if os.Getenv("OMNIDECK_CONFIG_DIR") != "" {
+		return nil
+	}
+
+	source := legacyDir()
+	target := Dir()
+	if filepath.Clean(source) == filepath.Clean(target) {
+		return nil
+	}
+	if _, err := os.Stat(target); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("checking config directory: %w", err)
+	}
+
+	info, err := os.Stat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("checking previous config directory: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("previous config path %s is not a directory", source)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("creating config parent directory: %w", err)
+	}
+	staging, err := os.MkdirTemp(filepath.Dir(target), ".omnideck-cli-migration-*")
+	if err != nil {
+		return fmt.Errorf("preparing config migration: %w", err)
+	}
+	defer func() { _ = os.RemoveAll(staging) }()
+
+	for _, name := range []string{"settings.yaml", "config.yaml"} {
+		if err := copyLegacyFile(filepath.Join(source, name), filepath.Join(staging, name)); err != nil {
+			return err
+		}
+	}
+
+	sourceInstances := filepath.Join(source, "instances")
+	entries, err := os.ReadDir(sourceInstances)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			return fmt.Errorf("reading previous instance configs: %w", err)
+		}
+		entries = nil
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		if err := copyLegacyFile(
+			filepath.Join(sourceInstances, entry.Name()),
+			filepath.Join(staging, "instances", entry.Name()),
+		); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(staging, target); err != nil {
+		// Another Omnideck process may have completed migration first. Its
+		// conventional directory remains authoritative in that case.
+		if _, statErr := os.Stat(target); statErr == nil {
+			return nil
+		}
+		return fmt.Errorf("finishing config migration: %w", err)
+	}
+	return nil
+}
+
+func legacyDir() string {
+	home, err := userHomeDir()
+	if err != nil || home == "" {
+		return filepath.Join("~", ".config", "omnideck-cli")
+	}
+	return filepath.Join(home, ".config", "omnideck-cli")
+}
+
+func copyLegacyFile(source, target string) error {
+	info, err := os.Lstat(source)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("checking previous config file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return nil
+	}
+
+	data, err := os.ReadFile(source)
+	if err != nil {
+		return fmt.Errorf("reading previous config file: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("creating config directory: %w", err)
+	}
+
+	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		if os.IsExist(err) {
+			return nil
+		}
+		return fmt.Errorf("creating migrated config file: %w", err)
+	}
+	written := false
+	defer func() {
+		_ = f.Close()
+		if !written {
+			_ = os.Remove(target)
+		}
+	}()
+	if _, err := f.Write(data); err != nil {
+		return fmt.Errorf("writing migrated config file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("closing migrated config file: %w", err)
+	}
+	written = true
+	return nil
 }
 
 // InstancesDir returns the directory where per-instance config files live.
@@ -184,7 +317,7 @@ func expandHome(path string) string {
 	if !strings.HasPrefix(path, "~") {
 		return path
 	}
-	home, err := os.UserHomeDir()
+	home, err := userHomeDir()
 	if err != nil {
 		return path
 	}

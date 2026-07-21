@@ -153,7 +153,7 @@ omnideck <command> [flags]
 ### Global flags
 
 ```
---config string   Config file path (default: ~/.config/omnideck-cli/config.yaml)
+--config string   Use a specific config file instead of the saved instance picker
 --name string     Instance name (e.g. omnideck, omnideck2)
 --no-color        Disable color output
 --debug           Print raw engine commands and stderr
@@ -202,11 +202,16 @@ Commands that need an instance (e.g. `start`, `status`) show a picker when more 
 
 ## Configuration
 
-Config files live at:
+Config files use the conventional per-user location for each operating system:
 
-```
-~/.config/omnideck-cli/instances/<container-name>.yaml
-```
+| Operating system | Config directory |
+|---|---|
+| Linux | `$XDG_CONFIG_HOME/omnideck-cli`, or `~/.config/omnideck-cli` |
+| macOS | `~/Library/Application Support/omnideck-cli` |
+| Windows | `%AppData%\omnideck-cli` |
+
+Each installation is stored under `instances/<container-name>.yaml` in that directory.
+Existing alpha configuration under `~/.config/omnideck-cli` is copied automatically when needed; existing files in the conventional location are never overwritten.
 
 ```yaml
 container_name: omnideck
@@ -222,7 +227,7 @@ installed_at: 2025-01-15T10:30:00Z
 The runtime shared by every instance is stored separately:
 
 ```yaml
-# ~/.config/omnideck-cli/settings.yaml
+# <config directory>/settings.yaml
 runtime: docker
 ```
 

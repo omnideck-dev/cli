@@ -73,12 +73,13 @@ func TestExpandHome(t *testing.T) {
 }
 
 func TestDefaultPath(t *testing.T) {
+	base := t.TempDir()
+	setUserDirectoriesForTest(t, base, t.TempDir())
 	p := DefaultPath()
 	if p == "" {
 		t.Fatal("DefaultPath should not be empty")
 	}
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".config/omnideck-cli/config.yaml")
+	expected := filepath.Join(base, "omnideck-cli", "config.yaml")
 	if p != expected {
 		t.Errorf("DefaultPath: got %q, want %q", p, expected)
 	}
@@ -99,12 +100,109 @@ func TestConfigDirOverride(t *testing.T) {
 }
 
 func TestInstancePath(t *testing.T) {
+	base := t.TempDir()
+	setUserDirectoriesForTest(t, base, t.TempDir())
 	p := InstancePath("myapp")
-	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, ".config/omnideck-cli/instances/myapp.yaml")
+	expected := filepath.Join(base, "omnideck-cli", "instances", "myapp.yaml")
 	if p != expected {
 		t.Errorf("InstancePath: got %q, want %q", p, expected)
 	}
+}
+
+func TestDirFallsBackToLegacyLocation(t *testing.T) {
+	home := t.TempDir()
+	setUserDirectoriesForTestWithError(t, home)
+	want := filepath.Join(home, ".config", "omnideck-cli")
+	if got := Dir(); got != want {
+		t.Fatalf("Dir() = %q, want %q", got, want)
+	}
+}
+
+func TestMigrateLegacyDirCopiesWithoutOverwriting(t *testing.T) {
+	base := t.TempDir()
+	home := t.TempDir()
+	setUserDirectoriesForTest(t, base, home)
+	t.Setenv("OMNIDECK_CONFIG_DIR", "")
+
+	legacy := filepath.Join(home, ".config", "omnideck-cli")
+	if err := os.MkdirAll(filepath.Join(legacy, "instances"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "settings.yaml"), []byte("runtime: podman\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(legacy, "instances", "omnideck.yaml"), []byte("container_name: omnideck\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := MigrateLegacyDir(); err != nil {
+		t.Fatalf("MigrateLegacyDir: %v", err)
+	}
+
+	target := filepath.Join(base, "omnideck-cli")
+	settings, err := os.ReadFile(filepath.Join(target, "settings.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(settings); got != "runtime: podman\n" {
+		t.Fatalf("settings were not migrated: %q", got)
+	}
+	instance, err := os.ReadFile(filepath.Join(target, "instances", "omnideck.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(instance); got != "container_name: omnideck\n" {
+		t.Fatalf("instance config = %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(legacy, "instances", "omnideck.yaml")); err != nil {
+		t.Fatalf("legacy file should remain in place: %v", err)
+	}
+
+	if err := os.WriteFile(filepath.Join(target, "settings.yaml"), []byte("runtime: docker\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(target, "instances", "omnideck.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := MigrateLegacyDir(); err != nil {
+		t.Fatalf("second MigrateLegacyDir: %v", err)
+	}
+	settings, err = os.ReadFile(filepath.Join(target, "settings.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(settings); got != "runtime: docker\n" {
+		t.Fatalf("existing settings were overwritten: %q", got)
+	}
+	if _, err := os.Stat(filepath.Join(target, "instances", "omnideck.yaml")); !os.IsNotExist(err) {
+		t.Fatalf("deleted instance was recreated; stat error = %v", err)
+	}
+}
+
+func setUserDirectoriesForTest(t *testing.T, configBase, home string) {
+	t.Helper()
+	t.Setenv("OMNIDECK_CONFIG_DIR", "")
+	oldConfigDir := userConfigDir
+	oldHomeDir := userHomeDir
+	userConfigDir = func() (string, error) { return configBase, nil }
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() {
+		userConfigDir = oldConfigDir
+		userHomeDir = oldHomeDir
+	})
+}
+
+func setUserDirectoriesForTestWithError(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("OMNIDECK_CONFIG_DIR", "")
+	oldConfigDir := userConfigDir
+	oldHomeDir := userHomeDir
+	userConfigDir = func() (string, error) { return "", os.ErrNotExist }
+	userHomeDir = func() (string, error) { return home, nil }
+	t.Cleanup(func() {
+		userConfigDir = oldConfigDir
+		userHomeDir = oldHomeDir
+	})
 }
 
 func TestListInstancesEmpty(t *testing.T) {

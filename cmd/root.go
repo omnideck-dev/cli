@@ -200,6 +200,9 @@ func persistentPreRun(cmd *cobra.Command, args []string) {
 	styles.NoColor(noColor)
 	debug.SetEnabled(debugFlag)
 	RuntimeName = ""
+	if err := config.MigrateLegacyDir(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Omnideck could not copy settings from their previous location: %v\n", err)
+	}
 	if settings, err := config.LoadSettings(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Omnideck settings are unreadable: %v\n", err)
 	} else {
