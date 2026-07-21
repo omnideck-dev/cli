@@ -10,7 +10,7 @@ import (
 	"github.com/omnideck-dev/cli/styles"
 )
 
-// StepStatus represents the state of a single installation step.
+// StepStatus represents the state of one workflow step.
 type StepStatus int
 
 const (
@@ -204,7 +204,7 @@ func (m SpinnerModel) View() string {
 // IsDone returns true when all steps have completed.
 func (m SpinnerModel) IsDone() bool { return m.done }
 
-// renderTNStep renders one wizard step in Tokyo Night style.
+// renderTNStep renders one workflow step in Tokyo Night style.
 // Pending steps are shown dim so the user can see what is coming.
 func renderTNStep(step Step, sm SpinnerModel) string {
 	switch step.Status {

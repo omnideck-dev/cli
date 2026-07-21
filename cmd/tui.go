@@ -5,6 +5,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/tui"
 	"github.com/spf13/cobra"
 )
@@ -13,7 +14,7 @@ var tuiCmd = &cobra.Command{
 	Use:   "tui",
 	Short: "Open the interactive dashboard TUI",
 	Long: `Opens the full Omnideck dashboard — a keyboard-driven terminal UI for managing
-all installed instances. Shows live CPU/memory stats, logs, config, and health checks.
+all installed instances. Shows live CPU/memory stats, logs, settings, and health checks.
 
 Key bindings (Dashboard):
   ↑↓      move selection
@@ -38,12 +39,55 @@ func runTUI(_ *cobra.Command, _ []string) error {
 	}
 	eng, err := engineFromConfig(legacyRuntime)
 	if err != nil {
-		return fmt.Errorf("no container engine available: %w", err)
+		return fmt.Errorf("no container runtime is ready: %w", err)
 	}
 
-	instances, _ := config.ListInstances()
+	instances, err := config.ListInstances()
+	if err != nil {
+		return fmt.Errorf("reading saved Omnideck installations: %w", err)
+	}
+	return runDashboard(eng, instances, LoadedConfig, ConfigPath)
+}
+
+// runDashboard is the single interactive shell for returning users. A legacy
+// single-file configuration is included until the user next saves it in the
+// conventional instances directory.
+func runDashboard(eng engine.Engine, instances []config.InstanceInfo, loaded *config.Config, loadedPath string) error {
+	if eng == nil {
+		return fmt.Errorf("Podman or Docker is not ready\nRun `omnideck` for guided setup")
+	}
+	instances = withLoadedInstance(instances, loaded, loadedPath)
 	model := tui.NewDashboardModel(eng, instances)
+	return runDashboardModel(model)
+}
+
+func runDashboardForDoctor(eng engine.Engine, instances []config.InstanceInfo, selected int) error {
+	model := tui.NewDashboardModelForDoctor(eng, instances, selected)
+	return runDashboardModel(model)
+}
+
+func runDashboardModel(model tui.DashboardModel) error {
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err = p.Run()
+	_, err := p.Run()
 	return err
+}
+
+func withLoadedInstance(instances []config.InstanceInfo, loaded *config.Config, loadedPath string) []config.InstanceInfo {
+	if loaded == nil || containsInstanceConfig(instances, loadedPath, loaded.ContainerName) {
+		return instances
+	}
+	return append(instances, config.InstanceInfo{
+		Name:   instanceNameFromPath(loadedPath),
+		Path:   loadedPath,
+		Config: loaded,
+	})
+}
+
+func containsInstanceConfig(instances []config.InstanceInfo, path, containerName string) bool {
+	for _, instance := range instances {
+		if instance.Path == path || instance.Config != nil && instance.Config.ContainerName == containerName {
+			return true
+		}
+	}
+	return false
 }

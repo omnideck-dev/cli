@@ -38,7 +38,7 @@ func TestValidMemorySize(t *testing.T) {
 			t.Errorf("ValidMemorySize(%q) = false", value)
 		}
 	}
-	for _, value := range []string{"", "512", "2gb", "1.5g"} {
+	for _, value := range []string{"", "0g", "512", "2gb", "1.5g"} {
 		if ValidMemorySize(value) {
 			t.Errorf("ValidMemorySize(%q) = true", value)
 		}

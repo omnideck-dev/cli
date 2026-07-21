@@ -111,8 +111,8 @@ func TestHelpFlag(t *testing.T) {
 	if !strings.Contains(stdout, "omnideck") {
 		t.Fatalf("expected help to mention omnideck, got: %s", stdout)
 	}
-	if !strings.Contains(stdout, "install") {
-		t.Fatalf("expected help to list 'install' command, got: %s", stdout)
+	if !strings.Contains(stdout, "setup") || !strings.Contains(stdout, "list") {
+		t.Fatalf("expected help to list setup and list commands, got: %s", stdout)
 	}
 }
 
@@ -127,7 +127,7 @@ func TestNoArgsShowsHelp(t *testing.T) {
 }
 
 func TestSubcommandHelp(t *testing.T) {
-	for _, sub := range []string{"install", "start", "stop", "restart", "status", "logs", "doctor", "config", "update", "uninstall"} {
+	for _, sub := range []string{"setup", "install", "list", "start", "stop", "restart", "status", "logs", "doctor", "config", "update", "uninstall"} {
 		t.Run(sub, func(t *testing.T) {
 			stdout, _, code := run(sub, "--help")
 			if code != 0 {

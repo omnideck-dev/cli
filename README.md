@@ -17,10 +17,10 @@ CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnid
 
 - **Guided setup** — diagnoses, installs, starts, or repairs Podman or Docker before configuring Omnideck
 - **Smart memory defaults** — suggests container RAM limits based on your system (20% of host RAM, 1–8 GB)
-- **Update in place** — pulls the latest image and recreates the container, preserving config
+- **Safe maintenance** — update and repair share one review-first recreate flow with rollback and preserved data volumes
 - **Multi-instance** — run more than one Omnideck container on different ports from a single binary
-- **Health check** — `doctor` runs parallel checks and prints a full pass/warn/fail report
-- **Docker + Podman** — auto-detected; SELinux, volume ownership, and Ollama host differences handled per OS
+- **Actionable health check** — `doctor` identifies the root problem and can open runtime setup, start a stopped instance, or repair a missing container
+- **Docker + Podman** — auto-detected; runtime setup and host-networking differences handled per OS
 - **Backup on uninstall** — optionally archives data directories to a `.tar.gz` before removal
 - **`--no-color`** — safe to pipe; exits non-zero on actual failures, not on warnings
 
@@ -33,7 +33,8 @@ CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnid
 | Docker | 20.10+ on Linux | Older Linux versions cannot provide Omnideck's connection to apps installed directly on the same computer |
 | Podman | Must pass the built-in readiness check | Version 4 is not required. A version number alone cannot prove whether this computer's network lets Omnideck reach a local Ollama installation. |
 
-Ollama is optional at install time — the wizard warns if it isn't reachable but proceeds anyway.
+Ollama is optional during setup. Omnideck reports when it is not reachable but
+continues without it.
 
 ### Why does Omnideck run in a container?
 
@@ -53,12 +54,12 @@ recommends the easiest default for the platform:
 | Windows 10/11 | Docker Desktop | The most guided Windows setup; Podman's official Windows installer remains a visible free alternative |
 | Linux running inside Windows (WSL) | Docker Desktop | Reuses Docker managed by Windows instead of installing a second copy inside Linux |
 
-The interactive wizard can ask your computer's built-in tools to install or
+The guided setup can ask your computer's built-in tools to install or
 start Podman or Docker, then check the result automatically. Before it does
 anything, it shows a numbered explanation and waits for a second confirmation.
 Technical commands stay hidden unless the user asks to see them. It never runs
 a downloaded setup script or silently changes account security settings. App
-installers open from their official pages, and the wizard waits for you to
+installers open from their official pages, and Omnideck waits for you to
 return and press Enter before it checks again.
 
 Run `omnideck` as your normal user. Do not put `sudo` before it or choose
@@ -69,7 +70,7 @@ Run `omnideck` as your normal user. Do not put `sudo` before it or choose
 | Linux | The computer's app installer may ask for the user's account password while it installs Podman or starts Docker. The account must be allowed to install software. |
 | macOS | Omnideck runs normally. The official Podman or Docker installer may ask for the user's Mac password while it adds Podman or Docker. |
 | Windows with Docker Desktop | Keep the installer's recommended **Per-user** choice. That normally needs no special permission. Windows may need approval from the person who manages the computer the first time it turns on the built-in Linux feature Docker uses. |
-| Windows with Podman | The recommended **Just for me** install needs no administrator. Windows may require an administrator and a restart if WSL is not enabled yet. |
+| Windows with Podman | The recommended **Just for me** install needs no administrator. Podman requires Windows 11 and either WSL 2 or Hyper-V; enabling one of those Windows features requires an administrator and may require a restart. |
 
 ---
 
@@ -84,7 +85,7 @@ Run `omnideck` as your normal user. Do not put `sudo` before it or choose
 ### Build from source
 
 Requires Go 1.25+. A missing Docker/Podman installation can be handled by the
-interactive wizard after the CLI is built. In the example below, the computer
+guided setup after the CLI is built. In the example below, the computer
 asks for a password only while copying the finished CLI into a shared apps
 folder. Run `omnideck` itself as the normal user.
 
@@ -116,14 +117,16 @@ omnideck doctor
 #    http://localhost:2337
 ```
 
-The wizard diagnoses or sets up Podman or Docker, checks Ollama reachability,
+Guided setup diagnoses or sets up Podman or Docker, checks Ollama reachability,
 suggests memory limits sized for your machine, and starts the container. With
 `--plain`, a ready runtime performs the same container setup without the TUI. If
 the runtime is missing, it prints the recommended commands or official URL and
 exits without installing host software.
 
 See the [screen-by-screen macOS walkthrough](docs/mac-setup-walkthrough.md) for
-the exact fresh-install flow and user-facing text.
+the exact fresh-install flow and user-facing text. The
+[setup flow matrix](docs/setup-flow-matrix.md) records the first-run,
+returning, repair, and additional-instance transitions shared across platforms.
 
 ---
 
@@ -137,18 +140,19 @@ omnideck <command> [flags]
 
 | Command | Description |
 |---|---|
-| `setup` | Set up one additional Omnideck instance (`install` remains an alias) |
-| `update` | Pull the latest image and recreate the container |
+| `setup` | Set up the first or one additional Omnideck instance (`install` remains an alias) |
+| `list` | List saved installations, their container status, and browser addresses (`instances` is an alias) |
+| `update` | Download and apply the latest Omnideck version |
 | `start` | Start a stopped container |
 | `stop` | Gracefully stop the running container |
 | `restart` | Stop then start |
-| `status` | Print a status table (container, dirs, Ollama, web UI port) |
+| `status` | Print a status table (installation, saved volumes, optional local AI, browser address) |
 | `logs` | Tail container logs |
-| `doctor` | Run parallel health checks and print a report |
+| `doctor` | Check runtime, instance, browser, storage, memory, and optional local AI; offer safe next steps |
 | `config show` | Pretty-print the saved config |
-| `config set <key> <value>` | Update a single config key |
+| `config set <key> <value>` | Save one setting and explain how to apply it |
 | `config path` | Print the config file path |
-| `uninstall` | Stop, remove container, optionally delete data dirs |
+| `uninstall` | Remove an installation, with backup and saved-data options |
 
 ### Global flags
 
@@ -167,7 +171,7 @@ omnideck <command> [flags]
 --image string    Override the container image (for testing alternate builds)
 ```
 
-`--engine` can select the runtime during the first setup. After that, Omnideck uses the saved shared runtime for every instance and will not silently switch existing installations.
+`--engine` can select the runtime during the first setup. Interactive first setup keeps both choices visible even when Docker or Podman is already installed. After an instance exists, Omnideck uses its saved shared runtime for every instance and will not silently switch existing installations or disconnect their saved container data.
 
 ### Examples
 
@@ -197,6 +201,15 @@ omnideck --name omnideck2 uninstall
 Choose **Setup** from the dashboard, or run `omnideck setup`, to create exactly one additional instance. Each setup suggests a unique container name (`omnideck2`, `omnideck3`, …), separate named volumes, and the next available browser port. Names and ports are checked before Omnideck changes anything; unrelated containers are never replaced.
 
 Commands that need an instance (e.g. `start`, `status`) show a picker when more than one instance exists, or accept `--name` to skip the prompt.
+Scripts and other non-interactive uses must pass `--name` when more than one
+instance exists; the CLI never tries to open an interactive picker without a terminal.
+
+Running bare `omnideck` routes to the right journey: first setup when nothing is
+configured, guided runtime setup when Docker/Podman is unavailable, Doctor when
+a saved container is missing, and the dashboard when the installation is healthy
+or deliberately stopped.
+
+See [docs/architecture.md](docs/architecture.md) for the workflow and package map.
 
 ---
 

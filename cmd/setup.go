@@ -2,8 +2,7 @@ package cmd
 
 import (
 	"fmt"
-	"runtime"
-	"strconv"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,19 +10,20 @@ import (
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/tui"
+	"github.com/omnideck-dev/cli/workflow"
 	"github.com/spf13/cobra"
 )
 
 var (
-	installImageFlag  string
-	installPlainFlag  bool
-	installPortFlag   string
-	installMemoryFlag string
-	installShmFlag    string
-	installEngineFlag string
+	setupImageFlag  string
+	setupPlainFlag  bool
+	setupPortFlag   string
+	setupMemoryFlag string
+	setupShmFlag    string
+	setupEngineFlag string
 )
 
-var installCmd = &cobra.Command{
+var setupCmd = &cobra.Command{
 	Use:          "setup",
 	Aliases:      []string{"install"},
 	Short:        "Set up an Omnideck instance",
@@ -32,38 +32,38 @@ var installCmd = &cobra.Command{
 
 Use --plain for non-interactive / CI-CD setup:
   omnideck setup --plain --name omnideck --port 2337`,
-	RunE: runInstall,
+	RunE: runSetup,
 }
 
 func init() {
-	rootCmd.AddCommand(installCmd)
-	installCmd.Flags().StringVar(&installImageFlag, "image", "", "override container image")
-	installCmd.Flags().BoolVar(&installPlainFlag, "plain", false, "non-interactive setup (no TUI) — for scripts and CI/CD")
-	installCmd.Flags().StringVar(&installPortFlag, "port", "", "web UI host port (default: 2337)")
-	installCmd.Flags().StringVar(&installMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
-	installCmd.Flags().StringVar(&installShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
-	installCmd.Flags().StringVar(&installEngineFlag, "engine", "", "runtime for the first setup: docker or podman (later instances reuse it)")
+	rootCmd.AddCommand(setupCmd)
+	setupCmd.Flags().StringVar(&setupImageFlag, "image", "", "advanced: use a different Omnideck container image")
+	setupCmd.Flags().BoolVar(&setupPlainFlag, "plain", false, "non-interactive setup (no TUI) — for scripts and CI/CD")
+	setupCmd.Flags().StringVar(&setupPortFlag, "port", "", "web UI host port (default: 2337)")
+	setupCmd.Flags().StringVar(&setupMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
+	setupCmd.Flags().StringVar(&setupShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
+	setupCmd.Flags().StringVar(&setupEngineFlag, "engine", "", "choose Docker or Podman during first setup (later instances reuse it)")
 }
 
-func runInstall(_ *cobra.Command, _ []string) error {
-	if installEngineFlag != "" && installEngineFlag != "docker" && installEngineFlag != "podman" {
+func runSetup(_ *cobra.Command, _ []string) error {
+	if setupEngineFlag != "" && setupEngineFlag != "docker" && setupEngineFlag != "podman" {
 		return fmt.Errorf("--engine must be docker or podman")
 	}
-	if RuntimeName != "" && installEngineFlag != "" && installEngineFlag != RuntimeName {
-		return fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --engine %s", RuntimeName, installEngineFlag)
+	instances, err := config.ListInstances()
+	if err != nil {
+		return fmt.Errorf("reading saved Omnideck installations: %w", err)
 	}
-	if installPlainFlag {
-		return runInstallPlain()
+	preferredEngine, err := setupRuntimePreference(RuntimeName, setupEngineFlag, len(instances))
+	if err != nil {
+		return err
+	}
+	if setupPlainFlag {
+		return runSetupPlain(preferredEngine, instances)
 	}
 
-	instances, _ := config.ListInstances()
-	preferredEngine := RuntimeName
-	if preferredEngine == "" {
-		preferredEngine = installEngineFlag
-	}
-	model := tui.NewDashboardModelForInstall(nil, instances, installImageFlag, preferredEngine)
+	model := tui.NewDashboardModelForSetup(nil, instances, setupImageFlag, preferredEngine)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	_, err := p.Run()
+	_, err = p.Run()
 	return err
 }
 
@@ -77,16 +77,12 @@ func runRuntimeSetup(instances []config.InstanceInfo) error {
 	return err
 }
 
-// runInstallPlain performs a non-interactive install suitable for CI/CD and scripts.
+// runSetupPlain performs non-interactive setup suitable for CI/CD and scripts.
 // All settings come from flags or sensible defaults.
-func runInstallPlain() error {
+func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) error {
 	probes := engine.ProbeAll()
 	available := engine.ReadyEngines(probes)
 	var eng engine.Engine
-	preferredEngine := RuntimeName
-	if preferredEngine == "" {
-		preferredEngine = installEngineFlag
-	}
 	for _, candidate := range available {
 		if preferredEngine == "" || candidate.Name() == preferredEngine {
 			eng = candidate
@@ -107,21 +103,21 @@ func runInstallPlain() error {
 		}
 	}
 
-	cfg := suggestNewInstanceDefaults()
+	cfg := workflow.NewInstanceDefaults(instances)
 	if nameFlag != "" {
 		cfg.ContainerName = nameFlag
 	}
-	if installPortFlag != "" {
-		cfg.WebUIPort = installPortFlag
+	if setupPortFlag != "" {
+		cfg.WebUIPort = setupPortFlag
 	}
-	if installMemoryFlag != "" {
-		cfg.Memory = installMemoryFlag
+	if setupMemoryFlag != "" {
+		cfg.Memory = setupMemoryFlag
 	}
-	if installShmFlag != "" {
-		cfg.ShmSize = installShmFlag
+	if setupShmFlag != "" {
+		cfg.ShmSize = setupShmFlag
 	}
-	if installImageFlag != "" {
-		cfg.Image = installImageFlag
+	if setupImageFlag != "" {
+		cfg.Image = setupImageFlag
 	}
 	if nameFlag == "" {
 		availableName, err := suggestAvailableRuntimeName(cfg.ContainerName, eng)
@@ -165,19 +161,7 @@ func runInstallPlain() error {
 			close(msgs)
 			return err
 		}},
-		{"Start Omnideck", func() error {
-			return eng.RunContainer(engine.RunOptions{
-				Name:        cfg.ContainerName,
-				Image:       cfg.Image,
-				Memory:      cfg.Memory,
-				ShmSize:     cfg.ShmSize,
-				HomeVolume:  cfg.HomeVolumeName(),
-				StateVolume: cfg.StateVolumeName(),
-				Restart:     "always",
-				WebUIPort:   cfg.WebUIPortOrDefault(),
-				Platform:    runtime.GOOS,
-			})
-		}},
+		{"Start Omnideck", func() error { return eng.RunContainer(workflow.RunOptions(cfg)) }},
 		{"Remember these settings", func() error { return saveInstalledConfig(savePath, cfg, eng.Name()) }},
 	}
 
@@ -192,6 +176,24 @@ func runInstallPlain() error {
 
 	fmt.Printf("\n✓  Omnideck is ready: http://localhost:%s\n", cfg.WebUIPortOrDefault())
 	return nil
+}
+
+// setupRuntimePreference keeps one runtime shared by existing instances while
+// allowing a genuinely fresh setup to choose again. A settings file can remain
+// after the final instance is removed, so it must not hide the other option.
+func setupRuntimePreference(saved, requested string, instanceCount int) (string, error) {
+	if instanceCount > 0 {
+		if saved != "" && requested != "" && requested != saved {
+			return "", fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --engine %s", saved, requested)
+		}
+		if saved != "" {
+			return saved, nil
+		}
+	}
+	if requested != "" {
+		return requested, nil
+	}
+	return "", nil
 }
 
 // saveInstalledConfig records the machine-wide runtime and the new instance.
@@ -249,44 +251,6 @@ func printRuntimeSetupGuidanceFromProbes(preferred string, probes []engine.Probe
 	fmt.Println("After manual setup, run this command again.")
 }
 
-// suggestNewInstanceDefaults inspects existing instances and returns a Config
-// pre-filled with a unique container name and web UI port.
-func suggestNewInstanceDefaults() *config.Config {
-	instances, _ := config.ListInstances()
-
-	// Collect names and ports already in use.
-	takenNames := map[string]bool{}
-	takenPorts := map[string]bool{}
-	maxPort := 2336
-	for _, inst := range instances {
-		if inst.Config == nil {
-			continue
-		}
-		takenNames[inst.Config.ContainerName] = true
-		takenPorts[inst.Config.WebUIPortOrDefault()] = true
-		if p, err := strconv.Atoi(inst.Config.WebUIPortOrDefault()); err == nil && p >= maxPort {
-			maxPort = p
-		}
-	}
-
-	name := "omnideck"
-	if takenNames[name] {
-		for i := 2; ; i++ {
-			name = fmt.Sprintf("omnideck%d", i)
-			if !takenNames[name] {
-				break
-			}
-		}
-	}
-
-	d := config.DefaultConfig()
-	d.ContainerName = name
-	if port, ok := checks.NextAvailablePort(maxPort+1, takenPorts); ok {
-		d.WebUIPort = port
-	}
-	return d
-}
-
 func suggestAvailableRuntimeName(initial string, eng engine.Engine) (string, error) {
 	instances, err := config.ListInstances()
 	if err != nil {
@@ -323,6 +287,15 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 	}
 	if !checks.ValidPort(cfg.WebUIPortOrDefault()) {
 		return fmt.Errorf("--port must be a number between 1 and 65535")
+	}
+	if !checks.ValidMemorySize(cfg.Memory) {
+		return fmt.Errorf("--memory must be a positive number and unit, such as 2g")
+	}
+	if !checks.ValidMemorySize(cfg.ShmSize) {
+		return fmt.Errorf("--shm-size must be a positive number and unit, such as 512m")
+	}
+	if strings.TrimSpace(cfg.Image) == "" {
+		return fmt.Errorf("--image cannot be empty")
 	}
 	instances, err := config.ListInstances()
 	if err != nil {

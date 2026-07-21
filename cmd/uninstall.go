@@ -12,31 +12,26 @@ import (
 	"strings"
 	"time"
 
-	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/styles"
-	"github.com/omnideck-dev/cli/tui"
+	"github.com/omnideck-dev/cli/workflow"
 	"github.com/spf13/cobra"
 )
 
-var uninstallCmd = &cobra.Command{
+var unsetupCmd = &cobra.Command{
 	Use:   "uninstall",
-	Short: "Stop and remove the Omnideck container",
+	Short: "Remove an Omnideck installation",
 	RunE:  runUninstall,
 }
 
 func init() {
-	rootCmd.AddCommand(uninstallCmd)
+	rootCmd.AddCommand(unsetupCmd)
 }
 
 func runUninstall(_ *cobra.Command, _ []string) error {
-	cfg, cfgPath, err := resolveUninstallTarget()
-	if err != nil {
-		if err.Error() == "aborted" {
-			fmt.Println("Aborted.")
-			return nil
-		}
+	if err := requireConfigMulti(); err != nil {
 		return err
 	}
+	cfg, cfgPath := LoadedConfig, ConfigPath
 
 	fmt.Printf("\nUninstalling instance %s (container: %s)\n\n",
 		styles.Active.Render(instanceNameFromPath(cfgPath)),
@@ -55,28 +50,28 @@ func runUninstall(_ *cobra.Command, _ []string) error {
 
 	// Stop container.
 	fmt.Printf("Stopping %s... ", cfg.ContainerName)
-	if err := eng.StopContainer(cfg.ContainerName); err != nil {
-		if isAlreadyStopped(err) {
-			fmt.Println(styles.Warning.Render("(already stopped)"))
-		} else {
-			fmt.Println(styles.CrossMark)
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		}
-	} else {
+	stopped, err := workflow.EnsureStopped(eng, cfg.ContainerName)
+	if err != nil {
+		fmt.Println(styles.CrossMark)
+		return err
+	}
+	if stopped {
 		fmt.Println(styles.CheckMark)
+	} else {
+		fmt.Println(styles.Warning.Render("(already stopped or removed)"))
 	}
 
 	// Remove container.
 	fmt.Printf("Removing container %s... ", cfg.ContainerName)
-	if err := eng.RemoveContainer(cfg.ContainerName); err != nil {
-		if isNotFound(err) {
-			fmt.Println(styles.Warning.Render("(already removed)"))
-		} else {
-			fmt.Println(styles.CrossMark)
-			fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
-		}
-	} else {
+	removed, err := workflow.EnsureRemoved(eng, cfg.ContainerName)
+	if err != nil {
+		fmt.Println(styles.CrossMark)
+		return fmt.Errorf("the container could not be removed, so its saved settings were kept: %w", err)
+	}
+	if removed {
 		fmt.Println(styles.CheckMark)
+	} else {
+		fmt.Println(styles.Warning.Render("(already removed)"))
 	}
 
 	homeVolume := cfg.HomeVolumeName()
@@ -89,8 +84,7 @@ func runUninstall(_ *cobra.Command, _ []string) error {
 			archivePath, err := backupVolumes(eng, homeVolume, stateVolume, cfg.ContainerName)
 			if err != nil {
 				fmt.Println(styles.CrossMark)
-				fmt.Fprintf(os.Stderr, "Warning: backup failed: %v\nData volumes were NOT deleted.\n", err)
-				goto removeConfig
+				return fmt.Errorf("backup failed; data volumes and saved settings were kept: %w", err)
 			}
 			fmt.Println(styles.CheckMark)
 			fmt.Printf("  Saved to: %s\n", styles.Active.Render(archivePath))
@@ -98,26 +92,23 @@ func runUninstall(_ *cobra.Command, _ []string) error {
 
 		for _, volume := range []string{homeVolume, stateVolume} {
 			if err := validateVolumeName(volume); err != nil {
-				fmt.Printf("Skipping %s: %v\n", volume, err)
-				continue
+				return fmt.Errorf("data volumes and saved settings were kept: %w", err)
 			}
 			fmt.Printf("Removing volume %s... ", volume)
 			if err := eng.RemoveVolume(volume); err != nil {
 				fmt.Println(styles.CrossMark)
-				fmt.Fprintf(os.Stderr, "  Warning: %v\n", err)
+				return fmt.Errorf("volume %s could not be removed, so saved settings were kept: %w", volume, err)
 			} else {
 				fmt.Println(styles.CheckMark)
 			}
 		}
 	}
 
-removeConfig:
-
 	// Remove config file.
 	fmt.Printf("Removing config %s... ", cfgPath)
 	if err := os.Remove(cfgPath); err != nil && !os.IsNotExist(err) {
 		fmt.Println(styles.CrossMark)
-		fmt.Fprintf(os.Stderr, "Warning: %v\n", err)
+		return fmt.Errorf("removing saved settings: %w", err)
 	} else {
 		fmt.Println(styles.CheckMark)
 	}
@@ -126,43 +117,8 @@ removeConfig:
 	return nil
 }
 
-// resolveUninstallTarget decides which instance to uninstall:
-// - If --config or --name was given (LoadedConfig is set), use it.
-// - If exactly one instance exists, use it.
-// - If multiple exist, run the picker.
-// - If none, error.
-func resolveUninstallTarget() (*config.Config, string, error) {
-	if LoadedConfig != nil {
-		return LoadedConfig, ConfigPath, nil
-	}
-
-	instances, err := config.ListInstances()
-	if err != nil {
-		return nil, "", fmt.Errorf("listing instances: %w", err)
-	}
-
-	switch len(instances) {
-	case 0:
-		return nil, "", fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")
-	case 1:
-		return instances[0].Config, instances[0].Path, nil
-	default:
-		chosen, ok := tui.RunPicker(
-			"Uninstall — Select an instance",
-			"Which instance do you want to remove?",
-			instances,
-		)
-		if !ok {
-			return nil, "", fmt.Errorf("aborted")
-		}
-		return chosen.Config, chosen.Path, nil
-	}
-}
-
 func instanceNameFromPath(path string) string {
-	base := strings.TrimSuffix(path, ".yaml")
-	base = strings.TrimPrefix(base, config.InstancesDir()+"/")
-	return base
+	return strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 }
 
 func promptYN(scanner *bufio.Scanner, prompt string) bool {
@@ -179,25 +135,27 @@ func promptYN(scanner *bufio.Scanner, prompt string) bool {
 // Returns the path to the created archive.
 func backupVolumes(eng interface {
 	ExportVolume(string, io.Writer) error
-}, homeVolume, stateVolume, containerName string) (string, error) {
+}, homeVolume, stateVolume, containerName string) (archivePath string, retErr error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		home = "."
 	}
 	timestamp := time.Now().Format("20060102-150405")
-	archivePath := filepath.Join(home, fmt.Sprintf("omnideck-backup-%s-%s.tar.gz", containerName, timestamp))
+	archivePath = filepath.Join(home, fmt.Sprintf("omnideck-backup-%s-%s.tar.gz", containerName, timestamp))
 
 	f, err := os.Create(archivePath)
 	if err != nil {
 		return "", fmt.Errorf("creating archive file: %w", err)
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+		if retErr != nil {
+			_ = os.Remove(archivePath)
+		}
+	}()
 
 	gz := gzip.NewWriter(f)
-	defer gz.Close()
-
 	tw := tar.NewWriter(gz)
-	defer tw.Close()
 
 	tmpDir, err := os.MkdirTemp("", "omnideck-volume-backup-*")
 	if err != nil {
@@ -231,6 +189,15 @@ func backupVolumes(eng interface {
 			return "", fmt.Errorf("archiving volume %s: %w", entry.volume, err)
 		}
 	}
+	if err := tw.Close(); err != nil {
+		return "", fmt.Errorf("finishing backup archive: %w", err)
+	}
+	if err := gz.Close(); err != nil {
+		return "", fmt.Errorf("compressing backup archive: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return "", fmt.Errorf("closing backup archive: %w", err)
+	}
 	return archivePath, nil
 }
 
@@ -263,15 +230,4 @@ func validateVolumeName(name string) error {
 		return fmt.Errorf("invalid volume name %q", name)
 	}
 	return nil
-}
-
-func isAlreadyStopped(err error) bool {
-	s := err.Error()
-	return strings.Contains(s, "not running") ||
-		strings.Contains(s, "is not running") ||
-		strings.Contains(s, "No such container")
-}
-
-func isNotFound(err error) bool {
-	return strings.Contains(err.Error(), "No such container")
 }
