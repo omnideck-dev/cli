@@ -2,7 +2,6 @@ package tui
 
 import (
 	"fmt"
-	"os"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -13,20 +12,7 @@ import (
 // openBrowserCmd launches the system browser for url.
 func openBrowserCmd(url string) tea.Cmd {
 	return func() tea.Msg {
-		var cmd *exec.Cmd
-		switch runtime.GOOS {
-		case "darwin":
-			cmd = exec.Command("open", url)
-		case "windows":
-			cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", url)
-		default:
-			if os.Getenv("WSL_DISTRO_NAME") != "" {
-				cmd = exec.Command("cmd.exe", "/c", "start", "", url)
-			} else {
-				cmd = exec.Command("xdg-open", url)
-			}
-		}
-		_ = cmd.Start()
+		_ = openBrowser(url)
 		return nil
 	}
 }

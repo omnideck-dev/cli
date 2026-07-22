@@ -91,7 +91,7 @@ steps; local AI remains optional and online AI continues to work.
 
 ### Build from source
 
-Requires Go 1.25+. A missing Docker/Podman installation can be handled by the
+Requires Go 1.25.10+. A missing Docker/Podman installation can be handled by the
 guided setup after the CLI is built. In the example below, the computer
 asks for a password only while copying the finished CLI into a shared apps
 folder. Run `omnideck` itself as the normal user.
@@ -99,7 +99,7 @@ folder. Run `omnideck` itself as the normal user.
 ```sh
 git clone https://github.com/omnideck-dev/cli
 cd omnideck-cli
-go build -ldflags="-s -w" -o omnideck .
+go build -trimpath -o omnideck .
 sudo mv omnideck /usr/local/bin/
 ```
 
@@ -108,6 +108,31 @@ sudo mv omnideck /usr/local/bin/
 ```sh
 omnideck --version
 ```
+
+### Verify a downloaded release
+
+Every release includes `SHA256SUMS` and one SPDX software bill of materials
+for each platform archive. Download `SHA256SUMS` beside the archive, then check
+that its recorded SHA-256 value matches the file you received.
+
+On Windows, PowerShell can print the archive's value:
+
+```powershell
+Get-FileHash .\omnideck-windows-amd64.zip -Algorithm SHA256
+```
+
+GitHub also records signed build provenance for both the archive and the
+executable inside it. If GitHub CLI is installed, extract the archive and run:
+
+```powershell
+gh attestation verify .\omnideck.exe --repo omnideck-dev/cli
+```
+
+The checksum catches a changed download. The attestation proves which
+repository, commit, and GitHub Actions workflow built it; neither check alone
+proves that software is harmless. Preview Windows builds do not yet have a
+Microsoft Authenticode publisher signature. Do not bypass a malware warning.
+See [release security and Windows detections](docs/release-security.md).
 
 ---
 

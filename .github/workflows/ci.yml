@@ -7,6 +7,22 @@ on:
     branches: ["main"]
 
 jobs:
+  vulnerability-check:
+    name: vulnerability-check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Scan reachable dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
   # ── Unit + smoke tests on natively-available runners ───────────
   # macos-13 (Intel) is intentionally omitted: GitHub's Intel macOS
   # runners are scarce and frequently fail to allocate (jobs queue for
@@ -28,9 +44,11 @@ jobs:
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
@@ -58,9 +76,11 @@ jobs:
           - goos: windows
             goarch: arm64
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 

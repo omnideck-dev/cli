@@ -8,12 +8,18 @@ on:
 permissions:
   contents: read
 
+env:
+  # Keep archive timestamps and tool output independent of the runner locale.
+  TZ: UTC
+
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Validate semantic version tag
         shell: bash
@@ -23,9 +29,14 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
+
+      - name: Download and verify modules
+        run: |
+          go mod download
+          go mod verify
 
       - name: Vet
         run: go vet ./...
@@ -33,9 +44,16 @@ jobs:
       - name: Test
         run: go test ./...
 
+      - name: Scan reachable dependencies
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+
   build:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -54,13 +72,27 @@ jobs:
             goarch: arm64
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.mod
 
-      - name: Build archive
+      - name: Add Windows application metadata
+        if: matrix.goos == 'windows'
+        env:
+          TARGET_ARCH: ${{ matrix.goarch }}
+        run: |
+          go tool go-winres make \
+            --arch "${TARGET_ARCH}" \
+            --out rsrc \
+            --file-version git-tag \
+            --product-version git-tag
+
+      - name: Build executable
         shell: bash
         env:
           GOOS: ${{ matrix.goos }}
@@ -68,9 +100,10 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           VERSION=${GITHUB_REF_NAME}
-          COMMIT=$(git rev-parse --short HEAD)
-          DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          LDFLAGS="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
+          COMMIT=$(git rev-parse --short=12 HEAD)
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          DATE=$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)
+          LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
           mkdir -p dist
 
           BIN=omnideck
@@ -78,42 +111,94 @@ jobs:
             BIN=omnideck.exe
           fi
 
-          go build -ldflags "${LDFLAGS}" -o "dist/${BIN}" .
+          # Keep Go build/symbol metadata for transparency and malware-analysis
+          # tooling. -trimpath removes runner-specific filesystem paths.
+          go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "dist/${BIN}" .
+          touch -d "@${SOURCE_DATE_EPOCH}" "dist/${BIN}"
+          sha256sum "dist/${BIN}"
+          go version -m "dist/${BIN}"
 
-          ARCHIVE=omnideck-${{ matrix.goos }}-${{ matrix.goarch }}
-          if [ "${{ matrix.goos }}" = "windows" ]; then
-            (cd dist && zip "${ARCHIVE}.zip" "${BIN}")
-          else
-            chmod +x "dist/${BIN}"
-            tar -czf "dist/${ARCHIVE}.tar.gz" -C dist "${BIN}"
+      - name: Generate executable SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          file: dist/${{ matrix.goos == 'windows' && 'omnideck.exe' || 'omnideck' }}
+          syft-version: v1.49.0
+          format: spdx-json
+          output-file: dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Attest executable provenance
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: dist/${{ matrix.goos == 'windows' && 'omnideck.exe' || 'omnideck' }}
+
+      - name: Attest executable SBOM
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: dist/${{ matrix.goos == 'windows' && 'omnideck.exe' || 'omnideck' }}
+          sbom-path: dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.spdx.json
+
+      - name: Create archive
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
+          BIN=omnideck
+          if [ "${GOOS}" = "windows" ]; then
+            BIN=omnideck.exe
           fi
 
-      - name: Upload archive artifact
-        uses: actions/upload-artifact@v7
+          ARCHIVE=omnideck-${GOOS}-${GOARCH}
+          if [ "${GOOS}" = "windows" ]; then
+            (cd dist && zip -X -q "${ARCHIVE}.zip" "${BIN}")
+          else
+            chmod +x "dist/${BIN}"
+            tar --sort=name \
+              --mtime="@${SOURCE_DATE_EPOCH}" \
+              --owner=0 --group=0 --numeric-owner \
+              -cf - -C dist "${BIN}" | gzip -n > "dist/${ARCHIVE}.tar.gz"
+          fi
+
+      - name: Upload release artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: omnideck-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.*
+          path: |
+            dist/omnideck-${{ matrix.goos }}-${{ matrix.goarch }}.*
           if-no-files-found: error
 
   publish:
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       actions: read
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download archives
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           path: dist
           merge-multiple: true
 
       - name: Create checksums
         working-directory: dist
-        run: sha256sum omnideck-* > SHA256SUMS
+        run: find . -maxdepth 1 -type f -name 'omnideck-*' -printf '%f\n' | LC_ALL=C sort | xargs sha256sum > SHA256SUMS
+
+      - name: Attest release artifacts
+        uses: actions/attest@f7c74d28b9d84cb8768d0b8ca14a4bac6ef463e6 # v4.2.0
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS
 
       - name: Publish GitHub release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: dist/*
           fail_on_unmatched_files: true
