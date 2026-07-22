@@ -825,6 +825,53 @@ func TestRuntimeWaitingCopyMatchesTheAction(t *testing.T) {
 	}
 }
 
+func TestRuntimeNotReadyCopyPointsToTheVisibleOptionAndExactKeys(t *testing.T) {
+	tests := []struct {
+		name  string
+		plans []engine.SetupPlan
+		want  []string
+		not   []string
+	}{
+		{
+			name:  "missing",
+			plans: []engine.SetupPlan{{Title: "Docker", State: engine.RuntimeMissing}},
+			want:  []string{"press Enter to review the installation steps", "press r to check again"},
+			not:   []string{"below"},
+		},
+		{
+			name: "multiple choices",
+			plans: []engine.SetupPlan{
+				{Title: "Podman", State: engine.RuntimeStopped},
+				{Title: "Docker", State: engine.RuntimeStopped},
+			},
+			want: []string{"options above", "press Enter to review", "press r to check again"},
+			not:  []string{"below"},
+		},
+		{
+			name:  "stopped",
+			plans: []engine.SetupPlan{{Title: "Docker", State: engine.RuntimeStopped}},
+			want:  []string{"Press Enter to review the start steps", "press r to check again"},
+			not:   []string{"below"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			message := runtimeNotReadyMessage(tt.plans, "")
+			for _, want := range tt.want {
+				if !strings.Contains(message, want) {
+					t.Fatalf("message %q does not contain %q", message, want)
+				}
+			}
+			for _, unwanted := range tt.not {
+				if strings.Contains(message, unwanted) {
+					t.Fatalf("message %q contains misleading %q", message, unwanted)
+				}
+			}
+		})
+	}
+}
+
 func TestRepeatedEnterAfterOpeningInstallerDoesNotDownloadAgain(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
