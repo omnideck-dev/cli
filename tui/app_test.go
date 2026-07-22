@@ -102,7 +102,7 @@ func TestSetupViewFitsAStandardTerminalAndKeepsItsFooter(t *testing.T) {
 		t.Fatalf("setup footer is missing primary actions:\n%s", plain)
 	}
 
-	m.setupModel.runtimeChoice = 1
+	m.setupModel.runtimeChoice = 0
 	m.setupModel.runtimeSetupStage = runtimeSetupReview
 	view = m.View()
 	plain = ansi.Strip(view)

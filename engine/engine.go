@@ -44,6 +44,9 @@ type Engine interface {
 	ExportVolume(name string, w io.Writer) error
 	PullImage(image string, msgs chan<- string) error
 	RunContainer(opts RunOptions) error
+	// CheckOllamaConnection tests the same container-to-host address Omnideck
+	// receives. It runs from inside an existing Omnideck container.
+	CheckOllamaConnection(name string) error
 	StopContainer(name string) error
 	StartContainer(name string) error
 	RemoveContainer(name string) error
@@ -101,7 +104,7 @@ func ByName(name string) (Engine, error) {
 		}
 		return e, nil
 	default:
-		return nil, fmt.Errorf("unknown engine %q (must be docker or podman)", name)
+		return nil, fmt.Errorf("unknown container runtime %q (must be docker or podman)", name)
 	}
 }
 

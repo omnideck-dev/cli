@@ -317,11 +317,10 @@ func TestReadyRuntimeDefaultMatchesThePlatformRecommendation(t *testing.T) {
 	}
 }
 
-func TestFreshSetupCanChooseMissingPodmanWhenDockerIsReady(t *testing.T) {
+func TestFreshSetupUsesOnlyInstalledRuntimeWithoutOfferingMissingAlternative(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
 	docker := &mockEngine{name: "docker"}
-	m.quickCheckReady = true
 	m.eng = docker
 	m.availableEngines = []engine.Engine{docker}
 	m.runtimeProbes = []engine.ProbeResult{
@@ -329,10 +328,31 @@ func TestFreshSetupCanChooseMissingPodmanWhenDockerIsReady(t *testing.T) {
 		{Name: "docker", State: engine.RuntimeReady},
 	}
 
-	if view := m.tnQuickCheck(100); !strings.Contains(view, "Set up Podman instead") {
-		t.Fatalf("fresh setup does not show the Podman choice:\n%s", view)
+	if alternative := m.setupAlternativeRuntime(); alternative != "" {
+		t.Fatalf("missing runtime was offered as alternative: %q", alternative)
+	}
+	newModel, _ := m.updateQuickCheck(allQuickCheckDone{})
+	nm := newModel.(SetupModel)
+	if nm.Stage != SetupStageSettings || nm.eng.Name() != "docker" || nm.quickCheckReady {
+		t.Fatalf("single installed runtime did not continue automatically: stage=%d engine=%v ready=%t", nm.Stage, nm.eng, nm.quickCheckReady)
+	}
+}
+
+func TestFreshSetupCanChooseSecondInstalledRuntimeThatNeedsAttention(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	m := NewSetupModel(SetupRequest{})
+	docker := &mockEngine{name: "docker"}
+	m.quickCheckReady = true
+	m.eng = docker
+	m.availableEngines = []engine.Engine{docker}
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMachineStopped},
+		{Name: "docker", State: engine.RuntimeReady},
 	}
 
+	if view := m.tnQuickCheck(100); !strings.Contains(view, "Set up Podman instead") {
+		t.Fatalf("second installed runtime is not available as a choice:\n%s", view)
+	}
 	newModel, cmd := m.updateQuickCheck(tea.KeyMsg{Type: tea.KeyTab})
 	if cmd != nil {
 		t.Fatal("choosing the alternative should not run anything")
@@ -344,7 +364,7 @@ func TestFreshSetupCanChooseMissingPodmanWhenDockerIsReady(t *testing.T) {
 
 	newModel, cmd = nm.updateQuickCheck(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd != nil {
-		t.Fatal("opening Podman setup should not install anything immediately")
+		t.Fatal("opening Podman setup should not change anything immediately")
 	}
 	nm = newModel.(SetupModel)
 	if nm.Stage != SetupStageRuntime || nm.preferredEngine != "podman" || len(nm.runtimePlans) != 1 || nm.runtimePlans[0].Runtime != "podman" {
@@ -368,8 +388,9 @@ func TestRecommendedNameSkipsUnrelatedContainer(t *testing.T) {
 	}
 }
 
-func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
+func TestNoInstalledRuntimeShowsOnlyTheEasiestPlatformSetup(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
 		{Name: "docker", State: engine.RuntimeMissing},
@@ -377,11 +398,62 @@ func TestRuntimeSetupExplainsWhyAndRecommendsPlatformRuntime(t *testing.T) {
 	m.configureRuntimeSetup()
 
 	view := m.tnRuntimeSetup(80)
-	if !strings.Contains(view, "Choose Podman or Docker") || !strings.Contains(view, "Why this is needed") || !strings.Contains(view, "isolated") {
+	if !strings.Contains(view, "Set up Docker") || !strings.Contains(view, "Why this is needed") || !strings.Contains(view, "isolated") {
 		t.Fatalf("runtime setup must explain why the dependency exists:\n%s", view)
 	}
-	if len(m.runtimePlans) != 2 {
-		t.Fatalf("runtime plan count = %d, want 2", len(m.runtimePlans))
+	if len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "docker" || m.preferredEngine != "docker" {
+		t.Fatalf("Windows default was not reduced to one simple path: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
+	}
+	if strings.Contains(view, "Install Podman") || strings.Contains(view, "Set up Podman") || strings.Contains(view, "Choose one") {
+		t.Fatalf("no-runtime setup still exposed an unnecessary choice:\n%s", view)
+	}
+}
+
+func TestTwoInstalledRuntimesThatNeedAttentionRemainAChoice(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMachineStopped},
+		{Name: "docker", State: engine.RuntimeStopped},
+	}
+	m.configureRuntimeSetup()
+
+	if len(m.runtimePlans) != 2 || m.preferredEngine != "" {
+		t.Fatalf("two installed runtimes should remain a choice: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
+	}
+	if view := m.tnRuntimeSetup(100); !strings.Contains(view, "Choose Podman or Docker") {
+		t.Fatalf("two installed runtimes did not show a picker:\n%s", view)
+	}
+}
+
+func TestOneInstalledRuntimeThatNeedsAttentionIsTheOnlyRepairPath(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMachineStopped},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	if len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "podman" || m.preferredEngine != "podman" {
+		t.Fatalf("installed Podman was not selected for repair: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
+	}
+	if !strings.Contains(m.runtimePlans[0].Recommendation, "already installed") {
+		t.Fatalf("repair path does not explain the automatic choice: %#v", m.runtimePlans[0])
+	}
+}
+
+func TestRuntimeOverrideWinsWhenNothingIsInstalled(t *testing.T) {
+	m := NewSetupModel(SetupRequest{PreferredEngine: "podman"})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	if len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "podman" {
+		t.Fatalf("--runtime podman did not override Windows default: %#v", m.runtimePlans)
 	}
 }
 
@@ -441,8 +513,9 @@ func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
 	}
 }
 
-func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
+func TestRuntimeCommandsHiddenUntilRequested(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04"}
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
 		{Name: "docker", State: engine.RuntimeMissing},
@@ -450,21 +523,73 @@ func TestRuntimeTechnicalDetailsHiddenUntilRequested(t *testing.T) {
 	m.configureRuntimeSetup()
 
 	plan := m.runtimePlans[m.runtimeChoice]
-	detail := plan.URL
-	if len(plan.Commands) > 0 {
-		detail = plan.Commands[0].Display
+	if len(plan.Commands) == 0 {
+		t.Fatalf("selected setup plan has no command: %#v", plan)
 	}
-	if detail == "" {
-		t.Fatalf("selected setup plan has no command or URL: %#v", plan)
-	}
+	detail := plan.Commands[0].Display
 
-	if view := m.tnRuntimeSetup(100); strings.Contains(view, "Technical details") || strings.Contains(view, detail) {
-		t.Fatalf("technical details should be hidden by default:\n%s", view)
+	if view := m.tnRuntimeSetup(100); strings.Contains(view, "Commands Omnideck will run") || strings.Contains(view, detail) {
+		t.Fatalf("commands should be hidden by default:\n%s", view)
 	}
 	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	nm := newModel.(SetupModel)
-	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Technical details") || !strings.Contains(strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields(detail), "")) {
-		t.Fatalf("technical details should show the selected plan's command or URL when requested:\n%s", view)
+	if view := nm.tnRuntimeSetup(100); !strings.Contains(view, "Commands Omnideck will run") || !strings.Contains(strings.Join(strings.Fields(view), ""), strings.Join(strings.Fields(detail), "")) {
+		t.Fatalf("commands should be available when requested:\n%s", view)
+	}
+}
+
+func TestManualRuntimeInstallDoesNotOfferRawURLDetails(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.preferredEngine = "podman"
+	m.runtimeProbes = []engine.ProbeResult{{Name: "podman", State: engine.RuntimeMissing}}
+	m.configureRuntimeSetup()
+	if m.runtimeDetailsAvailable() {
+		t.Fatal("a manual installer URL should not be presented as useful setup details")
+	}
+	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	nm := newModel.(SetupModel)
+	view := nm.tnRuntimeSetup(100)
+	if nm.runtimeShowDetails || strings.Contains(view, "github.com/containers/podman/releases") || strings.Contains(view, "Technical details") {
+		t.Fatalf("manual Windows setup exposed raw installer details:\n%s", view)
+	}
+}
+
+func TestWindowsPodmanDoesNotClaimHostOnlyOllamaIsReady(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.eng = &mockEngine{name: "podman"}
+	m.ollamaOK = true
+	m.ollamaHost = "127.0.0.1:11434"
+	m.memMB = 4096
+	m.memChecked = true
+
+	quickCheck := m.tnQuickCheck(100)
+	if !strings.Contains(quickCheck, "connection checked after start") || strings.Contains(quickCheck, "Ollama is ready") {
+		t.Fatalf("Windows Podman preflight overstated Ollama reachability:\n%s", quickCheck)
+	}
+
+	m.buildReviewWarnings()
+	review := m.tnReview(100)
+	compactReview := strings.Join(strings.Fields(review), " ")
+	for _, want := range []string{"Local AI", "real connection from inside Podman"} {
+		if !strings.Contains(compactReview, want) {
+			t.Fatalf("Windows Podman Ollama check explanation is missing %q:\n%s", want, review)
+		}
+	}
+
+	m.ollamaContainerChecked = true
+	m.ollamaContainerOK = false
+	failed := m.tnComplete(100)
+	for _, want := range []string{"Local AI needs one Windows setting", "environment variables", "OLLAMA_HOST", "0.0.0.0:11434", "public networks"} {
+		if !strings.Contains(failed, want) {
+			t.Fatalf("failed in-container check is missing %q:\n%s", want, failed)
+		}
+	}
+
+	m.ollamaContainerOK = true
+	if view := m.tnComplete(100); strings.Contains(view, "Local AI needs one Windows setting") {
+		t.Fatalf("successful in-container check still showed repair steps:\n%s", view)
 	}
 }
 

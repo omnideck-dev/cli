@@ -74,18 +74,21 @@ type SetupModel struct {
 	setupMode SetupMode
 
 	// QuickCheck state.
-	eng                   engine.Engine
-	engErr                error
-	availableEngines      []engine.Engine // all detected engines (for switching)
-	quickCheckReady       bool            // true when checks pass and user must confirm engine
-	quickCheckAlternative string          // missing runtime explicitly selected during first setup
-	permChecking          bool            // true while re-checking permission after engine switch
-	permErr               error
-	ollamaOK              bool
-	ollamaHost            string
-	memMB                 int64
-	memWarning            string
-	quickCheckDone        int // count of completed checks
+	eng                    engine.Engine
+	engErr                 error
+	availableEngines       []engine.Engine // all detected engines (for switching)
+	quickCheckReady        bool            // true when checks pass and user must confirm engine
+	quickCheckAlternative  string          // missing runtime explicitly selected during first setup
+	permChecking           bool            // true while re-checking permission after engine switch
+	permErr                error
+	ollamaOK               bool
+	ollamaContainerChecked bool
+	ollamaContainerOK      bool
+	ollamaHost             string
+	memMB                  int64
+	memWarning             string
+	memChecked             bool
+	quickCheckDone         int // count of completed checks
 
 	// Runtime setup state.
 	runtimeProbes       []engine.ProbeResult
@@ -107,8 +110,7 @@ type SetupModel struct {
 	settingsAdvanced bool
 
 	// Review.
-	reviewWarnings    []string
-	reviewShowDetails bool
+	reviewWarnings []string
 
 	// Apply setup.
 	spinnerModel      SpinnerModel

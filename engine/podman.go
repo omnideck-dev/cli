@@ -106,6 +106,10 @@ func (e *PodmanEngine) RunContainer(opts RunOptions) error {
 	return nil
 }
 
+func (e *PodmanEngine) CheckOllamaConnection(name string) error {
+	return checkContainerOllama("podman", name)
+}
+
 func (e *PodmanEngine) StopContainer(name string) error {
 	cmd := buildCmd("podman", "stop", name)
 	out, err := cmd.CombinedOutput()
@@ -207,17 +211,7 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 	// OLLAMA_HOST — always set. Podman resolves host.containers.internal when
 	// it can determine a route back to the host; this is environment-dependent,
 	// not a reliable major-version boundary.
-	ollamaHost := opts.OllamaHost
-	if ollamaHost == "" {
-		if opts.Platform == "darwin" {
-			ollamaHost = "host.docker.internal:11434"
-		} else {
-			ollamaHost = "host.containers.internal:11434"
-		}
-	}
-	if !strings.HasPrefix(ollamaHost, "http") {
-		ollamaHost = "http://" + ollamaHost
-	}
+	ollamaHost := normalizeOllamaURL(opts.OllamaHost, "podman", opts.Platform)
 	args = append(args, "-e", "OLLAMA_HOST="+ollamaHost)
 
 	// PORT tells the container app which internal port to bind on.

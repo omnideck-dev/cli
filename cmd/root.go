@@ -63,7 +63,7 @@ func init() {
 	rootCmd.PersistentFlags().StringVar(&cfgPath, "config", "", "Explicit path to a config file")
 	rootCmd.PersistentFlags().StringVarP(&nameFlag, "name", "n", "", "Instance name (e.g. omnideck, staging)")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable color/style output")
-	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print raw engine commands and output")
+	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print raw container runtime commands and output")
 	rootCmd.Flags().Bool("version", false, "Print version and exit")
 
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {

@@ -134,3 +134,15 @@ func TestStepCmdError(t *testing.T) {
 		t.Errorf("index: got %d, want 1", failed.Index)
 	}
 }
+
+func TestSpinnerWarningCompletesAnOptionalStep(t *testing.T) {
+	m := NewSpinnerModel([]string{"Check optional service"}, nil)
+	m, _ = m.Update(StepWarningMsg{Index: 0, Detail: "not connected (optional)"})
+	if !m.IsDone() || m.Steps[0].Status != StepWarning {
+		t.Fatalf("warning step did not complete: %#v", m.Steps[0])
+	}
+	view := m.View()
+	if !strings.Contains(view, "!") || !strings.Contains(view, "not connected (optional)") {
+		t.Fatalf("warning step is not clear:\n%s", view)
+	}
+}

@@ -60,8 +60,63 @@ func TestWindowsRecommendsDockerDesktop(t *testing.T) {
 	if len(plans[0].Steps) != 3 || !plans[0].DirectDownload || !strings.Contains(plans[0].URL, "podman-installer-windows-amd64.msi") {
 		t.Fatalf("Podman alternative must have its own plain walkthrough: %#v", plans[0])
 	}
+	if !strings.Contains(plans[0].Description, "WSL 2") || !strings.Contains(plans[0].SafetyNote, "Hyper-V") || !strings.Contains(plans[0].SafetyNote, "Windows Pro or Enterprise") {
+		t.Fatalf("Podman alternative must recommend WSL 2 and explain Hyper-V: %#v", plans[0])
+	}
 	if len(plans[1].Steps) != 3 || !strings.Contains(plans[1].PermissionNote, "administrator") {
 		t.Fatalf("Docker recommendation must explain its Windows setup: %#v", plans[1])
+	}
+}
+
+func TestDefaultRuntimeForSetupUsesInstalledRuntimeBeforePlatformDefault(t *testing.T) {
+	windows := HostPlatform{OS: "windows", Arch: "amd64"}
+	tests := []struct {
+		name   string
+		probes []ProbeResult
+		want   string
+	}{
+		{
+			name: "nothing installed uses Windows default",
+			probes: []ProbeResult{
+				{Name: "podman", State: RuntimeMissing},
+				{Name: "docker", State: RuntimeMissing},
+			},
+			want: "docker",
+		},
+		{
+			name: "one installed runtime is repaired",
+			probes: []ProbeResult{
+				{Name: "podman", State: RuntimeMachineStopped},
+				{Name: "docker", State: RuntimeMissing},
+			},
+			want: "podman",
+		},
+		{
+			name: "two installed runtimes require a choice",
+			probes: []ProbeResult{
+				{Name: "podman", State: RuntimeMachineStopped},
+				{Name: "docker", State: RuntimeStopped},
+			},
+			want: "",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := DefaultRuntimeForSetup(tt.probes, windows); got != tt.want {
+				t.Fatalf("DefaultRuntimeForSetup() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestWindowsPodmanMachineSetupExplainsItsProvider(t *testing.T) {
+	plans := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMachineMissing}}, HostPlatform{OS: "windows", Arch: "amd64"})
+	if len(plans) != 1 {
+		t.Fatalf("plans = %#v", plans)
+	}
+	plan := plans[0]
+	if !strings.Contains(plan.Steps[0], "WSL 2") || !strings.Contains(plan.SafetyNote, "Hyper-V") || !strings.Contains(plan.PermissionNote, "administrator") {
+		t.Fatalf("Windows Podman machine guidance is incomplete: %#v", plan)
 	}
 }
 

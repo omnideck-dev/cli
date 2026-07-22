@@ -92,13 +92,17 @@ func (m SetupModel) tnRuntimeSetup(w int) string {
 			sb.WriteString("\n  " + styles.TNYellowTxt.Render("Before you continue") + "\n")
 			writeTNWrapped(&sb, w, "  ", "  ", plan.SafetyNote, styles.TNDimText)
 		}
-		if m.runtimeShowDetails {
-			sb.WriteString("\n  " + styles.TNFaintText.Render("Technical details") + "\n")
+		if m.runtimeShowDetails && m.runtimeDetailsAvailable() {
+			heading := "Commands Omnideck will run"
+			if m.runtimeLastError != "" {
+				heading = "Details for support"
+			}
+			sb.WriteString("\n  " + styles.TNFaintText.Render(heading) + "\n")
 			for _, command := range plan.Commands {
 				writeTNWrapped(&sb, w, "    $ ", "      ", command.Display, styles.TNFaintText)
 			}
-			if plan.URL != "" {
-				writeTNWrapped(&sb, w, "    ", "    ", plan.URL, styles.TNFaintText)
+			if m.runtimeLastError != "" {
+				writeTNWrapped(&sb, w, "    ", "    ", m.runtimeLastError, styles.TNRedTxt)
 			}
 		}
 		return sb.String()
@@ -145,13 +149,14 @@ func (m SetupModel) tnRuntimeSetup(w int) string {
 			if plan.Recommendation != "" {
 				writeTNWrapped(&sb, w, "      ", "      ", plan.Recommendation, styles.TNGreenTxt)
 			}
-			if m.runtimeShowDetails {
-				sb.WriteString("      " + styles.TNFaintText.Render("Technical details") + "\n")
+			if m.runtimeShowDetails && m.runtimeDetailsAvailable() {
+				heading := "Commands Omnideck will run"
+				if m.runtimeLastError != "" {
+					heading = "Details for support"
+				}
+				sb.WriteString("      " + styles.TNFaintText.Render(heading) + "\n")
 				for _, command := range plan.Commands {
 					writeTNWrapped(&sb, w, "        $ ", "          ", command.Display, styles.TNFaintText)
-				}
-				if plan.URL != "" {
-					writeTNWrapped(&sb, w, "        ", "        ", plan.URL, styles.TNFaintText)
 				}
 				if m.runtimeLastError != "" {
 					writeTNWrapped(&sb, w, "        ", "        ", m.runtimeLastError, styles.TNRedTxt)
@@ -236,15 +241,21 @@ func (m SetupModel) tnQuickCheck(_ int) string {
 
 	ollamaDone := m.ollamaHost != ""
 	ollamaDetail := "not found — you can add it later"
+	ollamaWarn := !m.ollamaOK && ollamaDone
 	if m.ollamaOK {
-		ollamaDetail = "Ollama is ready"
+		ollamaDetail = "Ollama is running on this computer"
+		if m.windowsPodmanOllamaAwaitingCheck() {
+			ollamaDetail = "running on Windows — connection checked after start"
+		}
 	}
-	rows = append(rows, checkRow{"Local AI (optional)", ollamaDetail, m.ollamaOK, ollamaDone, !m.ollamaOK && ollamaDone})
+	rows = append(rows, checkRow{"Local AI (optional)", ollamaDetail, m.ollamaOK && !ollamaWarn, ollamaDone, ollamaWarn})
 
-	memDone := m.memMB > 0
-	memDetail := "checking…"
-	if memDone {
+	memDone := m.memChecked
+	memDetail := m.memWarning
+	if m.memMB > 0 {
 		memDetail = fmt.Sprintf("%d MB", m.memMB)
+	} else if memDone && memDetail == "" {
+		memDetail = "could not read memory"
 	}
 	rows = append(rows, checkRow{"Available memory", memDetail, m.memWarning == "", memDone, m.memWarning != "" && memDone})
 
@@ -366,7 +377,6 @@ func (m SetupModel) tnReview(w int) string {
 		engName = runtimeNameForPeople(m.eng.Name())
 	}
 
-	cfg := m.buildConfig()
 	sb.WriteString("  " + styles.TNTextBold.Render("Ready to set up Omnideck") + "\n")
 	sb.WriteString("  " + styles.TNDimText.Render("Here is what Omnideck will do after you press Enter:") + "\n\n")
 	sb.WriteString("    1. Download the Omnideck app.\n")
@@ -380,14 +390,9 @@ func (m SetupModel) tnReview(w int) string {
 	for _, warn := range m.reviewWarnings {
 		sb.WriteString("\n  " + styles.TNYellowTxt.Render("⚠  ") + styles.TNDimText.Render(warn) + "\n")
 	}
-
-	if m.reviewShowDetails {
-		sb.WriteString("\n  " + styles.TNFaintText.Render("Technical details") + "\n")
-		sb.WriteString(kv("Computer", runtime.GOOS+" / "+runtime.GOARCH))
-		sb.WriteString(kv("File storage", cfg.HomeVolumeName()))
-		sb.WriteString(kv("App storage", cfg.StateVolumeName()))
-		sb.WriteString(kv("Shared memory", m.inputs[inputShmSize].Value()))
-		sb.WriteString(kv("Download", cfg.Image))
+	if m.windowsPodmanOllamaAwaitingCheck() {
+		sb.WriteString("\n  " + styles.TNTextSub.Render("Local AI") + "\n")
+		writeTNWrapped(&sb, w, "  ", "  ", "Ollama is running on Windows. After Omnideck starts, setup will check the real connection from inside Podman.", styles.TNDimText)
 	}
 
 	sb.WriteString("\n  " + styles.TNGreenTxt.Render("Press Enter to start setup. Nothing starts before then.") + "\n")
@@ -405,15 +410,35 @@ func (m SetupModel) tnApplying(_ int) string {
 	return sb.String()
 }
 
-func (m SetupModel) tnComplete(_ int) string {
+func (m SetupModel) tnComplete(w int) string {
 	var sb strings.Builder
 	sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render("Omnideck is ready!") + "\n\n")
 
 	sb.WriteString("  " + styles.TNDimText.Render("Open Omnideck in your browser:") + "\n")
 	sb.WriteString("  " + styles.TNBlueTxt.Render("http://localhost:"+m.inputs[inputWebUIPort].Value()) + "\n\n")
 	sb.WriteString("  " + styles.TNDimText.Render("Your files and settings will be kept when Omnideck updates.") + "\n")
+	if m.windowsPodmanOllamaNeedsSetup() {
+		writeWindowsPodmanOllamaSteps(&sb, w)
+	}
 	sb.WriteString("  " + styles.TNDimText.Render("Press any key to return to the dashboard.") + "\n")
 	return sb.String()
+}
+
+func writeWindowsPodmanOllamaSteps(sb *strings.Builder, w int) {
+	sb.WriteString("\n  " + styles.TNYellowTxt.Render("Local AI needs one Windows setting") + "\n")
+	writeTNWrapped(sb, w, "  ", "  ", "Omnideck checked from inside Podman and could not connect to Ollama on Windows.", styles.TNDimText)
+	steps := []string{
+		"Quit Ollama from the small icons near the Windows clock.",
+		"Open the Start menu, search for environment variables, and choose Edit environment variables for your account.",
+		"Under User variables, select New. Enter OLLAMA_HOST as the name and 0.0.0.0:11434 as the value.",
+		"Select OK, then open Ollama again from the Start menu.",
+	}
+	for i, step := range steps {
+		prefix := fmt.Sprintf("    %d. ", i+1)
+		writeTNWrapped(sb, w, prefix, strings.Repeat(" ", lipgloss.Width(prefix)), step, styles.TNDimText)
+	}
+	writeTNWrapped(sb, w, "  ", "  ", "This setting can let other computers reach Ollama if Windows Firewall allows it. Do not allow access on public networks. Online AI works without this setting.", styles.TNFaintText)
+	sb.WriteString("\n")
 }
 
 func (m SetupModel) tnFailed(_ int) string {

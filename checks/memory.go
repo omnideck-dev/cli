@@ -13,26 +13,32 @@ import (
 const memWarnThresholdMB = 512
 
 // AvailableMemoryMB returns the available system memory in megabytes.
-// On Linux it parses /proc/meminfo; on macOS it uses vm_stat.
+// On Linux it parses /proc/meminfo, on macOS it uses vm_stat, and on
+// Windows it reads the operating system's memory status directly.
 func AvailableMemoryMB() (int64, error) {
 	switch runtime.GOOS {
 	case "linux":
 		return availableMemoryLinux()
 	case "darwin":
 		return availableMemoryDarwin()
+	case "windows":
+		return availableMemoryWindows()
 	default:
 		return 0, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}
 }
 
 // TotalMemoryMB returns the total installed system memory in megabytes.
-// On Linux it parses /proc/meminfo; on macOS it uses sysctl hw.memsize.
+// On Linux it parses /proc/meminfo, on macOS it uses sysctl hw.memsize, and
+// on Windows it reads the operating system's memory status directly.
 func TotalMemoryMB() (int64, error) {
 	switch runtime.GOOS {
 	case "linux":
 		return totalMemoryLinux()
 	case "darwin":
 		return totalMemoryDarwin()
+	case "windows":
+		return totalMemoryWindows()
 	default:
 		return 0, fmt.Errorf("unsupported OS: %s", runtime.GOOS)
 	}

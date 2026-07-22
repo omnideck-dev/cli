@@ -48,11 +48,11 @@ unreachable on any host port.
 
 ---
 
-## 4. Engine × OS Matrix
+## 4. Container Runtime × OS Matrix
 
 Combinations to validate end-to-end (install → use → uninstall):
 
-| Engine          | OS              | Notes                                      |
+| Container runtime | OS            | Notes                                      |
 |-----------------|-----------------|---------------------------------------------|
 | Docker          | Linux           | Primary target. `OLLAMA_HOST=http://host-gateway:11434` |
 | Podman rootless | Linux (Fedora)  | Primary target. Built-in host aliases      |
@@ -110,18 +110,19 @@ Validate the new no-runtime and repair paths before promoting the preview:
 | Linux | Docker socket permission denied | Explain that Docker access can give apps full control of the computer; do not change account groups |
 | macOS | Podman installed, no machine | Run `podman machine init --now --update-connection=true`, then continue without a technical connection prompt |
 | macOS | Docker Desktop stopped | Launch app, wait, then recheck |
-| Windows | Neither installed | Recommend Docker Desktop/WSL 2; show the official Podman installer as an alternative |
+| Windows | Neither installed | Show only the Docker Desktop/WSL 2 setup; `--runtime podman` overrides it |
 | Windows | Podman machine stopped | Run `podman machine start`, then continue |
 | WSL 2 | Neither usable | Recommend Windows Docker Desktop and WSL integration |
-| Any | Runtime already healthy | Skip runtime setup entirely |
+| Any | Exactly one runtime installed | Use it when ready, or show only its repair path when broken |
+| Any | Both runtimes installed | Show the runtime picker |
 
 For every case, verify:
 
 - The reason Omnideck needs a runtime is visible before any setup action.
-- Every command is available under **technical details** before execution and uses direct arguments, not a shell pipeline.
+- Every command is available under **commands** before execution and uses direct arguments, not a shell pipeline. Installer URLs stay out of the normal flow because Omnideck opens them for the user.
 - Omnideck itself runs as the current user. Only the computer's built-in software or background-app tool may ask for the user's account password.
 - `--plain` prints guidance and exits non-zero without modifying the host.
-- The first setup honors `--engine docker` or `--engine podman`; later setups keep the saved machine-wide runtime.
+- The first setup honors `--runtime docker` or `--runtime podman`; later setups keep the saved machine-wide runtime.
 
 ---
 
@@ -136,12 +137,17 @@ read that env var instead of hardcoding a host name.
 **Docker/Linux:** `OLLAMA_HOST=http://host-gateway:11434` (requires Docker 20.10+)
 **Podman/Linux:** `OLLAMA_HOST=http://host.containers.internal:11434`
 **macOS/Windows Docker:** `OLLAMA_HOST=http://host.docker.internal:11434`
+**Windows Podman:** `OLLAMA_HOST=http://host.containers.internal:11434`
 
 **To test:**
 - Install with Ollama running → confirm the web UI can use Ollama models
 - Install with Ollama NOT running → confirm the install succeeds with the
   expected warning, then start Ollama after and confirm it connects
 - Check container logs for Ollama connection errors: `omnideck logs`
+- On Windows with Podman and default Ollama settings, confirm preflight says
+  Ollama is running but does not call it ready. Confirm setup then checks from
+  inside the Omnideck container and, if that fails, shows the `OLLAMA_HOST`
+  user-variable and Ollama restart steps.
 
 ---
 

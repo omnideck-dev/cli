@@ -157,7 +157,7 @@ try {
     }
 
     $CurrentStep = "setup"
-    Invoke-Cli @("setup", "--plain", "--engine", $Engine, "--image", $FixtureImage, "--port", "$Port", "--memory", "512m", "--shm-size", "64m")
+    Invoke-Cli @("setup", "--plain", "--runtime", $Engine, "--image", $FixtureImage, "--port", "$Port", "--memory", "512m", "--shm-size", "64m")
     $ConfigText = Get-Content -Raw $ConfigPath
     $SettingsPath = Join-Path $env:OMNIDECK_CONFIG_DIR "settings.yaml"
     $SettingsText = Get-Content -Raw $SettingsPath

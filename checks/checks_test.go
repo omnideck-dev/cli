@@ -143,9 +143,9 @@ func TestTotalMemoryLinuxMocked(t *testing.T) {
 // TestDefaultContainerMemory verifies the formula M = max(1, min(floor(0.2*RAM_GB), 8)).
 func TestDefaultContainerMemory(t *testing.T) {
 	cases := []struct {
-		totalMB  int64
-		wantMem  string
-		wantShm  string
+		totalMB int64
+		wantMem string
+		wantShm string
 	}{
 		{512, "1g", "512m"},    // 0.5 GB  → < 6 GB tier
 		{4096, "1g", "512m"},   // 4 GB   → < 6 GB tier

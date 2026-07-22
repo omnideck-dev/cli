@@ -98,6 +98,7 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.quickCheckDone++
 		m.memMB = msg.mb
 		m.memWarning = msg.warning
+		m.memChecked = true
 		return m, m.maybeAdvanceQuickCheck()
 
 	case allQuickCheckDone:
@@ -118,8 +119,8 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.configureRuntimeSetup()
 			return m, nil
 		}
-		// On a fresh setup, pause whenever there is a meaningful runtime
-		// choice—even if one option is ready and the other still needs setup.
+		// Only ask the user to choose when both runtimes are installed. A
+		// missing alternative is not useful friction on first setup.
 		if m.preferredEngine == "" && (len(m.availableEngines) > 1 || m.setupAlternativeRuntime() != "") {
 			m.quickCheckReady = true
 			return m, nil
@@ -129,15 +130,16 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// setupAlternativeRuntime returns a runtime that is not ready yet but can be
-// explicitly chosen during a fresh setup. Existing instances stay on their one
-// shared runtime so their containers and volumes are never silently stranded.
+// setupAlternativeRuntime returns a second installed runtime that is not ready
+// yet. Missing alternatives stay hidden; --runtime is the explicit override.
+// Existing instances stay on their shared runtime so saved data is never
+// silently stranded.
 func (m SetupModel) setupAlternativeRuntime() string {
 	if m.setupMode != SetupFirstRun || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
 		return ""
 	}
 	for _, probe := range m.runtimeProbes {
-		if probe.Name != m.eng.Name() && !probe.Ready() {
+		if probe.Name != m.eng.Name() && probe.State != engine.RuntimeMissing && !probe.Ready() {
 			return probe.Name
 		}
 	}
@@ -200,8 +202,30 @@ func runPermissionCheck(eng engine.Engine) tea.Cmd {
 }
 
 func runOllamaCheck() tea.Msg {
-	ok, host := checks.CheckOllama()
-	return ollamaCheckResult{reachable: ok, host: host}
+	status := checks.CheckOllamaStatus()
+	return ollamaCheckResult{
+		reachable: status.Running,
+		host:      status.Host,
+	}
+}
+
+func (m SetupModel) windowsPodmanOllamaNeedsSetup() bool {
+	return m.isWindowsPodman() && m.ollamaOK && m.ollamaContainerChecked && !m.ollamaContainerOK
+}
+
+func (m SetupModel) windowsPodmanOllamaAwaitingCheck() bool {
+	return m.isWindowsPodman() && m.ollamaOK && !m.ollamaContainerChecked
+}
+
+func (m SetupModel) isWindowsPodman() bool {
+	if m.eng == nil || m.eng.Name() != "podman" {
+		return false
+	}
+	hostOS := m.hostPlatform.OS
+	if hostOS == "" {
+		hostOS = engine.DetectHostPlatform().OS
+	}
+	return hostOS == "windows"
 }
 
 func runMemoryCheck() tea.Msg {

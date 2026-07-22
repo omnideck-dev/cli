@@ -204,6 +204,43 @@ func TestBuildPodmanRunArgsMacOS(t *testing.T) {
 	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
 }
 
+// TestBuildPodmanRunArgsWindows verifies the address used by both Omnideck and
+// the post-setup connection check inside a Windows Podman machine.
+func TestBuildPodmanRunArgsWindows(t *testing.T) {
+	opts := RunOptions{
+		Name:        "omnideck",
+		Image:       "ghcr.io/example/img:latest",
+		ShmSize:     "256m",
+		HomeVolume:  "omnideck-home",
+		StateVolume: "omnideck-state",
+		WebUIPort:   "2337",
+		Platform:    "windows",
+	}
+
+	args := buildPodmanRunArgs(opts)
+	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
+	if got := defaultOllamaURL("podman", "windows"); got != "http://host.containers.internal:11434" {
+		t.Fatalf("Windows Podman Ollama URL = %q", got)
+	}
+}
+
+func TestNormalizeOllamaURL(t *testing.T) {
+	tests := []struct {
+		value, runtimeName, platform, want string
+	}{
+		{"", "docker", "linux", "http://host-gateway:11434"},
+		{"", "docker", "windows", "http://host.docker.internal:11434"},
+		{"", "podman", "darwin", "http://host.docker.internal:11434"},
+		{"localhost:11434", "podman", "windows", "http://localhost:11434"},
+		{"https://ollama.example", "podman", "windows", "https://ollama.example"},
+	}
+	for _, tt := range tests {
+		if got := normalizeOllamaURL(tt.value, tt.runtimeName, tt.platform); got != tt.want {
+			t.Errorf("normalizeOllamaURL(%q, %q, %q) = %q, want %q", tt.value, tt.runtimeName, tt.platform, got, tt.want)
+		}
+	}
+}
+
 // TestBuildRunArgsMemorySet verifies --memory is included when Memory is set.
 func TestBuildRunArgsMemorySet(t *testing.T) {
 	opts := RunOptions{
