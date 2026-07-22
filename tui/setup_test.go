@@ -457,6 +457,53 @@ func TestRuntimeOverrideWinsWhenNothingIsInstalled(t *testing.T) {
 	}
 }
 
+func TestRuntimeRepairDoesNotRestoreAnUninstalledSavedRuntime(t *testing.T) {
+	m := NewSetupModel(SetupRequest{
+		Mode:            SetupRuntimeRepair,
+		PreferredEngine: "podman",
+	})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	if m.preferredEngine != "docker" || len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "docker" {
+		t.Fatalf("stale Podman preference produced preferred=%q plans=%#v; want the Windows Docker default", m.preferredEngine, m.runtimePlans)
+	}
+	if view := m.tnRuntimeSetup(88); !strings.Contains(view, "Set up Docker") || strings.Contains(view, "Set up Podman") {
+		t.Fatalf("stale Podman preference is still visible:\n%s", view)
+	}
+}
+
+func TestRuntimeRepairUsesTheOnlyReadyRuntimeAfterSavedRuntimeWasRemoved(t *testing.T) {
+	m := NewSetupModel(SetupRequest{
+		Mode:            SetupRuntimeRepair,
+		PreferredEngine: "podman",
+	})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	docker := &mockEngine{name: "docker"}
+
+	newModel, permissionCheck := m.updateQuickCheck(engineCheckResult{
+		eng: nil,
+		all: []engine.Engine{docker},
+		probes: []engine.ProbeResult{
+			{Name: "podman", State: engine.RuntimeMissing},
+			{Name: "docker", State: engine.RuntimeReady},
+		},
+		err: fmt.Errorf("podman is not ready"),
+	})
+	m = newModel.(SetupModel)
+
+	if m.preferredEngine != "" || m.eng == nil || m.eng.Name() != "docker" || m.engErr != nil {
+		t.Fatalf("ready fallback = preferred %q engine %v error %v; want Docker", m.preferredEngine, m.eng, m.engErr)
+	}
+	if permissionCheck == nil {
+		t.Fatal("the automatically selected Docker runtime must continue through the normal permission check")
+	}
+}
+
 func TestMissingContainerRuntimeDoesNotClaimAccountAccessWasChecked(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.quickCheckDone = 2
@@ -775,6 +822,63 @@ func TestRuntimeWaitingCopyMatchesTheAction(t *testing.T) {
 	help := runtimeWaitingMessage(engine.SetupPlan{Title: "Docker", State: engine.RuntimePermissionDenied})
 	if !strings.Contains(help, "help page") || strings.Contains(help, "Finish the installation") {
 		t.Fatalf("help message = %q", help)
+	}
+}
+
+func TestRepeatedEnterAfterOpeningInstallerDoesNotDownloadAgain(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.preferredEngine = "podman"
+	m.runtimeProbes = []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeMissing},
+		{Name: "docker", State: engine.RuntimeMissing},
+	}
+	m.configureRuntimeSetup()
+
+	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(SetupModel)
+	newModel, openInstaller := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(SetupModel)
+	if openInstaller == nil || m.runtimeSetupStage != runtimeSetupWaiting {
+		t.Fatal("review confirmation must open the installer and wait")
+	}
+
+	// A held Enter can send another key event immediately. It may start one
+	// readiness check, but further events are ignored while that check runs.
+	newModel, check := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(SetupModel)
+	if check == nil || m.runtimeSetupStage != runtimeSetupWorking {
+		t.Fatal("Enter on the waiting screen must start one readiness check")
+	}
+	newModel, repeated := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(SetupModel)
+	if repeated != nil || m.runtimeSetupStage != runtimeSetupWorking {
+		t.Fatal("repeated Enter must be ignored while readiness is being checked")
+	}
+
+	// If the download or installer has not finished, remain on the waiting
+	// screen. Returning to the install choice allowed queued Enter events to
+	// launch the same direct download over and over.
+	newModel, cmd := m.updateRuntimeSetup(engineCheckResult{
+		probes: []engine.ProbeResult{
+			{Name: "podman", State: engine.RuntimeMissing},
+			{Name: "docker", State: engine.RuntimeMissing},
+		},
+		err: fmt.Errorf("podman is not ready"),
+	})
+	m = newModel.(SetupModel)
+	if cmd != nil || m.runtimeSetupStage != runtimeSetupWaiting {
+		t.Fatalf("failed recheck = stage %d, command %v; want waiting with no download", m.runtimeSetupStage, cmd)
+	}
+	if !strings.Contains(m.runtimeMessage, "still cannot find Podman") {
+		t.Fatalf("failed recheck message = %q", m.runtimeMessage)
+	}
+
+	// Reopening is still available, but only through the explicit retry key.
+	newModel, reopen := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
+	m = newModel.(SetupModel)
+	if reopen == nil || m.runtimeSetupStage != runtimeSetupWaiting {
+		t.Fatal("o must explicitly reopen the installer while staying on the waiting screen")
 	}
 }
 

@@ -20,6 +20,7 @@ func (m *SetupModel) configureRuntimeSetup() {
 		host = engine.DetectHostPlatform()
 	}
 	m.runtimePlans = engine.BuildSetupPlans(m.runtimeProbes, host)
+	m.releaseMissingSavedRuntime()
 	selectedRuntime := m.preferredEngine
 	automaticSelection := selectedRuntime == ""
 	installed := engine.InstalledRuntimeNames(m.runtimeProbes)
@@ -113,6 +114,7 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.runtimeSetupStage == runtimeSetupWaiting {
 			switch msg.String() {
 			case "r", "enter", " ":
+				m.runtimeCheckFromWaiting = true
 				m.runtimeSetupStage = runtimeSetupWorking
 				m.runtimeMessage = "Checking whether Podman or Docker is ready…"
 				return m, runEngineCheckFor(m.preferredEngine)
@@ -209,6 +211,9 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.runtimeMessage = "That step finished. Checking that everything is ready…"
 		return m, runEngineCheckFor(m.preferredEngine)
 	case engineCheckResult:
+		checkedFromWaiting := m.runtimeCheckFromWaiting
+		m.runtimeCheckFromWaiting = false
+		previousPlan, hadPreviousPlan := m.selectedRuntimePlan()
 		m.runtimeSetupStage = runtimeSetupChoose
 		m.runtimeProbes = msg.probes
 		if msg.eng != nil {
@@ -220,9 +225,27 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.engErr = msg.err
 		m.configureRuntimeSetup()
+		if checkedFromWaiting && hadPreviousPlan {
+			if currentPlan, ok := m.selectedRuntimePlan(); ok && sameRuntimeSetupStep(previousPlan, currentPlan) {
+				m.runtimeSetupStage = runtimeSetupWaiting
+				m.runtimeMessage = runtimeStillWaitingMessage(currentPlan)
+				return m, nil
+			}
+		}
 		m.runtimeMessage = runtimeNotReadyMessage(m.runtimePlans, m.preferredEngine)
 	}
 	return m, nil
+}
+
+func (m SetupModel) selectedRuntimePlan() (engine.SetupPlan, bool) {
+	if m.runtimeChoice < 0 || m.runtimeChoice >= len(m.runtimePlans) {
+		return engine.SetupPlan{}, false
+	}
+	return m.runtimePlans[m.runtimeChoice], true
+}
+
+func sameRuntimeSetupStep(before, after engine.SetupPlan) bool {
+	return before.Runtime == after.Runtime && before.State == after.State && before.URL == after.URL
 }
 
 func (m SetupModel) runtimeDetailsAvailable() bool {
@@ -254,6 +277,13 @@ func runtimeWaitingMessage(plan engine.SetupPlan) string {
 	default:
 		return "The official " + name + " installation page should now be open. Finish the installation and make sure " + name + " is running, then return here."
 	}
+}
+
+func runtimeStillWaitingMessage(plan engine.SetupPlan) string {
+	if plan.DirectDownload {
+		return "Omnideck still cannot find " + plan.Title + ". If the installer is still open, finish it. Then return here and press Enter to check again."
+	}
+	return plan.Title + " is not ready yet. Finish the step on the other screen, wait until " + plan.Title + " is running, then return here and press Enter to check again."
 }
 
 func runtimeNotReadyMessage(plans []engine.SetupPlan, preferred string) string {

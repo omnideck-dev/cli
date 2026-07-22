@@ -64,10 +64,16 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case engineCheckResult:
 		m.quickCheckDone++
+		m.runtimeProbes = msg.probes
+		if m.releaseMissingSavedRuntime() && msg.eng == nil {
+			msg.eng = readyEngineForSetup(msg.all, m.hostPlatform)
+			if msg.eng != nil {
+				msg.err = nil
+			}
+		}
 		m.eng = msg.eng
 		m.engErr = msg.err
 		m.availableEngines = msg.all
-		m.runtimeProbes = msg.probes
 		m.quickCheckAlternative = ""
 		// Run permission check only after engine is known.
 		if msg.eng != nil {
@@ -130,10 +136,27 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// releaseMissingSavedRuntime forgets a machine-wide preference only for the
+// current setup decision when that app has been uninstalled. An explicit
+// first-run --runtime choice remains locked. The new ready runtime is saved
+// only after setup confirms that it works.
+func (m *SetupModel) releaseMissingSavedRuntime() bool {
+	if m.setupMode == SetupFirstRun || m.preferredEngine == "" {
+		return false
+	}
+	for _, probe := range m.runtimeProbes {
+		if probe.Name == m.preferredEngine && probe.State == engine.RuntimeMissing {
+			m.preferredEngine = ""
+			return true
+		}
+	}
+	return false
+}
+
 // setupAlternativeRuntime returns a second installed runtime that is not ready
 // yet. Missing alternatives stay hidden; --runtime is the explicit override.
-// Existing instances stay on their shared runtime so saved data is never
-// silently stranded.
+// An installed shared runtime stays selected for existing instances. A saved
+// runtime that has been uninstalled is released by releaseMissingSavedRuntime.
 func (m SetupModel) setupAlternativeRuntime() string {
 	if m.setupMode != SetupFirstRun || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
 		return ""
