@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 )
@@ -23,6 +24,10 @@ func TestSaveAndLoad(t *testing.T) {
 
 	if err := Save(path, cfg); err != nil {
 		t.Fatalf("Save: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		assertPrivateMode(t, filepath.Dir(path), 0o700)
+		assertPrivateMode(t, path, 0o600)
 	}
 
 	got, err := Load(path)
@@ -47,6 +52,17 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 	if !got.InstalledAt.Equal(cfg.InstalledAt) {
 		t.Errorf("InstalledAt: got %v, want %v", got.InstalledAt, cfg.InstalledAt)
+	}
+}
+
+func assertPrivateMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat(%s): %v", path, err)
+	}
+	if got := info.Mode().Perm(); got != want {
+		t.Fatalf("mode for %s = %o, want %o", path, got, want)
 	}
 }
 
@@ -340,7 +356,9 @@ func TestMigrateImage(t *testing.T) {
 		{"legacy main tag", "ghcr.io/lefoulkrod/computron_9000:main", DefaultImage, true},
 		{"legacy latest tag", "ghcr.io/lefoulkrod/computron_9000:latest", DefaultImage, true},
 		{"legacy no tag", "ghcr.io/lefoulkrod/computron_9000", DefaultImage, true},
+		{"previous official main channel", "ghcr.io/omnideck-dev/omnideck:main", DefaultImage, true},
 		{"already current", DefaultImage, DefaultImage, false},
+		{"official development override untouched", "ghcr.io/omnideck-dev/omnideck:dev", "ghcr.io/omnideck-dev/omnideck:dev", false},
 		{"custom override untouched", "ghcr.io/example/omnideck:dev", "ghcr.io/example/omnideck:dev", false},
 	}
 	for _, tt := range tests {

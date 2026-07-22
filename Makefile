@@ -4,13 +4,17 @@ VERSION    ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo "
 COMMIT     ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo "none")
 DATE       ?= $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
+GOVULNCHECK_VERSION := v1.6.0
+STATICCHECK_VERSION  := v0.7.0
+ACTIONLINT_VERSION   := v1.7.12
+
 LDFLAGS := -ldflags "\
   -X main.version=$(VERSION) \
   -X main.commit=$(COMMIT) \
   -X main.date=$(DATE) \
 "
 
-.PHONY: build test vet lint clean release hardware-test
+.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -18,15 +22,35 @@ build:
 test:
 	go test ./...
 
+race:
+	go test -race ./...
+
 vet:
 	go vet ./...
 
-lint:
-	@if command -v golangci-lint > /dev/null; then \
-		golangci-lint run; \
-	else \
-		echo "golangci-lint not installed, skipping"; \
+fmt-check:
+	@files="$$(gofmt -l .)"; \
+	if [ -n "$$files" ]; then \
+		echo "These Go files need gofmt:"; \
+		echo "$$files"; \
+		exit 1; \
 	fi
+
+tidy-check:
+	go mod tidy -diff
+
+staticcheck:
+	go run honnef.co/go/tools/cmd/staticcheck@$(STATICCHECK_VERSION) -checks=all,-ST1005 ./...
+
+actionlint:
+	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
+
+lint: fmt-check tidy-check vet staticcheck actionlint
+
+vulnerability:
+	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...
+
+verify: lint test vulnerability
 
 clean:
 	rm -f $(BINARY) dist/*

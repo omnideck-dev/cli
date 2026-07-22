@@ -51,14 +51,14 @@ func SaveRuntime(name string) error {
 		return fmt.Errorf("unknown container runtime %q", name)
 	}
 	path := SettingsPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensurePrivateDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("creating settings directory: %w", err)
 	}
 	data, err := yaml.Marshal(&Settings{Runtime: name})
 	if err != nil {
 		return fmt.Errorf("preparing settings: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0o644); err != nil {
+	if err := writePrivateFile(path, data); err != nil {
 		return fmt.Errorf("saving settings: %w", err)
 	}
 	return nil

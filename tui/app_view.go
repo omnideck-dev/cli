@@ -366,16 +366,6 @@ func (m AppModel) renderScreen(body string) string {
 
 // --- Helpers ---
 
-// prefixLines adds prefix to every line of a rendered multi-line block.
-func prefixLines(block, prefix string) string {
-	block = strings.TrimSuffix(block, "\n")
-	lines := strings.Split(block, "\n")
-	for i, line := range lines {
-		lines[i] = prefix + line
-	}
-	return strings.Join(lines, "\n") + "\n"
-}
-
 // wrapWords word-wraps text into lines, preserving original spacing.
 // It scans rune-by-rune, breaking at the last space within the width limit.
 // Long runs with no spaces are hard-broken at the limit.
@@ -434,15 +424,6 @@ func padToHeight(s string, h int) string {
 		return s
 	}
 	return s + strings.Repeat("\n", h-lines)
-}
-
-// padRightStyled pads a styled string to width n (measures rendered width).
-func padRightStyled(s string, n int) string {
-	w := lipgloss.Width(s)
-	if w >= n {
-		return s
-	}
-	return s + strings.Repeat(" ", n-w)
 }
 
 func dashOr(s string) string {

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -184,6 +185,12 @@ func TestWindowsARMUsesDockerInstallerInsteadOfX64StoreListing(t *testing.T) {
 
 func TestStartDockerDesktopChecksPerUserAndAllUserLocations(t *testing.T) {
 	command := startDockerDesktopCommand()
+	if runtime.GOOS == "windows" {
+		if command.Name == "powershell.exe" || len(command.Args) != 0 {
+			t.Fatalf("Windows should launch Docker Desktop directly: %#v", command)
+		}
+		return
+	}
 	args := strings.Join(command.Args, " ")
 	if !strings.Contains(args, `LOCALAPPDATA\Programs\DockerDesktop`) {
 		t.Fatalf("start command does not check the per-user Docker location: %s", args)
