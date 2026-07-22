@@ -228,7 +228,7 @@ func buildCmd(binary string, args ...string) *exec.Cmd {
 	return exec.Command(binary, args...)
 }
 
-// ContainerVersion returns the Docker version string.
+// Version returns the Docker version string.
 func (e *DockerEngine) Version() string {
 	cmd := buildCmd("docker", "version", "--format", "{{.Server.Version}}")
 	out, err := cmd.Output()

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -27,6 +28,10 @@ func TestSaveAndLoadRuntime(t *testing.T) {
 
 	if err := SaveRuntime("docker"); err != nil {
 		t.Fatalf("SaveRuntime: %v", err)
+	}
+	if runtime.GOOS != "windows" {
+		assertPrivateMode(t, filepath.Dir(settingsPathOverride), 0o700)
+		assertPrivateMode(t, settingsPathOverride, 0o600)
 	}
 	settings, err := LoadSettings()
 	if err != nil {

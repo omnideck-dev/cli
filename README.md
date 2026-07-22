@@ -91,7 +91,7 @@ steps; local AI remains optional and online AI continues to work.
 
 ### Build from source
 
-Requires Go 1.25.10+. A missing Docker/Podman installation can be handled by the
+Requires Go 1.25.12+. A missing Docker/Podman installation can be handled by the
 guided setup after the CLI is built. In the example below, the computer
 asks for a password only while copying the finished CLI into a shared apps
 folder. Run `omnideck` itself as the normal user.
@@ -270,7 +270,7 @@ state_volume: omnideck-state
 memory: 3g
 shm_size: 1536m
 web_ui_port: "2337"
-image: ghcr.io/omnideck-dev/omnideck:main
+image: ghcr.io/omnideck-dev/omnideck:latest
 installed_at: 2025-01-15T10:30:00Z
 ```
 
@@ -290,9 +290,8 @@ runtime: docker
 ## Contributing
 
 1. Fork and clone the repo
-2. `go test ./...` — all tests must pass
-3. `go vet ./...` — no vet errors
-4. Open a PR against `main`
+2. Run `make verify` — formatting, module metadata, static analysis, tests, workflow validation, and the Go vulnerability scan must pass
+3. Open a PR against `main`
 
 **Container runtime calls shell out intentionally** — no Docker SDK. Keep the binary dependency-free when adding runtime features. The internal `engine` package owns these operations.
 
@@ -308,6 +307,9 @@ See `CLAUDE.md` for the full platform table and architecture notes.
 Preview releases follow `alpha → beta → rc → stable` Semantic Versioning. See
 [RELEASING.md](RELEASING.md) for the tagging, promotion, and GitHub prerelease
 workflow.
+
+Report suspected vulnerabilities privately using the instructions in
+[SECURITY.md](SECURITY.md), not a public issue.
 
 ---
 

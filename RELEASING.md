@@ -17,10 +17,12 @@ the default release.
 
 ## Publish a preview
 
-1. Merge the intended changes to `main` and ensure CI is green.
-2. Choose the next prerelease identifier. Increment the final number for every
+1. Run `make verify` locally.
+2. Merge the intended changes to `main` and ensure every required CI and CodeQL
+   check is green.
+3. Choose the next prerelease identifier. Increment the final number for every
    new build; never move or replace a published tag.
-3. Create and push an annotated tag:
+4. Create and push an annotated tag:
 
    ```sh
    git switch main
@@ -28,11 +30,16 @@ the default release.
    git tag -a v0.8.0-alpha.1 -m "Omnideck CLI v0.8.0-alpha.1"
    git push origin v0.8.0-alpha.1
    ```
+5. Open the release workflow. Confirm that the source checks, vulnerability
+   scan, builds, SBOM generation, and provenance attestations passed. Approve
+   the protected `release` environment only after reviewing those results.
 
-The release workflow validates the tag, runs tests and vet, builds all supported
-platform archives, creates `SHA256SUMS`, and publishes one GitHub release. Tags
-containing a suffix are marked as prereleases and do not replace the latest
-stable release.
+The release workflow rejects malformed tags and tags that do not point to a
+commit already merged into `main`. It then repeats the source and vulnerability
+checks, builds all supported platform archives, creates `SHA256SUMS`, SBOMs and
+provenance attestations, and pauses for approval before publishing one GitHub
+release. Tags containing a suffix are marked as prereleases and do not replace
+the latest stable release.
 
 ## Promotion
 

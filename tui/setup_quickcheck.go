@@ -156,10 +156,6 @@ func (m *SetupModel) maybeAdvanceQuickCheck() tea.Cmd {
 
 // --- QuickCheck commands ---
 
-func runEngineCheck() tea.Msg {
-	return runEngineCheckFor("")()
-}
-
 func runEngineCheckFor(preferred string) tea.Cmd {
 	return func() tea.Msg {
 		probes := engine.ProbeAll()

@@ -190,7 +190,9 @@ func hexToRGB(s string) (int, int, int) {
 		return 128, 128, 128
 	}
 	var r, g, b int
-	fmt.Sscanf(s, "%02x%02x%02x", &r, &g, &b)
+	if _, err := fmt.Sscanf(s, "%02x%02x%02x", &r, &g, &b); err != nil {
+		return 128, 128, 128
+	}
 	return r, g, b
 }
 

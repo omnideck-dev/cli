@@ -1,0 +1,6 @@
+* @lefoulkrod
+
+# Changes to build and release controls should always notify the maintainer.
+/.github/ @lefoulkrod
+/Makefile @lefoulkrod
+/RELEASING.md @lefoulkrod

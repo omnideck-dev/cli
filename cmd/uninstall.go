@@ -179,7 +179,7 @@ func backupVolumes(eng interface {
 			return "", fmt.Errorf("creating temporary export: %w", err)
 		}
 		if err := eng.ExportVolume(entry.volume, f); err != nil {
-			f.Close()
+			_ = f.Close()
 			return "", fmt.Errorf("exporting volume %s: %w", entry.volume, err)
 		}
 		if err := f.Close(); err != nil {

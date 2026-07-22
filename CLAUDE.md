@@ -75,7 +75,7 @@ omnideck-cli/
 - **Repo name:** `omnideck-cli`
 - **Module path:** `github.com/omnideck-dev/cli`
 - **Config directory:** OS-native user config directory under `omnideck-cli`
-- **Container image:** `ghcr.io/omnideck-dev/omnideck:main`
+- **Container image:** `ghcr.io/omnideck-dev/omnideck:latest`
 - **Default container name:** `omnideck`
 - **Default data volumes:** `{container-name}-home` and `{container-name}-state`
 

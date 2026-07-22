@@ -12,6 +12,10 @@ env:
   # Keep archive timestamps and tool output independent of the runner locale.
   TZ: UTC
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   verify:
     runs-on: ubuntu-24.04
@@ -19,6 +23,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate semantic version tag
@@ -26,6 +31,16 @@ jobs:
         run: |
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
             echo "Tag must be SemVer, for example v0.8.0-alpha.1 or v0.8.0"
+            exit 1
+          fi
+
+      - name: Require a commit from main
+        shell: bash
+        run: |
+          git fetch --no-tags origin main:refs/remotes/origin/main
+          TAG_COMMIT=$(git rev-list -n 1 "${GITHUB_REF_NAME}")
+          if ! git merge-base --is-ancestor "${TAG_COMMIT}" origin/main; then
+            echo "Release tags must point to a commit already merged into main."
             exit 1
           fi
 
@@ -38,14 +53,8 @@ jobs:
           go mod download
           go mod verify
 
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test ./...
-
-      - name: Scan reachable dependencies
-        run: go run golang.org/x/vuln/cmd/govulncheck@v1.6.0 ./...
+      - name: Verify release source
+        run: make verify
 
   build:
     needs: verify
@@ -173,6 +182,8 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-24.04
+    environment: release
+    timeout-minutes: 10
     permissions:
       actions: read
       contents: write

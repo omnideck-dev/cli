@@ -49,8 +49,8 @@ func TestSetupAndMaintenanceUseDifferentStageTypes(t *testing.T) {
 	// This compile-time-oriented assertion documents the architectural
 	// invariant: each workflow owns its state machine instead of sharing a
 	// generic phase enum with impossible states.
-	var setup SetupStage = SetupStageReview
-	var maintenance MaintenanceStage = MaintenanceStageReview
+	setup := SetupStageReview
+	maintenance := MaintenanceStageReview
 	if int(setup) < 0 || int(maintenance) < 0 {
 		t.Fatal("unreachable")
 	}

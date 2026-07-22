@@ -26,7 +26,9 @@ type Config struct {
 }
 
 // DefaultImage is the current container image the CLI installs and updates to.
-const DefaultImage = "ghcr.io/omnideck-dev/omnideck:main"
+// The latest tag is intentionally a moving channel: setup and update should
+// always fetch the newest published Omnideck application image.
+const DefaultImage = "ghcr.io/omnideck-dev/omnideck:latest"
 
 // legacyImagePrefixes are image repositories that DefaultImage supersedes.
 // A config still pointing at one of these (regardless of tag) is migrated to
@@ -34,6 +36,13 @@ const DefaultImage = "ghcr.io/omnideck-dev/omnideck:main"
 // left untouched.
 var legacyImagePrefixes = []string{
 	"ghcr.io/lefoulkrod/computron_9000",
+}
+
+// legacyDefaultImages are exact historical defaults. Keep these separate from
+// legacyImagePrefixes so an explicit Omnideck development tag remains a custom
+// override instead of being silently replaced.
+var legacyDefaultImages = []string{
+	"ghcr.io/omnideck-dev/omnideck:main",
 }
 
 // InstanceInfo is a resolved instance with its name, path, and loaded Config.
@@ -92,7 +101,7 @@ func MigrateLegacyDir() error {
 	if !info.IsDir() {
 		return fmt.Errorf("previous config path %s is not a directory", source)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(target), 0o700); err != nil {
 		return fmt.Errorf("creating config parent directory: %w", err)
 	}
 	staging, err := os.MkdirTemp(filepath.Dir(target), ".omnideck-cli-migration-*")
@@ -161,11 +170,11 @@ func copyLegacyFile(source, target string) error {
 	if err != nil {
 		return fmt.Errorf("reading previous config file: %w", err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+	if err := ensurePrivateDir(filepath.Dir(target)); err != nil {
 		return fmt.Errorf("creating config directory: %w", err)
 	}
 
-	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	f, err := os.OpenFile(target, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		if os.IsExist(err) {
 			return nil
@@ -267,6 +276,12 @@ func (c *Config) StateVolumeName() string {
 // Images that are not recognized as legacy (including custom overrides) are
 // left as-is.
 func (c *Config) MigrateImage() bool {
+	for _, image := range legacyDefaultImages {
+		if c.Image == image {
+			c.Image = DefaultImage
+			return true
+		}
+	}
 	for _, prefix := range legacyImagePrefixes {
 		if c.Image == prefix || strings.HasPrefix(c.Image, prefix+":") {
 			c.Image = DefaultImage
@@ -302,14 +317,30 @@ func Load(path string) (*Config, error) {
 // Save writes a Config as YAML to path, creating parent directories as needed.
 func Save(path string, cfg *Config) error {
 	path = expandHome(path)
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := ensurePrivateDir(filepath.Dir(path)); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
 	data, err := yaml.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshalling config: %w", err)
 	}
-	return os.WriteFile(path, data, 0o644)
+	return writePrivateFile(path, data)
+}
+
+func ensurePrivateDir(path string) error {
+	if err := os.MkdirAll(path, 0o700); err != nil {
+		return err
+	}
+	return os.Chmod(path, 0o700) // #nosec G302 -- path is a directory, not a file
+}
+
+func writePrivateFile(path string, data []byte) error {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return err
+	}
+	// WriteFile preserves the mode of an existing file. Tighten files created
+	// by older CLI versions as soon as they are saved again.
+	return os.Chmod(path, 0o600)
 }
 
 // expandHome replaces a leading ~ with the user's home directory.

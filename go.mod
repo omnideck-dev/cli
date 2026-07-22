@@ -1,6 +1,6 @@
 module github.com/omnideck-dev/cli
 
-go 1.25.10
+go 1.25.12
 
 require (
 	github.com/charmbracelet/bubbles v1.0.0
@@ -10,7 +10,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2
 	github.com/muesli/termenv v0.16.0
 	github.com/spf13/cobra v1.10.2
-	golang.org/x/sys v0.38.0
+	golang.org/x/sys v0.44.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
