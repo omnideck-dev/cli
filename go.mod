@@ -40,8 +40,8 @@ require (
 	github.com/urfave/cli/v2 v2.25.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
-	golang.org/x/image v0.12.0 // indirect
-	golang.org/x/text v0.13.0 // indirect
+	golang.org/x/image v0.44.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 )
 
 tool github.com/tc-hib/go-winres
