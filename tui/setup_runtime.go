@@ -292,25 +292,25 @@ func runtimeNotReadyMessage(plans []engine.SetupPlan, preferred string) string {
 		if preferred != "" {
 			name = runtimeNameForPeople(preferred)
 		}
-		return "Omnideck still cannot use " + name + ". Make sure it is installed and running, then check again."
+		return "Omnideck still cannot use " + name + ". Make sure it is installed and running, then press r to check again."
 	}
 	if len(plans) > 1 {
-		return "Neither Podman nor Docker is ready yet. Choose one of the setup options below, or check again if you just finished a step."
+		return "Neither Podman nor Docker is ready yet. Choose one of the setup options above and press Enter to review it, or press r to check again."
 	}
 	plan := plans[0]
 	switch plan.State {
 	case engine.RuntimeMissing:
-		return "Omnideck still cannot find " + plan.Title + ". Make sure the installation finished, then open " + plan.Title + " and wait until it is running. You can review the installation step below or check again."
+		return "Omnideck still cannot find " + plan.Title + ". If you already installed it, open " + plan.Title + " and wait until it is running, then press r to check again. Otherwise, press Enter to review the installation steps."
 	case engine.RuntimeStopped, engine.RuntimeMachineStopped:
-		return plan.Title + " is installed, but it is not running yet. Review the start step below or check again after you start it."
+		return plan.Title + " is installed, but it is not running yet. Press Enter to review the start steps, or start it yourself and press r to check again."
 	case engine.RuntimeMachineMissing:
-		return "Podman is installed, but its one-time setup is not finished. Review the step below to finish it."
+		return "Podman is installed, but its one-time setup is not finished. Press Enter to review and start the one-time setup."
 	case engine.RuntimePermissionDenied:
-		return plan.Title + " is installed, but your account cannot use it yet. Review the help step below."
+		return plan.Title + " is installed, but your account cannot use it yet. Press Enter to review the help steps."
 	case engine.RuntimeUnsupportedVersion:
-		return "Docker is installed, but it must be updated before Omnideck can use it. Review the update step below."
+		return "Docker is installed, but it must be updated before Omnideck can use it. Press Enter to review the update steps."
 	default:
-		return plan.Title + " is installed, but it still needs attention. Review the help step below or check again."
+		return plan.Title + " is installed, but it still needs attention. Press Enter to review the help steps, or press r after you fix it."
 	}
 }
 
