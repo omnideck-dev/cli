@@ -91,17 +91,18 @@ type SetupModel struct {
 	quickCheckDone         int // count of completed checks
 
 	// Runtime setup state.
-	runtimeProbes       []engine.ProbeResult
-	runtimePlans        []engine.SetupPlan
-	runtimeChoice       int
-	runtimeCommandIndex int
-	runtimeSetupStage   runtimeSetupStage
-	runtimeShowDetails  bool
-	runtimeMessage      string
-	runtimeLastError    string
-	preferredEngine     string
-	runtimeSetupEntry   runtimeSetupEntry
-	hostPlatform        engine.HostPlatform
+	runtimeProbes           []engine.ProbeResult
+	runtimePlans            []engine.SetupPlan
+	runtimeChoice           int
+	runtimeCommandIndex     int
+	runtimeSetupStage       runtimeSetupStage
+	runtimeShowDetails      bool
+	runtimeMessage          string
+	runtimeLastError        string
+	runtimeCheckFromWaiting bool
+	preferredEngine         string
+	runtimeSetupEntry       runtimeSetupEntry
+	hostPlatform            engine.HostPlatform
 
 	// Settings inputs.
 	inputs           []textinput.Model
