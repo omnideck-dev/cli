@@ -66,3 +66,23 @@ func (m AppModel) startEmbeddedMaintenance(mode MaintenanceMode) (AppModel, tea.
 	m.router.Push(RouteMaintenance)
 	return m, um.Init()
 }
+
+// startEmbeddedRemoval opens the full remove-instance workflow for the
+// selected dashboard item. The workflow itself owns every confirmation.
+func (m AppModel) startEmbeddedRemoval() (AppModel, tea.Cmd) {
+	inst := m.CurrentInstance()
+	if inst == nil || inst.Info.Config == nil || m.eng == nil {
+		return m, nil
+	}
+	rm := NewRemovalModel(RemovalRequest{
+		Instance: inst.Info,
+		Engine:   m.eng,
+		Embedded: true,
+	})
+	rm.WindowWidth = m.width
+	rm.WindowHeight = m.height
+	m.removalModel = rm
+	m.chipFocus = -1
+	m.router.Push(RouteRemoval)
+	return m, rm.Init()
+}

@@ -248,20 +248,20 @@ current_step="doctor"
 run_cli doctor | tee "${output_dir}/doctor.log"
 grep -Fq "Omnideck Doctor Report" "${output_dir}/doctor.log" || fail "doctor did not render its report."
 
-current_step="uninstall"
-printf 'yes\nyes\nno\n' | run_cli uninstall
+current_step="remove instance"
+printf 'yes\nyes\nno\n%s\n' "${instance}" | run_cli instance remove "${instance}"
 
 current_step="verify cleanup"
 if "${engine}" container inspect "${instance}" >/dev/null 2>&1; then
-  fail "The container still exists after uninstall."
+  fail "The container still exists after instance removal."
 fi
 if "${engine}" volume inspect "${instance}-home" >/dev/null 2>&1; then
-  fail "The home volume still exists after uninstall."
+  fail "The home volume still exists after instance removal."
 fi
 if "${engine}" volume inspect "${instance}-state" >/dev/null 2>&1; then
-  fail "The state volume still exists after uninstall."
+  fail "The state volume still exists after instance removal."
 fi
-[[ ! -e "${config_path}" ]] || fail "The configuration still exists after uninstall."
+[[ ! -e "${config_path}" ]] || fail "The configuration still exists after instance removal."
 
 current_step="complete"
 printf '\nPASS: lifecycle completed with %s on %s/%s.\n' "${engine}" "${host_os}" "${host_arch}"

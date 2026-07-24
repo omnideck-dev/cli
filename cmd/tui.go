@@ -21,6 +21,7 @@ Key bindings (Dashboard):
   enter   inspect instance
   n       set up another instance
   u       update selected instance
+  x       remove selected instance
   d       run doctor checks
   r       refresh stats
   q       quit`,

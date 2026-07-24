@@ -10,6 +10,7 @@ const (
 	RouteDoctor
 	RouteSetup
 	RouteMaintenance
+	RouteRemoval
 )
 
 // Router owns screen history for the TUI application shell. Workflows push a

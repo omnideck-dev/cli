@@ -192,6 +192,7 @@ type AppModel struct {
 	// Workflow screen models.
 	setupModel       SetupModel
 	maintenanceModel MaintenanceModel
+	removalModel     RemovalModel
 }
 
 // CurrentInstance returns a pointer to the selected instance, or nil.
@@ -307,6 +308,9 @@ func (m AppModel) Init() tea.Cmd {
 	}
 	if m.router.Current() == RouteMaintenance {
 		cmds = append(cmds, m.maintenanceModel.Init())
+	}
+	if m.router.Current() == RouteRemoval {
+		cmds = append(cmds, m.removalModel.Init())
 	}
 	if m.router.Current() == RouteDoctor {
 		cmds = append(cmds, m.doctorSpinner.Tick, m.runDoctorCmd())
