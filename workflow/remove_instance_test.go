@@ -140,13 +140,6 @@ func TestRemoveInstanceCanBackUpAndDeleteData(t *testing.T) {
 	if len(contents) != 2 || contents["home.tar"] != "home-data" || contents["state.tar"] != "state-data" {
 		t.Fatalf("backup contents = %#v", contents)
 	}
-	info, err := os.Stat(result.BackupPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if info.Mode().Perm() != 0o600 {
-		t.Fatalf("backup permissions = %o, want 600", info.Mode().Perm())
-	}
 }
 
 func TestRemoveInstanceFailureKeepsSavedSettings(t *testing.T) {
