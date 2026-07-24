@@ -54,7 +54,7 @@ Recommended gates:
 
 - Alpha: unit tests pass and the guided setup renders on every target OS.
 - Beta: runtime setup has been exercised on the supported platform matrix.
-- RC: installation, update, rollback, and uninstall pass end-to-end.
+- RC: setup, update, rollback, and instance removal pass end-to-end.
 - Stable: no unresolved release blockers; notes call out upgrades and known issues.
 
 GitHub-generated notes are a useful baseline. Curate the release description for

@@ -47,7 +47,7 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.chipFocus < 0 {
 				m.chipFocus = 0
 			} else {
-				m.chipFocus = (m.chipFocus + 1) % 4
+				m.chipFocus = (m.chipFocus + 1) % 5
 			}
 		} else if len(m.instances) > 0 {
 			if m.selected < len(m.instances)-1 {
@@ -58,7 +58,7 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "shift+tab":
 		if len(m.instances) > 0 && m.isExpanded() {
 			if m.chipFocus <= 0 {
-				m.chipFocus = 3
+				m.chipFocus = 4
 			} else {
 				m.chipFocus--
 			}
@@ -73,15 +73,15 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.chipFocus < 0 {
 				m.chipFocus = 0
 			} else {
-				m.chipFocus = (m.chipFocus + 1) % 4
+				m.chipFocus = (m.chipFocus + 1) % 5
 			}
 		}
 	case "left":
 		if len(m.instances) > 0 && m.isExpanded() {
 			if m.chipFocus < 0 {
-				m.chipFocus = 3
+				m.chipFocus = 4
 			} else {
-				m.chipFocus = (m.chipFocus + 3) % 4
+				m.chipFocus = (m.chipFocus + 4) % 5
 			}
 		}
 
@@ -114,6 +114,11 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "u":
 		if len(m.instances) > 0 {
 			return m.startEmbeddedUpdate()
+		}
+
+	case "x":
+		if len(m.instances) > 0 {
+			return m.startEmbeddedRemoval()
 		}
 
 	case "d":
@@ -178,6 +183,8 @@ func (m AppModel) execChip() (AppModel, tea.Cmd) {
 	case 3: // Stop/Start
 		m.chipFocus = -1
 		return m.doToggleContainer()
+	case 4: // Remove instance
+		return m.startEmbeddedRemoval()
 	}
 	return m, nil
 }
