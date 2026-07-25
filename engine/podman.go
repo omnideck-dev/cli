@@ -37,10 +37,34 @@ func (e *PodmanEngine) ContainerExists(name string) (bool, error) {
 }
 
 func (e *PodmanEngine) CreateVolume(name string) error {
-	cmd := buildCmd("podman", "volume", "create", name)
-	out, err := cmd.CombinedOutput()
+	return createVolumeIfMissing(name, e.VolumeExists, func() error {
+		cmd := buildCmd("podman", "volume", "create", name)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			return runtimeCommandError("podman volume create", err, out)
+		}
+		return nil
+	})
+}
+
+// createVolumeIfMissing makes Podman setup safe to retry. Podman 3 does not
+// support `volume create --ignore`, and unlike Docker it returns an error when
+// a named volume already exists.
+func createVolumeIfMissing(name string, exists func(string) (bool, error), create func() error) error {
+	found, err := exists(name)
 	if err != nil {
-		return fmt.Errorf("podman volume create: %w: %s", err, strings.TrimSpace(string(out)))
+		return fmt.Errorf("checking volume %q: %w", name, err)
+	}
+	if found {
+		return nil
+	}
+	if err := create(); err != nil {
+		// Another setup process can create the same volume after our check.
+		// Treat that race as success without hiding unrelated create failures.
+		if found, inspectErr := exists(name); inspectErr == nil && found {
+			return nil
+		}
+		return err
 	}
 	return nil
 }
@@ -98,10 +122,9 @@ func (e *PodmanEngine) PullImage(image string, msgs chan<- string) error {
 func (e *PodmanEngine) RunContainer(opts RunOptions) error {
 	args := buildPodmanRunArgs(opts)
 	cmd := buildCmd("podman", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("podman run: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return runtimeCommandError("podman run", err, out)
 	}
 	return nil
 }

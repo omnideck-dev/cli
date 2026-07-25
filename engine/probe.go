@@ -66,7 +66,7 @@ func probeAllForOS(goos string) []ProbeResult {
 	results := make([]ProbeResult, len(names))
 	// Refresh PATH before starting concurrent commands. An installer can finish
 	// while Omnideck is open, and serial updates avoid two probes overwriting
-	// each other's newly discovered Windows path.
+	// each other's newly discovered path.
 	for _, name := range names {
 		refreshRuntimePath(name, goos)
 	}
@@ -175,46 +175,76 @@ func installedDockerDesktopPath() string {
 }
 
 // refreshRuntimePath makes software installed while Omnideck is already open
-// visible to this process. Windows installers update future terminals, but an
-// existing process keeps the PATH it inherited when it started.
+// visible to this process. Installers can update the PATH used by future
+// terminals, but an existing process keeps the PATH it inherited when it
+// started.
 func refreshRuntimePath(name, goos string) {
-	if goos != "windows" {
-		return
-	}
+	refreshRuntimePathFromCandidates(name, goos, runtimePathCandidates(name, goos))
+}
 
+func runtimePathCandidates(name, goos string) []string {
 	var candidates []string
-	switch name {
-	case "docker":
-		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+	switch goos {
+	case "windows":
+		switch name {
+		case "docker":
+			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+				candidates = append(candidates,
+					filepath.Join(localAppData, "Programs", "DockerDesktop", "resources", "bin"),
+				)
+			}
+			if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+				candidates = append(candidates,
+					filepath.Join(programFiles, "Docker", "Docker", "resources", "bin"),
+				)
+			}
+		case "podman":
+			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+				candidates = append(candidates,
+					filepath.Join(localAppData, "Programs", "Podman"),
+				)
+			}
+			if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
+				candidates = append(candidates,
+					filepath.Join(programFiles, "Podman"),
+				)
+			}
+		}
+	case "darwin":
+		switch name {
+		case "podman":
+			// Podman's official macOS package installs here and adds this
+			// directory to /etc/paths.d for future terminal sessions.
 			candidates = append(candidates,
-				filepath.Join(localAppData, "Programs", "DockerDesktop", "resources", "bin"),
+				"/opt/podman/bin",
+				"/opt/homebrew/bin",
+				"/usr/local/bin",
+			)
+		case "docker":
+			if home, err := os.UserHomeDir(); err == nil {
+				candidates = append(candidates, filepath.Join(home, ".docker", "bin"))
+			}
+			candidates = append(candidates,
+				"/Applications/Docker.app/Contents/Resources/bin",
+				"/opt/homebrew/bin",
+				"/usr/local/bin",
 			)
 		}
-		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
-			candidates = append(candidates,
-				filepath.Join(programFiles, "Docker", "Docker", "resources", "bin"),
-			)
-		}
-	case "podman":
-		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-			candidates = append(candidates,
-				filepath.Join(localAppData, "Programs", "Podman"),
-			)
-		}
-		if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
-			candidates = append(candidates,
-				filepath.Join(programFiles, "Podman"),
-			)
-		}
-	default:
-		return
 	}
+	return candidates
+}
 
+func refreshRuntimePathFromCandidates(name, goos string, candidates []string) {
 	pathValue := os.Getenv("PATH")
 	pathEntries := filepath.SplitList(pathValue)
+	binaryName := name
+	if goos == "windows" {
+		binaryName += ".exe"
+	}
 	for _, candidate := range candidates {
-		binary := filepath.Join(candidate, name+".exe")
-		if _, err := os.Stat(binary); err != nil || pathEntryExists(pathEntries, candidate) {
+		binary := filepath.Join(candidate, binaryName)
+		info, err := os.Stat(binary)
+		if err != nil || info.IsDir() || pathEntryExists(pathEntries, candidate) {
 			continue
 		}
 		pathEntries = append(pathEntries, candidate)

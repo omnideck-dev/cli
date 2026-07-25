@@ -111,6 +111,41 @@ func TestRefreshRuntimePathFindsPerUserPodman(t *testing.T) {
 	}
 }
 
+func TestRefreshRuntimePathFindsNewMacOSPodmanInstall(t *testing.T) {
+	podmanBin := filepath.Join(t.TempDir(), "podman", "bin")
+	if err := os.MkdirAll(podmanBin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(podmanBin, "podman"), []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", "")
+
+	refreshRuntimePathFromCandidates("podman", "darwin", []string{podmanBin})
+	refreshRuntimePathFromCandidates("podman", "darwin", []string{podmanBin})
+
+	entries := filepath.SplitList(os.Getenv("PATH"))
+	count := 0
+	for _, entry := range entries {
+		if filepath.Clean(entry) == filepath.Clean(podmanBin) {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("macOS Podman path appears %d times in PATH %q, want once", count, os.Getenv("PATH"))
+	}
+}
+
+func TestMacOSRuntimePathCandidatesIncludeOfficialPodmanInstaller(t *testing.T) {
+	candidates := runtimePathCandidates("podman", "darwin")
+	for _, candidate := range candidates {
+		if candidate == "/opt/podman/bin" {
+			return
+		}
+	}
+	t.Fatalf("macOS Podman candidates = %q, want /opt/podman/bin", candidates)
+}
+
 func TestProbeDockerPermissionDenied(t *testing.T) {
 	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
 		if strings.Join(args, " ") == "--version" {

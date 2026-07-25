@@ -164,6 +164,16 @@ func parseInspectTime(s string) time.Time {
 	return time.Time{}
 }
 
+// runtimeCommandError keeps the engine's explanation alongside its exit code.
+// Full-screen callers cannot safely stream stderr directly to the terminal.
+func runtimeCommandError(action string, err error, output []byte) error {
+	detail := strings.TrimSpace(string(output))
+	if detail == "" {
+		return fmt.Errorf("%s: %w", action, err)
+	}
+	return fmt.Errorf("%s: %w: %s", action, err, detail)
+}
+
 // parseInspectLine parses the pipe-delimited output produced by ContainerInspect format strings.
 func parseInspectLine(s string) (InspectData, error) {
 	parts := strings.SplitN(s, "|", 4)
