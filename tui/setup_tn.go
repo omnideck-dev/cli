@@ -441,20 +441,22 @@ func writeWindowsPodmanOllamaSteps(sb *strings.Builder, w int) {
 	sb.WriteString("\n")
 }
 
-func (m SetupModel) tnFailed(_ int) string {
+func (m SetupModel) tnFailed(w int) string {
 	var sb strings.Builder
 	sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render("Omnideck could not finish setup") + "\n\n")
 	if m.errorMsg != "" {
 		sb.WriteString("  It stopped while trying to: " + styles.TNTextSub.Render(m.errorMsg) + "\n")
 	}
+	if m.errorShowDetails && m.errorDetail != "" {
+		sb.WriteString("\n  " + styles.TNFaintText.Render("Details to share when reporting this problem") + "\n")
+		writeTNWrapped(&sb, w, "  ", "  ", m.errorDetail, styles.TNRedTxt)
+	}
 	sb.WriteString("  " + styles.TNDimText.Render("Any saved space already prepared will be reused if you try again.") + "\n\n")
 	sb.WriteString("  " + styles.TNTextSub.Render("What you can do") + "\n")
 	sb.WriteString("    • Press r to review the setup and try again.\n")
 	sb.WriteString("    • Press Esc to return without trying again.\n")
-	sb.WriteString("    • Press d to show or hide details for support.\n")
-	if m.errorShowDetails && m.errorDetail != "" {
-		sb.WriteString("\n  " + styles.TNFaintText.Render("Details for support") + "\n")
-		sb.WriteString("  " + styles.TNRedTxt.Render(m.errorDetail) + "\n")
+	if m.errorDetail != "" {
+		sb.WriteString("    • Press d to hide or show the details above.\n")
 	}
 	return sb.String()
 }

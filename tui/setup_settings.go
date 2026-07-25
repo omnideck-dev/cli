@@ -116,17 +116,6 @@ func (m *SetupModel) validateCurrentInput() bool {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
 			return false
 		}
-		if m.eng != nil {
-			exists, err := m.eng.ContainerExists(val)
-			if err != nil {
-				m.inputErrs[m.inputFocus] = "Omnideck could not check whether this name is available"
-				return false
-			}
-			if exists {
-				m.inputErrs[m.inputFocus] = "another container already uses this name; choose a different name"
-				return false
-			}
-		}
 	case inputMemory, inputShmSize:
 		if !validMemSize(val) {
 			m.inputErrs[m.inputFocus] = "must be a number + unit (e.g. 512m, 2g)"

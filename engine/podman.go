@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -29,9 +28,9 @@ func (e *PodmanEngine) HasPermission() bool { return true }
 func (e *PodmanEngine) ContainerExists(name string) (bool, error) {
 	args := []string{"ps", "-a", "--filter", "name=^" + name + "$", "--format", "{{.Names}}"}
 	cmd := buildCmd("podman", args...)
-	out, err := cmd.Output()
+	out, err := commandOutput("podman ps", cmd)
 	if err != nil {
-		return false, fmt.Errorf("podman ps: %w", err)
+		return false, err
 	}
 	return strings.TrimSpace(string(out)) == name, nil
 }
@@ -39,11 +38,8 @@ func (e *PodmanEngine) ContainerExists(name string) (bool, error) {
 func (e *PodmanEngine) CreateVolume(name string) error {
 	return createVolumeIfMissing(name, e.VolumeExists, func() error {
 		cmd := buildCmd("podman", "volume", "create", name)
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			return runtimeCommandError("podman volume create", err, out)
-		}
-		return nil
+		_, err := commandCombinedOutput("podman volume create", cmd)
+		return err
 	})
 }
 
@@ -73,10 +69,10 @@ func (e *PodmanEngine) VolumeExists(name string) (bool, error) {
 	cmd := buildCmd("podman", "volume", "inspect", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
+		if _, ok := err.(*exec.ExitError); ok && volumeNotFound(string(out)) {
 			return false, nil
 		}
-		return false, fmt.Errorf("podman volume inspect: %w: %s", err, strings.TrimSpace(string(out)))
+		return false, runtimeCommandError("podman volume inspect", err, out)
 	}
 	return true, nil
 }
@@ -102,21 +98,7 @@ func (e *PodmanEngine) ExportVolume(name string, w io.Writer) error {
 
 func (e *PodmanEngine) PullImage(image string, msgs chan<- string) error {
 	cmd := buildCmd("podman", "pull", image)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("podman pull: %w", err)
-	}
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		if msgs != nil {
-			msgs <- scanner.Text()
-		}
-	}
-	return cmd.Wait()
+	return streamCommandOutput("podman pull", cmd, msgs)
 }
 
 func (e *PodmanEngine) RunContainer(opts RunOptions) error {
