@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 )
 
@@ -67,6 +69,49 @@ func TestDetectDockerFallback(t *testing.T) {
 	}
 	if eng.Name() != "docker" {
 		t.Errorf("expected docker, got %q", eng.Name())
+	}
+}
+
+func TestRuntimeCommandErrorKeepsEngineExplanation(t *testing.T) {
+	err := runtimeCommandError(
+		"podman run",
+		errors.New("exit status 125"),
+		[]byte("Error: address already in use\n"),
+	)
+	for _, want := range []string{"podman run", "exit status 125", "address already in use"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("runtime command error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestCreateVolumeIfMissingReusesExistingVolume(t *testing.T) {
+	createCalls := 0
+	err := createVolumeIfMissing(
+		"omnideck-home",
+		func(string) (bool, error) { return true, nil },
+		func() error {
+			createCalls++
+			return nil
+		},
+	)
+	if err != nil || createCalls != 0 {
+		t.Fatalf("createVolumeIfMissing() = %v, create calls = %d; want success without creating", err, createCalls)
+	}
+}
+
+func TestCreateVolumeIfMissingHandlesCreateRace(t *testing.T) {
+	inspectCalls := 0
+	err := createVolumeIfMissing(
+		"omnideck-home",
+		func(string) (bool, error) {
+			inspectCalls++
+			return inspectCalls > 1, nil
+		},
+		func() error { return errors.New("volume already exists") },
+	)
+	if err != nil {
+		t.Fatalf("createVolumeIfMissing() = %v, want race to succeed", err)
 	}
 }
 

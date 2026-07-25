@@ -109,10 +109,9 @@ func (e *DockerEngine) PullImage(image string, msgs chan<- string) error {
 func (e *DockerEngine) RunContainer(opts RunOptions) error {
 	args := buildRunArgs("docker", opts)
 	cmd := buildCmd("docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("docker run: %w", err)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return runtimeCommandError("docker run", err, out)
 	}
 	return nil
 }
