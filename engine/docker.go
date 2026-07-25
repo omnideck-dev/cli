@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"bufio"
 	"fmt"
 	"io"
 	"os"
@@ -38,9 +37,9 @@ func (e *DockerEngine) HasPermission() bool {
 func (e *DockerEngine) ContainerExists(name string) (bool, error) {
 	args := []string{"ps", "-a", "--filter", "name=^" + name + "$", "--format", "{{.Names}}"}
 	cmd := buildCmd("docker", args...)
-	out, err := cmd.Output()
+	out, err := commandOutput("docker ps", cmd)
 	if err != nil {
-		return false, fmt.Errorf("docker ps: %w", err)
+		return false, err
 	}
 	return strings.TrimSpace(string(out)) == name, nil
 }
@@ -58,10 +57,10 @@ func (e *DockerEngine) VolumeExists(name string) (bool, error) {
 	cmd := buildCmd("docker", "volume", "inspect", name)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		if _, ok := err.(*exec.ExitError); ok {
+		if _, ok := err.(*exec.ExitError); ok && volumeNotFound(string(out)) {
 			return false, nil
 		}
-		return false, fmt.Errorf("docker volume inspect: %w: %s", err, strings.TrimSpace(string(out)))
+		return false, runtimeCommandError("docker volume inspect", err, out)
 	}
 	return true, nil
 }
@@ -87,23 +86,7 @@ func (e *DockerEngine) ExportVolume(name string, w io.Writer) error {
 
 func (e *DockerEngine) PullImage(image string, msgs chan<- string) error {
 	cmd := buildCmd("docker", "pull", image)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	// Discard raw engine output — it contains ANSI progress codes that corrupt
-	// the Bubble Tea alt-screen. Callers receive structured messages via msgs.
-	cmd.Stderr = io.Discard
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("docker pull: %w", err)
-	}
-	scanner := bufio.NewScanner(stdout)
-	for scanner.Scan() {
-		if msgs != nil {
-			msgs <- scanner.Text()
-		}
-	}
-	return cmd.Wait()
+	return streamCommandOutput("docker pull", cmd, msgs)
 }
 
 func (e *DockerEngine) RunContainer(opts RunOptions) error {

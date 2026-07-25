@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -247,18 +248,39 @@ func TestSetupOnlyReturnsToDashboardWhenRuntimeIsReady(t *testing.T) {
 	}
 }
 
-func TestContainerNameCollisionIsRejected(t *testing.T) {
+func TestContainerNameCollisionReturnsToSettings(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
-	m.eng = &mockEngine{containerExists: true}
-	m.inputFocus = inputContainerName
-	m.inputs[inputContainerName].SetValue("omnideck")
+	m.Stage = SetupStageApplying
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+	err := checkSetupAvailability(&mockEngine{containerExists: true}, m.buildConfig())
 
-	if m.validateCurrentInput() {
-		t.Fatal("a container name already used by the runtime must be rejected")
+	newModel, _ := m.updateApplying(StepFailedMsg{Index: setupStepAvailability, Err: err})
+	nm := newModel.(SetupModel)
+	if nm.Stage != SetupStageSettings || nm.inputFocus != inputContainerName {
+		t.Fatalf("name collision stage = %d, focus = %d; want settings name field", nm.Stage, nm.inputFocus)
 	}
-	if !strings.Contains(m.inputErrs[inputContainerName], "another container") {
-		t.Fatalf("collision error = %q", m.inputErrs[inputContainerName])
+	if !strings.Contains(nm.inputErrs[inputContainerName], "another container") {
+		t.Fatalf("collision error = %q", nm.inputErrs[inputContainerName])
+	}
+}
+
+func TestRuntimeFailureDuringAvailabilityShowsReportableError(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageApplying
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+	runtimeErr := errors.New("podman ps: exit status 125\nError: machine connection failed")
+
+	newModel, _ := m.updateApplying(StepFailedMsg{Index: setupStepAvailability, Err: runtimeErr})
+	nm := newModel.(SetupModel)
+	if nm.Stage != SetupStageFailed || !nm.errorShowDetails {
+		t.Fatalf("runtime failure stage = %d, details = %v; want visible failure", nm.Stage, nm.errorShowDetails)
+	}
+	view := nm.tnFailed(100)
+	for _, want := range []string{"Check that the name", "podman ps", "machine connection failed"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("runtime failure view is missing %q:\n%s", want, view)
+		}
 	}
 }
 
@@ -1008,20 +1030,21 @@ func TestSettingsCanBeCustomized(t *testing.T) {
 	}
 }
 
-func TestInstallErrorOffersRetryAndHidesTechnicalDetails(t *testing.T) {
+func TestInstallErrorOffersRetryAndShowsReportableDetails(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.Stage = SetupStageFailed
 	m.errorMsg = "Download Omnideck"
 	m.errorDetail = "connection reset by peer"
+	m.errorShowDetails = true
 
 	view := m.tnFailed(100)
-	if !strings.Contains(view, "Press r") || strings.Contains(view, m.errorDetail) {
-		t.Fatalf("error screen must offer a retry and hide technical details by default:\n%s", view)
+	if !strings.Contains(view, "Press r") || !strings.Contains(view, "Details to share") || !strings.Contains(view, m.errorDetail) {
+		t.Fatalf("error screen must offer a retry and show reportable details by default:\n%s", view)
 	}
 
 	newModel, _ := m.updateFailed(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	nm := newModel.(SetupModel)
-	if view := nm.tnFailed(100); !strings.Contains(view, m.errorDetail) {
-		t.Fatalf("details should be available when requested:\n%s", view)
+	if view := nm.tnFailed(100); strings.Contains(view, m.errorDetail) {
+		t.Fatalf("details should be hidden when requested:\n%s", view)
 	}
 }

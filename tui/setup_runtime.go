@@ -325,6 +325,7 @@ func (m SetupModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
 			m.Stage = SetupStageFailed
 			m.errorMsg = "Omnideck could not remember the container runtime"
 			m.errorDetail = err.Error()
+			m.errorShowDetails = true
 			return m, nil
 		}
 		return m.exit(WorkflowCompleted)

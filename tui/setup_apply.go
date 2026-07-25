@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -71,6 +72,13 @@ const (
 	ollamaCheckNotInstalled = "not installed (optional)"
 )
 
+type setupInputError struct {
+	field   int
+	message string
+}
+
+func (e *setupInputError) Error() string { return e.message }
+
 func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -96,11 +104,16 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.Stage = SetupStageFailed
 		m.errorMsg = setupStepLabels[msg.Index]
 		m.errorDetail = msg.Err.Error()
-		m.errorShowDetails = false
-		if msg.Index == setupStepAvailability {
+		m.errorShowDetails = true
+		var inputErr *setupInputError
+		if msg.Index == setupStepAvailability && errors.As(msg.Err, &inputErr) {
 			m.Stage = SetupStageSettings
 			m.settingsAdvanced = true
-			_ = m.validateAllInputs()
+			m.errorMsg = ""
+			m.errorDetail = ""
+			m.errorShowDetails = false
+			m.inputFocus = inputErr.field
+			m.inputErrs[inputErr.field] = inputErr.message
 			for i := range m.inputs {
 				m.inputs[i].Blur()
 			}
@@ -170,17 +183,7 @@ func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 	switch i {
 	case setupStepAvailability: // Recheck name and port immediately before making changes.
 		workCmd = StepCmd(i, func() (string, error) {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil {
-				return "", fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
-			}
-			if exists {
-				return "", fmt.Errorf("another container already uses the name %q; go back and choose a different name", cfg.ContainerName)
-			}
-			if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-				return "", fmt.Errorf("another app is already using browser address number %s; go back and choose a different number", cfg.WebUIPortOrDefault())
-			}
-			return "available", nil
+			return "available", checkSetupAvailability(eng, cfg)
 		})
 	case setupStepHomeVolume: // Create home volume.
 		workCmd = StepCmd(i, func() (string, error) {
@@ -229,6 +232,28 @@ func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 	}
 
 	return tea.Sequence(startCmd, workCmd)
+}
+
+func checkSetupAvailability(eng interface {
+	ContainerExists(string) (bool, error)
+}, cfg *config.Config) error {
+	exists, err := eng.ContainerExists(cfg.ContainerName)
+	if err != nil {
+		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
+	}
+	if exists {
+		return &setupInputError{
+			field:   inputContainerName,
+			message: "another container already uses this name; choose a different name",
+		}
+	}
+	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
+		return &setupInputError{
+			field:   inputWebUIPort,
+			message: "another app is already using this browser address number",
+		}
+	}
+	return nil
 }
 
 func (m *SetupModel) buildConfig() *config.Config {
