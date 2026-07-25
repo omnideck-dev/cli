@@ -209,18 +209,18 @@ try {
     $Doctor | Tee-Object -FilePath (Join-Path $OutputDirectory "doctor.log")
     if (($Doctor -join "`n") -notlike "*Omnideck Doctor Report*") { throw "doctor did not render its report." }
 
-    $CurrentStep = "uninstall"
-    @("yes", "yes", "no") | & $CliPath --no-color --name $Instance uninstall
-    if ($LASTEXITCODE -ne 0) { throw "uninstall failed." }
+    $CurrentStep = "remove instance"
+    @("yes", "yes", "no", $Instance) | & $CliPath --no-color instance remove $Instance
+    if ($LASTEXITCODE -ne 0) { throw "instance removal failed." }
 
     $CurrentStep = "verify cleanup"
     & $Engine container inspect $Instance *> $null
-    if ($LASTEXITCODE -eq 0) { throw "The container still exists after uninstall." }
+    if ($LASTEXITCODE -eq 0) { throw "The container still exists after instance removal." }
     & $Engine volume inspect "$Instance-home" *> $null
-    if ($LASTEXITCODE -eq 0) { throw "The home volume still exists after uninstall." }
+    if ($LASTEXITCODE -eq 0) { throw "The home volume still exists after instance removal." }
     & $Engine volume inspect "$Instance-state" *> $null
-    if ($LASTEXITCODE -eq 0) { throw "The state volume still exists after uninstall." }
-    if (Test-Path $ConfigPath) { throw "The configuration still exists after uninstall." }
+    if ($LASTEXITCODE -eq 0) { throw "The state volume still exists after instance removal." }
+    if (Test-Path $ConfigPath) { throw "The configuration still exists after instance removal." }
 
     $CurrentStep = "complete"
     $TestPassed = $true

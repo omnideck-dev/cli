@@ -22,7 +22,7 @@ The scripts currently verify:
 - volume persistence
 - stop, start, and restart
 - doctor report
-- uninstall and resource cleanup
+- instance removal and resource cleanup
 - JSON, JUnit, command, container, and diagnostic output
 
 The following need separate scenarios before the hardware suite can be called
@@ -32,7 +32,7 @@ complete:
 - actual Podman or Docker installation and operating-system permission prompts
 - `omnideck update`, which currently has no non-interactive mode
 - upgrade from the previous stable CLI and production image
-- uninstall with a real data backup and restore
+- instance removal with a real data backup and restore
 - multiple simultaneous instances
 - local Ollama connectivity
 

@@ -34,7 +34,7 @@ omnideck-cli/
 │   ├── logs.go
 │   ├── doctor.go
 │   ├── config.go
-│   └── uninstall.go
+│   └── instance.go          # Instance-scoped commands, including safe removal
 ├── tui/
 │   ├── app.go               # Application shell and shared instance state
 │   ├── app_update.go        # Global messages and route dispatch
@@ -52,6 +52,7 @@ omnideck-cli/
 │   ├── container.go         # Idempotent lifecycle and transactional recreate
 │   ├── diagnostics.go       # Shared Doctor diagnosis and guided actions
 │   ├── instances.go         # Unique new-instance defaults
+│   ├── remove_instance.go   # Shared safe removal and optional data backup
 │   └── settings.go          # Shared settings validation/mutation
 ├── engine/
 │   ├── engine.go            # Engine interface

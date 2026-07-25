@@ -12,14 +12,37 @@ import (
 	"github.com/omnideck-dev/cli/engine"
 )
 
-// ContainerEngine is the part of engine.Engine needed for lifecycle changes.
-// Keeping the interface narrow makes workflow behavior straightforward to test.
-type ContainerEngine interface {
+// ContainerStateEngine is the read-only engine surface used by lifecycle
+// workflows.
+type ContainerStateEngine interface {
 	ContainerExists(name string) (bool, error)
 	ContainerStatus(name string) (string, error)
+}
+
+// ContainerStartEngine can inspect and start a container.
+type ContainerStartEngine interface {
+	ContainerStateEngine
 	StartContainer(name string) error
+}
+
+// ContainerStopEngine can inspect and stop a container.
+type ContainerStopEngine interface {
+	ContainerStateEngine
 	StopContainer(name string) error
+}
+
+// ContainerRemoveEngine can find and remove a container.
+type ContainerRemoveEngine interface {
+	ContainerExists(name string) (bool, error)
 	RemoveContainer(name string) error
+}
+
+// ContainerEngine is the full engine surface needed when replacing a
+// container. Smaller workflows accept the narrower interfaces above.
+type ContainerEngine interface {
+	ContainerStartEngine
+	ContainerStopEngine
+	ContainerRemoveEngine
 	RunContainer(opts engine.RunOptions) error
 }
 
@@ -61,7 +84,7 @@ func RunOptions(cfg *config.Config) engine.RunOptions {
 
 // EnsureStarted starts name only when it exists and is not already running.
 // changed reports whether an engine mutation was needed.
-func EnsureStarted(eng ContainerEngine, name string) (changed bool, err error) {
+func EnsureStarted(eng ContainerStartEngine, name string) (changed bool, err error) {
 	exists, err := eng.ContainerExists(name)
 	if err != nil {
 		return false, fmt.Errorf("checking container %q: %w", name, err)
@@ -84,7 +107,7 @@ func EnsureStarted(eng ContainerEngine, name string) (changed bool, err error) {
 
 // EnsureStopped stops name only when it exists and is in an active state.
 // Missing and already-stopped containers are successful no-ops.
-func EnsureStopped(eng ContainerEngine, name string) (changed bool, err error) {
+func EnsureStopped(eng ContainerStopEngine, name string) (changed bool, err error) {
 	exists, err := eng.ContainerExists(name)
 	if err != nil {
 		return false, fmt.Errorf("checking container %q: %w", name, err)
@@ -109,7 +132,7 @@ func EnsureStopped(eng ContainerEngine, name string) (changed bool, err error) {
 
 // EnsureRemoved removes name when it exists. Missing containers are successful
 // no-ops, which makes update retries and interrupted repairs safe.
-func EnsureRemoved(eng ContainerEngine, name string) (changed bool, err error) {
+func EnsureRemoved(eng ContainerRemoveEngine, name string) (changed bool, err error) {
 	exists, err := eng.ContainerExists(name)
 	if err != nil {
 		return false, fmt.Errorf("checking container %q: %w", name, err)

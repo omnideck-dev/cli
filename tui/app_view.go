@@ -160,6 +160,11 @@ func (m AppModel) breadcrumb() string {
 			return "Instances › " + inst.Info.Name + " › " + title
 		}
 		return title
+	case RouteRemoval:
+		if inst := m.CurrentInstance(); inst != nil {
+			return "Instances › " + inst.Info.Name + " › Remove"
+		}
+		return "Remove instance"
 	}
 	return ""
 }
@@ -197,11 +202,11 @@ func (m AppModel) footerHints() string {
 		}
 		if m.isExpanded() {
 			return keyHints([][2]string{
-				{"↑↓", "move"}, {"tab", "actions"}, {"enter", "open/collapse"}, {"esc", "collapse"},
+				{"↑↓", "move"}, {"tab", "actions"}, {"x", "remove"}, {"enter", "open/collapse"}, {"esc", "collapse"},
 			})
 		}
 		return keyHints([][2]string{
-			{"↑↓", "move"}, {"enter", "open"}, {"n", "new"}, {"d", "doctor"}, {"q", "quit"},
+			{"↑↓", "move"}, {"enter", "open"}, {"n", "new"}, {"x", "remove"}, {"d", "doctor"}, {"q", "quit"},
 		})
 	case RouteLogs:
 		if m.logSearchMode {
@@ -318,6 +323,22 @@ func (m AppModel) footerHints() string {
 			return keyHints([][2]string{{"r", "try again"}, {"esc", "return"}})
 		}
 		return ""
+	case RouteRemoval:
+		switch m.removalModel.Stage {
+		case RemovalStageDataChoice, RemovalStageBackupChoice:
+			return keyHints([][2]string{{"↑↓", "choose"}, {"enter", "continue"}, {"esc", "go back"}})
+		case RemovalStageReview:
+			return keyHints([][2]string{{"enter", "remove instance"}, {"esc", "go back"}})
+		case RemovalStageDeleteConfirm:
+			return keyHints([][2]string{{"type", "instance name"}, {"enter", "confirm deletion"}, {"esc", "go back"}})
+		case RemovalStageApplying:
+			return keyHints([][2]string{{"working", "please wait"}})
+		case RemovalStageComplete:
+			return keyHints([][2]string{{"any key", "return to instances"}})
+		case RemovalStageFailed:
+			return keyHints([][2]string{{"r", "try again"}, {"esc", "return to instances"}})
+		}
+		return ""
 	}
 	return ""
 }
@@ -351,6 +372,8 @@ func (m AppModel) renderBody() string {
 		return m.viewSetup()
 	case RouteMaintenance:
 		return m.viewMaintenance()
+	case RouteRemoval:
+		return m.viewRemoval()
 	}
 	return ""
 }

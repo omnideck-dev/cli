@@ -48,6 +48,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.router.Current() == RouteMaintenance {
 			m.maintenanceModel.HandleWindowSize(msg)
 		}
+		if m.router.Current() == RouteRemoval {
+			m.removalModel.HandleWindowSize(msg)
+		}
 		return m, nil
 
 	case statsTickMsg:
@@ -227,7 +230,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.doctorSpinner, cmd = m.doctorSpinner.Update(msg)
 			return m, cmd
 		}
-		// Setup and Maintenance own their spinners. Continue to the active
+		// Setup, Maintenance, and Removal own their spinners. Continue to the active
 		// route instead of consuming their animation message here.
 	}
 
@@ -243,6 +246,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case RouteMaintenance:
 		newModel, cmd := m.maintenanceModel.Update(msg)
 		m.maintenanceModel = newModel.(MaintenanceModel)
+		return m, cmd
+	case RouteRemoval:
+		newModel, cmd := m.removalModel.Update(msg)
+		m.removalModel = newModel.(RemovalModel)
 		return m, cmd
 	case RouteDashboard:
 		return m.updateDashboard(msg)
@@ -267,6 +274,8 @@ func (m AppModel) operationInProgress() bool {
 		return m.doctorStage == doctorStageActing
 	case RouteMaintenance:
 		return m.maintenanceModel.Stage == MaintenanceStageApplying
+	case RouteRemoval:
+		return m.removalModel.Stage == RemovalStageApplying
 	default:
 		return false
 	}

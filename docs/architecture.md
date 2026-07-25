@@ -19,7 +19,8 @@ main.go
                                 ├─ Settings screen
                                 ├─ Doctor screen
                                 ├─ Setup workflow screen
-                                └─ Maintenance workflow screen
+                                ├─ Maintenance workflow screen
+                                └─ Remove-instance workflow screen
 
 workflow/                 Shared lifecycle, settings, and diagnosis operations
 engine/                   Raw Docker and Podman commands and host setup plans
@@ -36,12 +37,12 @@ start, stop, status, logs, or Doctor implementations.
 ## TUI navigation
 
 `AppModel` owns shared instance state and a small stack-based `Router`. The
-Dashboard is the root screen. Logs, Settings, Doctor, Setup, and Maintenance
+Dashboard is the root screen. Logs, Settings, Doctor, Setup, Maintenance, and Removal
 are full screens. Pushing a screen records its caller, so Back returns to the
 actual previous screen—for example, Repair opened by Doctor returns to Doctor
 for another health check.
 
-Setup and Maintenance remain independent Bubble Tea workflow models hosted by
+Setup, Maintenance, and Removal remain independent Bubble Tea workflow models hosted by
 the application shell. Their exit messages distinguish completion from
 cancellation: a root-level cancel exits the TUI, while a completed first setup
 continues to the Dashboard.
@@ -58,17 +59,18 @@ being in Setup's runtime-selection state.
 
 | Workflow | States or modes |
 | --- | --- |
-| Application router | Dashboard, Logs, Settings, Doctor, Setup, Maintenance routes |
+| Application router | Dashboard, Logs, Settings, Doctor, Setup, Maintenance, Removal routes |
 | Setup | Quick check, Runtime, Settings, Review, Applying, Complete, Failed |
 | Runtime setup | Choose, Review, Working, Waiting |
 | Settings | Editing, Applying |
 | Doctor | Checking, Results, Acting |
 | Maintenance | Update or Repair mode; Review, Applying, Complete, Failed |
+| Removal | Data choice, Review or Backup choice, Delete confirmation, Applying, Complete, Failed |
 
-Constructors accept `SetupRequest` or `MaintenanceRequest`, which makes mode,
-target, runtime, and embedded/standalone behavior explicit before a workflow
-starts. A workflow should not be constructed and then mutated into another
-journey by its caller.
+Workflow constructors accept request values such as `SetupRequest`,
+`MaintenanceRequest`, and `RemovalRequest`. This makes mode, target, runtime,
+and embedded/standalone behavior explicit before a workflow starts. A workflow
+should not be constructed and then mutated into another journey by its caller.
 
 ## Container lifecycle rules
 
@@ -85,6 +87,8 @@ be an error. `workflow/` provides the application semantics used everywhere:
 - `ApplySetting` owns the editable settings surface and syntax validation.
 - `Diagnose` owns Doctor's runtime, instance, volume, and host checks for both
   the interactive screen and the plain `omnideck doctor` report.
+- `RemoveInstance` stops and removes one container, keeps its data by default,
+  and owns optional backup and permanent volume deletion for both CLI and TUI.
 
 Commands and TUI screens should call these operations rather than calling raw
 start/stop/remove methods or rebuilding `engine.RunOptions` themselves.
@@ -105,6 +109,11 @@ Settings apply is ordered as a small transaction:
 
 Update and Repair also begin on a review screen and allow retry. No mutation is
 started from a model's `Init` method before user confirmation.
+
+Instance removal deletes its saved YAML file last. If a runtime, backup, or
+volume operation fails, the instance therefore stays visible and the user can
+retry. Permanent data deletion requires an explicit choice and an exact-name
+confirmation; keeping the named volumes is the default.
 
 ## Adding or changing behavior
 

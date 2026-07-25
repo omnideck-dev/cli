@@ -27,3 +27,17 @@ func (m AppModel) viewMaintenance() string {
 
 	return m.renderScreen(m.maintenanceModel.TNView(contentW))
 }
+
+// --- Remove instance screen ---
+
+func (m AppModel) viewRemoval() string {
+	contentW := m.width - 4
+	if contentW > 88 {
+		contentW = 88
+	}
+	if contentW < 20 {
+		contentW = 20
+	}
+
+	return m.renderScreen(m.removalModel.TNView(contentW))
+}

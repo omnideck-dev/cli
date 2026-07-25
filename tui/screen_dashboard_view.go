@@ -121,7 +121,8 @@ func (m AppModel) renderInstanceCard(idx, cardW int) string {
 	stats := cpuBlock + "   " + memBlock
 	statsW := lipgloss.Width(stats)
 
-	// 4 action chips.
+	// Primary action chips. Destructive removal is kept out of this compact row
+	// and shown separately when the card is expanded.
 	chips := m.renderActionChips(inst, idx)
 	chipsW := lipgloss.Width(chips)
 
@@ -146,7 +147,8 @@ func (m AppModel) renderInstanceCard(idx, cardW int) string {
 	if expanded {
 		sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
 		accordion := m.renderCardAccordion(inst, contentW)
-		content = content + "\n" + sep + "\n" + accordion
+		removeAction := m.renderRemoveAction(idx, contentW)
+		content = content + "\n" + sep + "\n" + accordion + "\n" + sep + "\n" + removeAction
 	}
 
 	borderColor := styles.TNBorder
@@ -163,7 +165,7 @@ func (m AppModel) renderInstanceCard(idx, cardW int) string {
 		Render(content)
 }
 
-// renderActionChips renders 4 action chips for a card. Focused chip is highlighted.
+// renderActionChips renders the compact, non-destructive action row for a card.
 func (m AppModel) renderActionChips(inst *InstanceState, cardIdx int) string {
 	isSelected := cardIdx == m.selected
 	chipBase := lipgloss.NewStyle().
@@ -223,6 +225,30 @@ func (m AppModel) renderActionChips(inst *InstanceState, cardIdx int) string {
 	}
 
 	return openChip + " " + logsChip + " " + updateChip + " " + toggleChip
+}
+
+// renderRemoveAction makes instance removal discoverable without crowding the
+// card's compact action row. It is visible only in the expanded card.
+func (m AppModel) renderRemoveAction(cardIdx, innerW int) string {
+	label := "✕ Remove instance"
+	chipStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("#3d1a25")).
+		Foreground(styles.TNRed).
+		Padding(0, 1)
+	if cardIdx == m.selected && m.chipFocus == 4 {
+		chipStyle = lipgloss.NewStyle().
+			Background(styles.TNRed).
+			Foreground(lipgloss.Color("#16161e")).
+			Bold(true).
+			Padding(0, 1)
+	}
+	chip := chipStyle.Render(label)
+	title := styles.TNDimText.Render("INSTANCE ACTION")
+	gap := innerW - lipgloss.Width(title) - lipgloss.Width(chip)
+	if gap < 1 {
+		gap = 1
+	}
+	return title + safeRepeat(" ", gap) + chip
 }
 
 // renderCardAccordion renders the expanded accordion (metadata + resources + log tail).

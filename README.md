@@ -21,7 +21,7 @@ CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnid
 - **Multi-instance** — run more than one Omnideck container on different ports from a single binary
 - **Actionable health check** — `doctor` identifies the root problem and can open runtime setup, start a stopped instance, or repair a missing container
 - **Docker + Podman** — auto-detected; runtime setup and host-networking differences handled per OS
-- **Backup on uninstall** — optionally archives data directories to a `.tar.gz` before removal
+- **Safe instance removal** — keeps saved data by default, with an optional backup before permanent deletion
 - **`--no-color`** — safe to pipe; exits non-zero on actual failures, not on warnings
 
 ---
@@ -184,7 +184,7 @@ omnideck <command> [flags]
 | `config show` | Pretty-print the saved config |
 | `config set <key> <value>` | Save one setting and explain how to apply it |
 | `config path` | Print the config file path |
-| `uninstall` | Remove an installation, with backup and saved-data options |
+| `instance remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it |
 
 ### Global flags
 
@@ -229,8 +229,8 @@ omnideck setup --image ghcr.io/example/omnideck:dev
 # Non-interactive setup for CI/CD
 omnideck setup --plain --runtime docker --port 2337
 
-# Uninstall a specific instance
-omnideck --name omnideck2 uninstall
+# Remove a specific instance
+omnideck instance remove omnideck2
 ```
 
 ### Multiple instances

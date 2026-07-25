@@ -30,27 +30,27 @@ unreachable on any host port.
   correct web UIs
 - `omnideck status` / `omnideck --name omnideck2 status` — correct instance shown
 - `omnideck stop` / `omnideck --name omnideck2 stop` — stops correct instance only
-- `omnideck uninstall` with two instances — picker appears, correct one removed
+- `omnideck instance remove omnideck2` removes only the named instance
 
 ---
 
-## 3. Named Volume Persistence / Uninstall
+## 3. Named Volume Persistence / Instance Removal
 
 **Approach:** Docker and Podman use named volumes for `/home/omnideck` and
-`/var/lib/omnideck`, so host filesystem ownership no longer affects uninstall.
+`/var/lib/omnideck`, so host filesystem ownership no longer affects instance removal.
 
 **To test:**
 - After install, inspect mounts and confirm `Type:"volume"`, not `Type:"bind"`
 - Confirm volumes are named `{container}-home` and `{container}-state`
-- Uninstall → delete data volumes → should succeed without `sudo`
+- Remove instance → delete saved data → should succeed without `sudo`
 - Test the backup path (answer yes to backup prompt) — tar.gz created and complete
-- Test with a container that has written files before uninstall (not just empty volumes)
+- Test with a container that has written files before removal (not just empty volumes)
 
 ---
 
 ## 4. Container Runtime × OS Matrix
 
-Combinations to validate end-to-end (install → use → uninstall):
+Combinations to validate end-to-end (setup → use → remove instance):
 
 | Container runtime | OS            | Notes                                      |
 |-----------------|-----------------|---------------------------------------------|
@@ -188,13 +188,14 @@ time. SHM = 50% of M.
 
 ---
 
-## 11. Uninstall — Named Volumes
+## 11. Instance Removal — Named Volumes
 
-`omnideck uninstall` removes Docker/Podman named volumes when the user confirms
-data deletion. Host bind-mount directories are no longer removed by the CLI.
+`omnideck instance remove NAME` keeps Docker/Podman named volumes by default and
+removes them only when the user confirms permanent data deletion. Host
+bind-mount directories are never removed by the CLI.
 
 **To test:**
-- Confirm uninstall prompts to delete `{container}-home` and `{container}-state`
+- Confirm removal prompts to delete `{container}-home` and `{container}-state`
 - Confirm declining the prompt preserves both volumes
 - Confirm accepting the prompt removes both volumes
 
@@ -202,7 +203,7 @@ data deletion. Host bind-mount directories are no longer removed by the CLI.
 
 ## 12. Backup Archive
 
-`omnideck uninstall` optionally creates a `.tar.gz` backup before deleting
+`omnideck instance remove NAME` optionally creates a `.tar.gz` backup before deleting
 volumes. The archive contains native volume exports as `home.tar` and
 `state.tar`.
 

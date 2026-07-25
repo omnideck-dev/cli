@@ -127,7 +127,7 @@ func TestNoArgsShowsHelp(t *testing.T) {
 }
 
 func TestSubcommandHelp(t *testing.T) {
-	for _, sub := range []string{"setup", "install", "list", "start", "stop", "restart", "status", "logs", "doctor", "config", "update", "uninstall"} {
+	for _, sub := range []string{"setup", "install", "list", "start", "stop", "restart", "status", "logs", "doctor", "config", "update", "instance"} {
 		t.Run(sub, func(t *testing.T) {
 			stdout, _, code := run(sub, "--help")
 			if code != 0 {
@@ -137,6 +137,10 @@ func TestSubcommandHelp(t *testing.T) {
 				t.Fatalf("%s --help should mention %s, got: %s", sub, sub, stdout)
 			}
 		})
+	}
+	stdout, _, code := run("instance", "remove", "--help")
+	if code != 0 || !strings.Contains(stdout, "remove NAME") {
+		t.Fatalf("instance remove --help exited %d: %s", code, stdout)
 	}
 }
 
