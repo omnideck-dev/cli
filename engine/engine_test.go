@@ -195,6 +195,9 @@ func TestBuildRunArgsLinux(t *testing.T) {
 	args := buildRunArgs("docker", opts)
 
 	assertContains(t, args, "--shm-size=256m")
+	assertContains(t, args, "--log-driver=local")
+	assertContains(t, args, "--log-opt=max-size=50m")
+	assertContains(t, args, "--log-opt=max-file=3")
 	assertContains(t, args, "2337:8080")
 	assertContains(t, args, "--add-host=host-gateway:host-gateway")
 	assertContains(t, args, "omnideck-home:/home/omnideck")
@@ -286,6 +289,8 @@ func TestBuildPodmanRunArgsDoesNotReplace(t *testing.T) {
 
 	args := buildPodmanRunArgs(opts)
 	assertNotContains(t, args, "--replace")
+	assertContains(t, args, "--log-driver=k8s-file")
+	assertContains(t, args, "--log-opt=max-size=150mb")
 	assertContains(t, args, "2337:8080")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
 	assertNotContains(t, args, "--network")
