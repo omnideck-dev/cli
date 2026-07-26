@@ -97,8 +97,66 @@ func (e *PodmanEngine) ExportVolume(name string, w io.Writer) error {
 }
 
 func (e *PodmanEngine) PullImage(image string, msgs chan<- string) error {
-	cmd := buildCmd("podman", "pull", image)
-	return streamCommandOutput("podman pull", cmd, msgs)
+	runPull := func(args ...string) error {
+		cmd := buildCmd("podman", args...)
+		return streamCommandOutput("podman pull", cmd, msgs)
+	}
+	return pullPodmanImage(image, msgs, runPull)
+}
+
+func pullPodmanImage(image string, msgs chan<- string, runPull func(...string) error) error {
+	err := runPull("pull", image)
+	if err == nil || !emptyDockerCredentialHelperError(err) {
+		return err
+	}
+
+	// Podman falls back to Docker's credential configuration when it has no
+	// matching native login. A stale empty helper entry makes even public pulls
+	// fail by asking the OS to run "docker-credential-". Retry only that exact
+	// malformed case with an explicit empty auth file. This prevents the
+	// fallback without editing the user's Docker settings or ignoring a real,
+	// named credential helper.
+	authFile, cleanup, authErr := newAnonymousRegistryAuthFile()
+	if authErr != nil {
+		return fmt.Errorf("%w\nOmnideck could not prepare a safe retry without the invalid Docker login setting: %v", err, authErr)
+	}
+	defer cleanup()
+
+	if msgs != nil {
+		msgs <- "Podman found an invalid leftover Docker login setting. Retrying without it."
+	}
+	if retryErr := runPull("pull", "--authfile", authFile, image); retryErr != nil {
+		return fmt.Errorf("Podman found an invalid empty Docker credential-helper setting; the retry without that setting also failed: %w", retryErr)
+	}
+	return nil
+}
+
+func emptyDockerCredentialHelperError(err error) bool {
+	if err == nil {
+		return false
+	}
+	detail := strings.ToLower(err.Error())
+	return strings.Contains(detail, "error getting credentials") &&
+		strings.Contains(detail, `"docker-credential-"`)
+}
+
+func newAnonymousRegistryAuthFile() (string, func(), error) {
+	f, err := os.CreateTemp("", "omnideck-registry-auth-*.json")
+	if err != nil {
+		return "", func() {}, err
+	}
+	path := f.Name()
+	cleanup := func() { _ = os.Remove(path) }
+	if _, err := f.WriteString("{}\n"); err != nil {
+		_ = f.Close()
+		cleanup()
+		return "", func() {}, err
+	}
+	if err := f.Close(); err != nil {
+		cleanup()
+		return "", func() {}, err
+	}
+	return path, cleanup, nil
 }
 
 func (e *PodmanEngine) RunContainer(opts RunOptions) error {

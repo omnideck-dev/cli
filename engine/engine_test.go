@@ -2,7 +2,9 @@ package engine
 
 import (
 	"errors"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -112,6 +114,68 @@ func TestCreateVolumeIfMissingHandlesCreateRace(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("createVolumeIfMissing() = %v, want race to succeed", err)
+	}
+}
+
+func TestPullPodmanImageRetriesEmptyDockerCredentialHelperAnonymously(t *testing.T) {
+	msgs := make(chan string, 1)
+	calls := 0
+	var retryAuthFile string
+	err := pullPodmanImage(
+		"ghcr.io/omnideck-dev/omnideck:latest",
+		msgs,
+		func(args ...string) error {
+			calls++
+			if calls == 1 {
+				return errors.New(`podman pull: exit status 125
+Error: error getting credentials - err: exec: "docker-credential-": executable file not found in $PATH`)
+			}
+			if len(args) != 4 || args[0] != "pull" || args[1] != "--authfile" ||
+				args[3] != "ghcr.io/omnideck-dev/omnideck:latest" {
+				t.Fatalf("retry arguments = %q; want pull --authfile <path> <image>", args)
+			}
+			retryAuthFile = args[2]
+			data, readErr := os.ReadFile(args[2])
+			if readErr != nil {
+				t.Fatalf("reading retry auth file: %v", readErr)
+			}
+			if string(data) != "{}\n" {
+				t.Fatalf("retry auth file = %q, want empty JSON object", data)
+			}
+			if info, statErr := os.Stat(args[2]); statErr != nil {
+				t.Fatalf("stating retry auth file: %v", statErr)
+			} else if runtime.GOOS != "windows" && info.Mode().Perm()&0o077 != 0 {
+				t.Fatalf("retry auth file permissions = %o, want private", info.Mode().Perm())
+			}
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("pullPodmanImage() = %v, want successful retry", err)
+	}
+	if calls != 2 {
+		t.Fatalf("pull calls = %d, want 2", calls)
+	}
+	if _, statErr := os.Stat(retryAuthFile); !os.IsNotExist(statErr) {
+		t.Fatalf("retry auth file still exists after pull: %v", statErr)
+	}
+	if msg := <-msgs; !strings.Contains(msg, "Retrying") {
+		t.Fatalf("retry message = %q, want plain-language retry explanation", msg)
+	}
+}
+
+func TestPullPodmanImageDoesNotRetryOtherCredentialFailures(t *testing.T) {
+	calls := 0
+	wantErr := errors.New(`error getting credentials: exec: "docker-credential-desktop": executable file not found`)
+	err := pullPodmanImage("example.invalid/image", nil, func(...string) error {
+		calls++
+		return wantErr
+	})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("pullPodmanImage() = %v, want original error", err)
+	}
+	if calls != 1 {
+		t.Fatalf("pull calls = %d, want no retry", calls)
 	}
 }
 
