@@ -257,6 +257,8 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 		"run", "-d",
 		"--name", opts.Name,
 		"--restart", restart,
+		"--log-driver=k8s-file",
+		"--log-opt=max-size=150mb",
 		"--shm-size=" + opts.ShmSize,
 	}
 	if opts.Memory != "" {

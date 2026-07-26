@@ -166,6 +166,9 @@ func buildRunArgs(binary string, opts RunOptions) []string {
 		"run", "-d",
 		"--name", opts.Name,
 		"--restart", restart,
+		"--log-driver=local",
+		"--log-opt=max-size=50m",
+		"--log-opt=max-file=3",
 		"--shm-size=" + opts.ShmSize,
 	}
 	if opts.Memory != "" {
