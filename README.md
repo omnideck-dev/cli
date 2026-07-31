@@ -172,9 +172,9 @@ omnideck <command> [flags]
 
 | Command | Description |
 |---|---|
-| `setup` | Set up the first or one additional Omnideck instance (`install` remains an alias) |
+| `add` | Set up the first or one additional Omnideck instance (`install` and `setup` remain aliases) |
 | `list` | List saved installations, their container status, and browser addresses (`instances` is an alias) |
-| `update` | Download and apply the latest Omnideck version |
+| `update` | Download and apply the latest Omnideck version (`--plain` for non-interactive) |
 | `start` | Start a stopped container |
 | `stop` | Gracefully stop the running container |
 | `restart` | Stop then start |
@@ -184,7 +184,7 @@ omnideck <command> [flags]
 | `config show` | Pretty-print the saved config |
 | `config set <key> <value>` | Save one setting and explain how to apply it |
 | `config path` | Print the config file path |
-| `instance remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it |
+| `remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it (`uninstall` remains an alias; `--plain` for non-interactive) |
 
 ### Global flags
 
@@ -221,21 +221,21 @@ omnideck --name omnideck2 status
 omnideck --name omnideck2 stop
 
 # Choose Docker during the first setup
-omnideck setup --runtime docker
+omnideck add --runtime docker
 
 # Test an alternate image without changing the default
-omnideck setup --image ghcr.io/example/omnideck:dev
+omnideck add --image ghcr.io/example/omnideck:dev
 
 # Non-interactive setup for CI/CD
-omnideck setup --plain --runtime docker --port 2337
+omnideck add --plain --runtime docker --port 2337
 
 # Remove a specific instance
-omnideck instance remove omnideck2
+omnideck remove omnideck2
 ```
 
 ### Multiple instances
 
-Choose **Setup** from the dashboard, or run `omnideck setup`, to create exactly one additional instance. Each setup suggests a unique container name (`omnideck2`, `omnideck3`, …), separate named volumes, and the next available browser port. Names and ports are checked before Omnideck changes anything; unrelated containers are never replaced.
+Choose **Setup** from the dashboard, or run `omnideck add`, to create exactly one additional instance. Each setup suggests a unique container name (`omnideck2`, `omnideck3`, …), separate named volumes, and the next available browser port. Names and ports are checked before Omnideck changes anything; unrelated containers are never replaced.
 
 Commands that need an instance (e.g. `start`, `status`) show a picker when more than one instance exists, or accept `--name` to skip the prompt.
 Scripts and other non-interactive uses must pass `--name` when more than one
