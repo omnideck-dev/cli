@@ -209,15 +209,18 @@ func (e *PodmanEngine) ContainerStatus(name string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (e *PodmanEngine) TailLogs(name string, follow bool, tail int) error {
+func (e *PodmanEngine) TailLogs(name string, follow bool, tail int, w io.Writer) error {
 	args := []string{"logs"}
 	if follow {
 		args = append(args, "--follow")
 	}
 	args = append(args, "--tail", fmt.Sprintf("%d", tail), name)
 	cmd := buildCmd("podman", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	// See DockerEngine.TailLogs: route both stdout and stderr to w so
+	// --follow --json never silently drops container output that only ever
+	// hits stderr.
+	cmd.Stdout = w
+	cmd.Stderr = w
 	return cmd.Run()
 }
 

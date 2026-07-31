@@ -112,7 +112,7 @@ func summarizeInstances(instances []InstanceState) (string, headerStatusTone) {
 	}
 	label := fmt.Sprintf("%d of %d running", running, len(instances))
 	if unknown == len(instances) {
-		return "Checking instances…", headerNeutral
+		return "Checking decks…", headerNeutral
 	}
 	if running == len(instances) {
 		return label, headerHealthy
@@ -123,15 +123,15 @@ func summarizeInstances(instances []InstanceState) (string, headerStatusTone) {
 func (m AppModel) breadcrumb() string {
 	switch m.router.Current() {
 	case RouteDashboard:
-		return "Instances"
+		return "Decks"
 	case RouteLogs:
 		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name + " › Logs"
+			return "Decks › " + inst.Info.Name + " › Logs"
 		}
 		return "Logs"
 	case RouteSettings:
 		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name + " › Settings"
+			return "Decks › " + inst.Info.Name + " › Settings"
 		}
 		return "Settings"
 	case RouteDoctor:
@@ -157,12 +157,12 @@ func (m AppModel) breadcrumb() string {
 	case RouteMaintenance:
 		title := m.maintenanceModel.title()
 		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name + " › " + title
+			return "Decks › " + inst.Info.Name + " › " + title
 		}
 		return title
 	case RouteRemoval:
 		if inst := m.CurrentInstance(); inst != nil {
-			return "Instances › " + inst.Info.Name + " › Remove"
+			return "Decks › " + inst.Info.Name + " › Remove"
 		}
 		return "Remove instance"
 	}

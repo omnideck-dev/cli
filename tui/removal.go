@@ -224,7 +224,7 @@ func (m RemovalModel) TNView(width int) string {
 		writeTNWrapped(&sb, width, "  ", "  ", "Ready to remove "+name, styles.TNTextBold)
 		sb.WriteString("\n")
 		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Stop and remove the instance container.", styles.TNDimText)
-		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Remove this instance from the Instances screen.", styles.TNDimText)
+		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Remove this instance from the Decks screen.", styles.TNDimText)
 		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Keep its saved files and agent data.", styles.TNGreenTxt)
 		sb.WriteString("\n")
 		writeTNWrapped(&sb, width, "  ", "  ", "Press Enter to remove the instance, or Esc to go back without changing anything.", styles.TNTextSub)
@@ -267,7 +267,7 @@ func (m RemovalModel) TNView(width int) string {
 		} else {
 			writeTNWrapped(&sb, width, "  ", "  ", "Its saved files and agent data were kept.", styles.TNGreenTxt)
 		}
-		writeTNWrapped(&sb, width, "  ", "  ", "The Omnideck CLI and container runtime are still installed. Press any key to return to Instances.", styles.TNDimText)
+		writeTNWrapped(&sb, width, "  ", "  ", "The Omnideck CLI and container runtime are still installed. Press any key to return to Decks.", styles.TNDimText)
 	case RemovalStageFailed:
 		sb.WriteString("  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNTextBold.Render("The instance could not be fully removed") + "\n\n")
 		writeTNWrapped(&sb, width, "  ", "  ", "Omnideck kept the saved instance settings so the operation remains visible and can be retried. Some requested steps may already have finished.", styles.TNDimText)
@@ -277,7 +277,7 @@ func (m RemovalModel) TNView(width int) string {
 		if m.errorMsg != "" {
 			writeTNWrapped(&sb, width, "  ", "  ", m.errorMsg, styles.TNRedTxt)
 		}
-		writeTNWrapped(&sb, width, "  ", "  ", "Press r to try again, or Esc to return to Instances.", styles.TNTextSub)
+		writeTNWrapped(&sb, width, "  ", "  ", "Press r to try again, or Esc to return to Decks.", styles.TNTextSub)
 	}
 	return sb.String()
 }

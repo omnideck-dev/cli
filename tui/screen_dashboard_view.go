@@ -18,7 +18,7 @@ func (m AppModel) viewDashboard() string {
 	sb.WriteString("\n")
 
 	// Title row with status chips right-aligned.
-	title := styles.TNTextBold.Render("Instances")
+	title := styles.TNTextBold.Render("Decks")
 	sub := styles.TNFaintText.Render(" managed by this host")
 	titleLeft := title + sub
 

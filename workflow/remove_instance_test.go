@@ -92,6 +92,39 @@ func TestRemoveInstanceKeepsDataByDefault(t *testing.T) {
 	}
 }
 
+func TestRemoveInstanceOnStageKeepDataReportsOnlyApplicableStages(t *testing.T) {
+	instance, eng := removalFixture(t)
+	var stages []string
+	_, err := RemoveInstance(eng, instance, RemoveInstanceOptions{
+		OnStage: func(stage string) { stages = append(stages, stage) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"stop_container", "remove_container"}
+	if !reflect.DeepEqual(stages, want) {
+		t.Fatalf("stages = %v, want %v", stages, want)
+	}
+}
+
+func TestRemoveInstanceOnStageDeleteAndBackupReportsEveryStage(t *testing.T) {
+	instance, eng := removalFixture(t)
+	var stages []string
+	_, err := RemoveInstance(eng, instance, RemoveInstanceOptions{
+		DeleteData: true,
+		BackupData: true,
+		BackupDir:  t.TempDir(),
+		OnStage:    func(stage string) { stages = append(stages, stage) },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"stop_container", "backup", "remove_container", "delete_volumes"}
+	if !reflect.DeepEqual(stages, want) {
+		t.Fatalf("stages = %v, want %v", stages, want)
+	}
+}
+
 func TestRemoveInstanceCanBackUpAndDeleteData(t *testing.T) {
 	instance, eng := removalFixture(t)
 	backupDir := t.TempDir()

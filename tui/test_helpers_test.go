@@ -60,7 +60,7 @@ func (m *mockEngine) RemoveContainer(string) error {
 	}
 	return m.removeErr
 }
-func (m *mockEngine) TailLogs(string, bool, int) error { return nil }
+func (m *mockEngine) TailLogs(string, bool, int, io.Writer) error { return nil }
 func (m *mockEngine) ContainerExists(name string) (bool, error) {
 	if m.containerNames != nil {
 		return m.containerNames[name], nil

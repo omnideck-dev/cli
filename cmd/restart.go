@@ -25,7 +25,20 @@ func runRestart(_ *cobra.Command, _ []string) error {
 	cfg := LoadedConfig
 	eng, err := engineFromConfig(cfg.Engine)
 	if err != nil {
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))
+		}
 		return err
+	}
+
+	if jsonFlag {
+		return runLifecycleJSON(cfg, eng, func() error {
+			if _, actionErr := workflow.EnsureStopped(eng, cfg.ContainerName); actionErr != nil {
+				return actionErr
+			}
+			_, actionErr := workflow.EnsureStarted(eng, cfg.ContainerName)
+			return actionErr
+		})
 	}
 
 	fmt.Printf("Stopping %s... ", cfg.ContainerName)
