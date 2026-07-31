@@ -52,19 +52,13 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	eng, err := engineFromConfig(instance.Config.Engine)
-	if err != nil {
-		wrapped := fmt.Errorf("the container runtime must be running before this instance can be removed: %w", err)
-		if jsonFlag {
-			return writeJSONError(newJSONError(ErrCodeEngineNotFound, wrapped.Error()))
-		}
-		return wrapped
-	}
-
 	// --json implies the same non-interactive path as --plain — a caller
 	// never has to remember to pass both. --plain remains independently
 	// useful (plain text, no JSON) and may still be combined with --json.
 	if removePlainFlag || jsonFlag {
+		// Validate the explicit flags before requiring a container engine —
+		// a missing required flag is a pure, local, deterministic failure
+		// and must not depend on (or be masked by) engine availability.
 		opts, optErr := resolveRemoveOptions()
 		if optErr != nil {
 			if jsonFlag {
@@ -72,10 +66,23 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 			}
 			return optErr
 		}
+		eng, err := engineFromConfig(instance.Config.Engine)
+		if err != nil {
+			wrapped := fmt.Errorf("the container runtime must be running before this instance can be removed: %w", err)
+			if jsonFlag {
+				return writeJSONError(newJSONError(ErrCodeEngineNotFound, wrapped.Error()))
+			}
+			return wrapped
+		}
 		if jsonFlag {
 			return runRemoveJSON(eng, instance, opts)
 		}
 		return runRemovePlain(eng, instance, opts)
+	}
+
+	eng, err := engineFromConfig(instance.Config.Engine)
+	if err != nil {
+		return fmt.Errorf("the container runtime must be running before this instance can be removed: %w", err)
 	}
 
 	fmt.Printf("\nRemove instance %s\n\n", styles.Active.Render(instance.Name))
