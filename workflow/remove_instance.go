@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 )
 
 // InstanceRemovalEngine is the narrow container-runtime surface needed to
@@ -59,8 +60,14 @@ var removalVolumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 // Data volumes are retained unless DeleteData is explicitly true. The config
 // file is removed last so an interrupted operation remains visible and can be
 // retried instead of silently disappearing from Omnideck.
-func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opts RemoveInstanceOptions) (RemoveInstanceResult, error) {
-	var result RemoveInstanceResult
+//
+// If the failure was the shared process context being cancelled
+// (SIGINT/SIGTERM), the returned error satisfies
+// errors.Is(err, context.Canceled) — see engine.WrapIfCancelled's doc for why
+// a killed subprocess's own error can't be checked for that directly.
+func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opts RemoveInstanceOptions) (result RemoveInstanceResult, err error) {
+	defer func() { err = engine.WrapIfCancelled(err) }()
+
 	if eng == nil {
 		return result, fmt.Errorf("container runtime is not ready")
 	}

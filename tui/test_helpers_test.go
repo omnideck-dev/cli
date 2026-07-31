@@ -21,6 +21,7 @@ type mockEngine struct {
 	fetchLines      []string
 	fetchErr        error
 	volumes         map[string]bool
+	removedVolumes  []string
 	lastRunOptions  engine.RunOptions
 
 	statsCPU      string
@@ -68,7 +69,7 @@ func (m *mockEngine) RemoveContainer(string) error {
 	}
 	return m.removeErr
 }
-func (m *mockEngine) TailLogs(string, bool, int, io.Writer) error { return nil }
+func (m *mockEngine) TailLogs(string, bool, int, io.Writer, io.Writer) error { return nil }
 func (m *mockEngine) ContainerExists(name string) (bool, error) {
 	if m.containerNames != nil {
 		return m.containerNames[name], nil
@@ -79,7 +80,10 @@ func (m *mockEngine) CreateVolume(string) error { return nil }
 func (m *mockEngine) VolumeExists(name string) (bool, error) {
 	return m.volumes[name], nil
 }
-func (m *mockEngine) RemoveVolume(string) error            { return nil }
+func (m *mockEngine) RemoveVolume(name string) error {
+	m.removedVolumes = append(m.removedVolumes, name)
+	return nil
+}
 func (m *mockEngine) ExportVolume(string, io.Writer) error { return nil }
 func (m *mockEngine) StartContainer(string) error {
 	if m.startErr == nil {

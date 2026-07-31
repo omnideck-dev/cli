@@ -146,6 +146,11 @@ func writeJSONError(err error) error {
 type ndjsonEncoder struct {
 	w   *bufio.Writer
 	enc *json.Encoder
+	// err is set by the first emit that fails to reach the consumer (e.g. a
+	// closed pipe on the far end). Once set, further emits are no-ops: once
+	// nothing is listening, there's no point doing more work, or more I/O,
+	// to describe progress no one will see.
+	err error
 }
 
 func newNDJSONEncoder() *ndjsonEncoder {
@@ -153,9 +158,23 @@ func newNDJSONEncoder() *ndjsonEncoder {
 	return &ndjsonEncoder{w: w, enc: json.NewEncoder(w)}
 }
 
+// broken reports whether a previous emit failed to reach the consumer.
+// Callers running a multi-step streaming command should check this between
+// steps and stop rather than performing further irreversible work (pulling
+// an image, starting a container) that nothing will ever be told about.
+func (n *ndjsonEncoder) broken() bool { return n.err != nil }
+
 func (n *ndjsonEncoder) emit(v any) {
-	_ = n.enc.Encode(v)
-	_ = n.w.Flush()
+	if n.err != nil {
+		return
+	}
+	if err := n.enc.Encode(v); err != nil {
+		n.err = err
+		return
+	}
+	if err := n.w.Flush(); err != nil {
+		n.err = err
+	}
 }
 
 // stageEvent is one line of the shared NDJSON progress shape used by
@@ -311,6 +330,11 @@ func formatUptime(d time.Duration) string {
 // gatherListEntry builds one list --json array element. eng may be nil (no
 // ready container runtime); in that case the entry reports what's known
 // from saved config alone, with status "unknown" and every live field nil.
+//
+// ContainerStatus and ContainerInspect are independent engine calls, so
+// they're fetched concurrently rather than one after another — each is its
+// own docker/podman subprocess, and gatherListEntries already expects to be
+// polled repeatedly by a live dashboard.
 func gatherListEntry(eng engine.Engine, instance config.InstanceInfo) listEntry {
 	entry := listEntry{Name: instance.Name, Status: "unknown"}
 	if instance.Config != nil {
@@ -323,23 +347,42 @@ func gatherListEntry(eng engine.Engine, instance config.InstanceInfo) listEntry 
 	}
 	name := instance.Config.ContainerName
 
-	status, _ := eng.ContainerStatus(name)
+	var (
+		status    string
+		inspect   engine.InspectData
+		inspectOK bool
+	)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		status, _ = eng.ContainerStatus(name)
+	}()
+	go func() {
+		defer wg.Done()
+		var err error
+		inspect, err = eng.ContainerInspect(name)
+		inspectOK = err == nil
+	}()
+	wg.Wait()
+
 	if status != "" {
 		entry.Status = status
 	}
-	if entry.Status == "running" {
+	active := workflow.IsActiveContainerStatus(entry.Status)
+	if active {
 		cpu, cpuPct, ram, ramTotal, ramPct, err := eng.ContainerStats(name)
 		if err == nil {
 			entry.CPU, entry.CPUPct = &cpu, &cpuPct
 			entry.RAM, entry.RAMTotal, entry.RAMPct = &ram, &ramTotal, &ramPct
 		}
 	}
-	if inspect, err := eng.ContainerInspect(name); err == nil {
+	if inspectOK {
 		entry.Health = inspect.HealthStatus
 		if !inspect.CreatedAt.IsZero() {
 			entry.Created = inspect.CreatedAt.Format("2006-01-02")
 		}
-		if entry.Status == "running" {
+		if active {
 			restarts := inspect.RestartCount
 			entry.Restarts = &restarts
 			if !inspect.StartedAt.IsZero() {
@@ -388,6 +431,9 @@ func (w *jsonLogLineWriter) Write(p []byte) (int, error) {
 		line := string(w.buf[:idx])
 		w.buf = w.buf[idx+1:]
 		w.enc.emit(logLineEvent{Line: line, TS: jsonNowRFC3339()})
+		if w.enc.broken() {
+			return len(p), w.enc.err
+		}
 	}
 	return len(p), nil
 }
@@ -434,6 +480,38 @@ func allChecksPass(results []workflow.CheckResult) bool {
 		}
 	}
 	return true
+}
+
+// configPayload is "config show --json" and "config set --json"'s shape.
+type configPayload struct {
+	ContainerName string `json:"containerName"`
+	HomeVolume    string `json:"homeVolume"`
+	StateVolume   string `json:"stateVolume"`
+	Memory        string `json:"memory"`
+	ShmSize       string `json:"shmSize"`
+	WebUIPort     string `json:"webUiPort"`
+	Runtime       string `json:"runtime"`
+	Image         string `json:"image"`
+	InstalledAt   string `json:"installedAt"`
+}
+
+func newConfigPayload(cfg *config.Config, runtimeName string) configPayload {
+	return configPayload{
+		ContainerName: cfg.ContainerName,
+		HomeVolume:    cfg.HomeVolumeName(),
+		StateVolume:   cfg.StateVolumeName(),
+		Memory:        cfg.Memory,
+		ShmSize:       cfg.ShmSize,
+		WebUIPort:     cfg.WebUIPortOrDefault(),
+		Runtime:       runtimeName,
+		Image:         cfg.Image,
+		InstalledAt:   cfg.InstalledAt.Format(time.RFC3339),
+	}
+}
+
+// configPathPayload is "config path --json"'s shape.
+type configPathPayload struct {
+	Path string `json:"path"`
 }
 
 // removeResultPayload is "remove --plain --json"'s final result shape,

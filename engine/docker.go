@@ -139,20 +139,15 @@ func (e *DockerEngine) ContainerStatus(name string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (e *DockerEngine) TailLogs(name string, follow bool, tail int, w io.Writer) error {
+func (e *DockerEngine) TailLogs(name string, follow bool, tail int, stdout, stderr io.Writer) error {
 	args := []string{"logs"}
 	if follow {
 		args = append(args, "--follow")
 	}
 	args = append(args, "--tail", fmt.Sprintf("%d", tail), name)
 	cmd := buildCmd("docker", args...)
-	// docker logs interleaves the container's stdout and stderr; some images
-	// (e.g. nginx-based ones) log entirely to stderr. Route both to w so
-	// --follow --json never silently drops lines that only ever hit stderr —
-	// for the interactive case this is unchanged in substance, since both
-	// already ended up on the same terminal either way.
-	cmd.Stdout = w
-	cmd.Stderr = w
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 

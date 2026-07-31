@@ -7,24 +7,30 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/engine"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 // fetchStats calls the engine synchronously and returns an instanceStatsMsg.
 //
-// CPU/RAM are only fetched while the container is running: Docker and Podman
-// both report 0%/0B for a stopped container without erroring, which would
-// otherwise render as a misleadingly precise "0.00%" instead of the dash a
-// stopped instance should show. When the container is running but the stats
-// call itself fails (e.g. a stale network namespace after the host restarts
-// out from under a long-lived container), statsUnavailable is set instead of
-// silently leaving the same blank fields a "not polled yet" state would show.
+// CPU/RAM are only fetched while the container is in an active state (see
+// workflow.IsActiveContainerStatus): Docker and Podman both report 0%/0B for
+// a stopped container without erroring, which would otherwise render as a
+// misleadingly precise "0.00%" instead of the dash a stopped instance should
+// show. A paused or restarting container is not stopped, though, and still
+// returns real, non-error stats — skipping those too would make a paused
+// instance indistinguishable from a stopped one. When the container is
+// active but the stats call itself fails (e.g. a stale network namespace
+// after the host restarts out from under a long-lived container),
+// statsUnavailable is set instead of silently leaving the same blank fields
+// a "not polled yet" state would show.
 func fetchStats(eng engine.Engine, name string, idx int) tea.Msg {
 	status, _ := eng.ContainerStatus(name)
 	if status == "" {
 		status = "unknown"
 	}
 	msg := instanceStatsMsg{idx: idx, status: status}
-	if status == "running" {
+	active := workflow.IsActiveContainerStatus(status)
+	if active {
 		cpu, cpuPct, ram, ramTotal, ramPct, err := eng.ContainerStats(name)
 		if err != nil {
 			msg.statsUnavailable = true
@@ -40,7 +46,7 @@ func fetchStats(eng engine.Engine, name string, idx int) tea.Msg {
 		if !inspect.CreatedAt.IsZero() {
 			msg.created = inspect.CreatedAt.Format("2006-01-02")
 		}
-		if !inspect.StartedAt.IsZero() && status == "running" {
+		if !inspect.StartedAt.IsZero() && active {
 			msg.uptime = formatDuration(time.Since(inspect.StartedAt))
 		}
 	}

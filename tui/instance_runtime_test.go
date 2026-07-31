@@ -24,6 +24,33 @@ func TestFetchStatsRunningSucceeds(t *testing.T) {
 	}
 }
 
+// TestFetchStatsPausedStillCallsEngineStats is the regression guard for a
+// paused instance silently losing its stats display: a paused container is
+// frozen, not exited, and Docker/Podman still return real, non-error stats
+// for it — unlike the "running" narrowing this must not treat paused the
+// same as stopped.
+func TestFetchStatsPausedStillCallsEngineStats(t *testing.T) {
+	eng := &mockEngine{
+		containerStatus: "paused",
+		statsCPU:        "0.00%", statsCPUPct: 0,
+		statsRAM: "1.2GiB", statsRAMTotal: "2GiB", statsRAMPct: 0.6,
+	}
+	msg := fetchStats(eng, "demo", 0).(instanceStatsMsg)
+
+	if eng.statsCalls != 1 {
+		t.Fatalf("ContainerStats was called %d times for a paused container, want 1", eng.statsCalls)
+	}
+	if msg.statsUnavailable {
+		t.Fatal("statsUnavailable should be false on a successful paused fetch")
+	}
+	if !msg.sampleOK {
+		t.Fatal("sampleOK should be true on a successful paused fetch")
+	}
+	if msg.ram != "1.2GiB" {
+		t.Fatalf("paused instance should still show its frozen ram, got %q", msg.ram)
+	}
+}
+
 // TestFetchStatsStoppedNeverCallsEngineStats is the regression guard for the
 // misleading "0.00% / 0B" a stopped container used to show: Docker/Podman
 // report zeros without erroring for a stopped container, so the fix is to

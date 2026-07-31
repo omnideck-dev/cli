@@ -5,11 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 )
 
 func decodeNDJSON(t *testing.T, out string) []map[string]any {
@@ -125,13 +125,24 @@ func TestRunSetupStepsJSONFailureEmitsNestedError(t *testing.T) {
 // run cancelled after creating real resources (both volumes here) but
 // before the container/config exist must best-effort remove what it already
 // created, and report CANCELLED rather than INTERNAL_ERROR.
+//
+// The shared process context is actually cancelled here, then run_container
+// is made to fail the way a real killed docker/podman subprocess does — a
+// plain non-context error, not one wrapping context.Canceled (see
+// engine.CancelRequested's doc: exec.CommandContext's default Cancel kills
+// the process, which always returns a plain *exec.ExitError). This is what
+// regressed originally: detection must come from the shared context having
+// been cancelled, not from the subprocess's own returned error.
 func TestRunSetupStepsJSONCancellationCleansUpAndReportsCancelled(t *testing.T) {
 	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
 	eng := &mockEngine{
-		// run_container fails as exec.CommandContext would when the shared
-		// SIGINT/SIGTERM context is cancelled mid-command.
-		runErr: fmt.Errorf("docker run: %w", context.Canceled),
+		runErr: errors.New("signal: killed"),
 	}
+
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine.SetCancelContext(cancelledCtx)
+	defer engine.SetCancelContext(context.Background())
 
 	var runErr error
 	out := captureStdout(t, func() {

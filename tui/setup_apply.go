@@ -120,13 +120,24 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[m.inputFocus].Focus()
 			return m, cmd
 		}
-		// Attempt rollback if the container was started but settings were not
-		// saved, so setup never leaves an untracked Omnideck container behind.
-		if m.lastCompletedStep >= setupStepContainer {
+		// Attempt rollback of whatever this run already created — volumes as
+		// well as the container — so a failed setup never leaves an
+		// untracked container or orphaned volumes behind. lastCompletedStep
+		// only advances on a step's success, so each flag below reflects
+		// exactly what actually exists to clean up.
+		if m.lastCompletedStep >= setupStepHomeVolume {
 			cfg := m.buildConfig()
 			eng := m.eng
+			containerCreated := m.lastCompletedStep >= setupStepContainer
+			stateVolumeCreated := m.lastCompletedStep >= setupStepStateVolume
 			rollbackCmd := func() tea.Msg {
-				_, _ = workflow.EnsureRemoved(eng, cfg.ContainerName)
+				if containerCreated {
+					_, _ = workflow.EnsureRemoved(eng, cfg.ContainerName)
+				}
+				if stateVolumeCreated {
+					_ = eng.RemoveVolume(cfg.StateVolumeName())
+				}
+				_ = eng.RemoveVolume(cfg.HomeVolumeName())
 				return nil
 			}
 			return m, tea.Batch(cmd, rollbackCmd)

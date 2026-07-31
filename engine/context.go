@@ -1,6 +1,9 @@
 package engine
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // processCtx is the context used to build every underlying docker/podman
 // subprocess. It defaults to a context that is never cancelled so normal
@@ -20,4 +23,31 @@ func SetCancelContext(ctx context.Context) {
 		ctx = context.Background()
 	}
 	processCtx = ctx
+}
+
+// CancelRequested reports whether the shared process context has already
+// been cancelled (e.g. by SIGINT/SIGTERM). Callers that need to distinguish
+// "this subprocess failed because we killed it" from a genuine failure must
+// use this instead of errors.Is(err, context.Canceled): exec.CommandContext's
+// default Cancel behavior just calls Process.Kill(), and a killed process
+// exits non-zero, so the error os/exec actually returns is a plain
+// *exec.ExitError ("signal: killed"), never one wrapping context.Canceled.
+func CancelRequested() bool {
+	return processCtx.Err() != nil
+}
+
+// WrapIfCancelled returns err annotated so errors.Is(err, context.Canceled)
+// succeeds if the shared process context was already cancelled when err was
+// produced; otherwise it returns err unchanged. A workflow that runs a
+// sequence of engine subprocess calls should call this once, at its single
+// point of failure, instead of checking errors.Is(err, context.Canceled)
+// directly against a subprocess's own error — see CancelRequested's doc for
+// why that check does not otherwise work. Must be called before any
+// SetCancelContext reset (e.g. for best-effort cleanup), or the
+// cancellation will no longer be observable.
+func WrapIfCancelled(err error) error {
+	if err == nil || !CancelRequested() {
+		return err
+	}
+	return errors.Join(context.Canceled, err)
 }

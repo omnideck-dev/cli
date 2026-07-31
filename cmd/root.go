@@ -119,17 +119,6 @@ func init() {
 	}
 }
 
-// resetCleanupContext restores an uncancelled context for the engine
-// package so best-effort cleanup calls (removing a container/volumes this
-// process just created) can still run after the shared SIGINT/SIGTERM
-// context has already been cancelled — a cancelled context can't run any
-// further subprocess, cleanup included, without this. Safe because the
-// process exits immediately after cleanup either way: this never
-// un-cancels anything for a longer-running operation.
-func resetCleanupContext() {
-	engine.SetCancelContext(context.Background())
-}
-
 // versionPayload is the --version --json shape.
 type versionPayload struct {
 	Version      string `json:"version"`

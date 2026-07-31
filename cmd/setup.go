@@ -184,8 +184,32 @@ func resolveSetupConfig(eng engine.Engine, instances []config.InstanceInfo) (*co
 	return cfg, nil
 }
 
-// runSetupPlain performs non-interactive setup suitable for CI/CD and scripts.
-// All settings come from flags or sensible defaults.
+// createStageLabel gives each workflow.CreateInstance stage the same
+// plain-language phrasing runRemovePlain/runUpdatePlain use for their steps.
+func createStageLabel(stage string) string {
+	switch stage {
+	case "check_availability":
+		return "Check that the name and browser address are available"
+	case "create_home_volume":
+		return "Prepare space for your files"
+	case "create_state_volume":
+		return "Prepare space for Omnideck data"
+	case "pull_image":
+		return "Download Omnideck"
+	case "run_container":
+		return "Start Omnideck"
+	case "save_config":
+		return "Remember these settings"
+	default:
+		return stage
+	}
+}
+
+// runSetupPlain performs non-interactive setup suitable for CI/CD and
+// scripts. All settings come from flags or sensible defaults. It shares
+// workflow.CreateInstance with runSetupStepsJSON so the two non-interactive
+// paths can never disagree about what creating an instance does or what
+// happens when it fails partway through.
 func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) error {
 	eng, probes, selectedRuntime, err := selectSetupEngine(preferredEngine)
 	if err != nil {
@@ -206,47 +230,23 @@ func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) erro
 
 	savePath := config.InstancePath(cfg.ContainerName)
 
-	steps := []struct {
-		label string
-		fn    func() error
-	}{
-		{"Check that the name and browser address are available", func() error {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil {
-				return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
+	lastStage := ""
+	opts := workflow.CreateInstanceOptions{
+		OnStage: func(stage string) {
+			if lastStage != "" {
+				fmt.Println("ok")
 			}
-			if exists {
-				return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
-			}
-			if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-				return fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault())
-			}
-			return nil
-		}},
-		{"Prepare space for your files", func() error { return eng.CreateVolume(cfg.HomeVolumeName()) }},
-		{"Prepare space for Omnideck data", func() error { return eng.CreateVolume(cfg.StateVolumeName()) }},
-		{"Download Omnideck", func() error {
-			msgs := make(chan string, 32)
-			go func() {
-				for range msgs {
-				}
-			}()
-			err := eng.PullImage(cfg.Image, msgs)
-			close(msgs)
-			return err
-		}},
-		{"Start Omnideck", func() error { return eng.RunContainer(workflow.RunOptions(cfg)) }},
-		{"Remember these settings", func() error { return saveInstalledConfig(savePath, cfg, eng.Name()) }},
+			fmt.Printf("  → %s... ", createStageLabel(stage))
+			lastStage = stage
+		},
 	}
-
-	for _, step := range steps {
-		fmt.Printf("  → %s... ", step.label)
-		if err := step.fn(); err != nil {
-			fmt.Printf("FAILED\n    %v\n", err)
-			return err
-		}
-		fmt.Println("ok")
+	if err := workflow.CreateInstance(eng, cfg, func() error {
+		return saveInstalledConfig(savePath, cfg, eng.Name())
+	}, opts); err != nil {
+		fmt.Printf("FAILED\n    %v\n", err)
+		return err
 	}
+	fmt.Println("ok")
 
 	fmt.Printf("\n✓  Omnideck is ready: http://localhost:%s\n", cfg.WebUIPortOrDefault())
 	return nil
@@ -263,11 +263,11 @@ type suggestDefaultsPayload struct {
 // carries a status --json-shaped result.
 //
 // On cancellation (SIGINT/SIGTERM) before the new instance's config has been
-// saved, it best-effort removes whatever container/volumes this run already
-// created — nothing else will ever discover them otherwise, since
-// list/doctor/remove are all keyed off the saved config file that a
-// cancelled run never gets to write. See JSON_MODE_SPEC.md's "Cancellation
-// and teardown".
+// saved, workflow.CreateInstance best-effort removes whatever
+// container/volumes this run already created — nothing else will ever
+// discover them otherwise, since list/doctor/remove are all keyed off the
+// saved config file that a cancelled run never gets to write. See
+// JSON_MODE_SPEC.md's "Cancellation and teardown".
 func runSetupJSON(preferredEngine string, instances []config.InstanceInfo) error {
 	eng, _, _, err := selectSetupEngine(preferredEngine)
 	if err != nil {
@@ -283,99 +283,49 @@ func runSetupJSON(preferredEngine string, instances []config.InstanceInfo) error
 }
 
 // runSetupStepsJSON runs the actual create-volumes/pull/run/save sequence
-// once the engine and instance config are already resolved. Split out from
-// runSetupJSON so the step/NDJSON/cancellation-cleanup logic is unit
-// testable against a mock engine without needing a real container runtime
-// for engine selection.
+// once the engine and instance config are already resolved, sharing
+// workflow.CreateInstance with runSetupPlain. Split out from runSetupJSON so
+// the NDJSON/cancellation-cleanup logic is unit testable against a mock
+// engine without needing a real container runtime for engine selection.
 func runSetupStepsJSON(eng engine.Engine, cfg *config.Config, savePath string) error {
 	nd := newNDJSONEncoder()
 
-	var homeVolumeCreated, stateVolumeCreated, containerCreated bool
-	cleanupOnCancel := func() {
-		resetCleanupContext()
-		if containerCreated {
-			_ = eng.RemoveContainer(cfg.ContainerName)
-		}
-		if homeVolumeCreated {
-			_ = eng.RemoveVolume(cfg.HomeVolumeName())
-		}
-		if stateVolumeCreated {
-			_ = eng.RemoveVolume(cfg.StateVolumeName())
-		}
+	lastStage := ""
+	opts := workflow.CreateInstanceOptions{
+		OnStage: func(stage string) {
+			if lastStage != "" {
+				nd.done(lastStage)
+			}
+			nd.start(stage)
+			lastStage = stage
+		},
+		OnPullProgress: func(line string) {
+			// PullImage already streams every raw docker/podman pull line;
+			// forward it as progress detail instead of discarding it the way
+			// runSetupPlain's text path does — a multi-minute pull otherwise
+			// looks identical to a hang.
+			nd.progress("pull_image", line)
+		},
 	}
 
-	steps := []struct {
-		stage string
-		fn    func() error
-	}{
-		{"check_availability", func() error {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil {
-				return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
-			}
-			if exists {
-				return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
-			}
-			if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-				return fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault())
-			}
-			return nil
-		}},
-		{"create_home_volume", func() error {
-			if err := eng.CreateVolume(cfg.HomeVolumeName()); err != nil {
-				return err
-			}
-			homeVolumeCreated = true
-			return nil
-		}},
-		{"create_state_volume", func() error {
-			if err := eng.CreateVolume(cfg.StateVolumeName()); err != nil {
-				return err
-			}
-			stateVolumeCreated = true
-			return nil
-		}},
-		{"pull_image", func() error {
-			// PullImage already streams every raw docker/podman pull line on
-			// this channel; forward it as progress detail instead of
-			// discarding it the way runSetupPlain's text path does — a
-			// multi-minute pull otherwise looks identical to a hang.
-			msgs := make(chan string, 32)
-			forwarded := make(chan struct{})
-			go func() {
-				defer close(forwarded)
-				for line := range msgs {
-					nd.progress("pull_image", line)
-				}
-			}()
-			err := eng.PullImage(cfg.Image, msgs)
-			close(msgs)
-			<-forwarded
-			return err
-		}},
-		{"run_container", func() error {
-			if err := eng.RunContainer(workflow.RunOptions(cfg)); err != nil {
-				return err
-			}
-			containerCreated = true
-			return nil
-		}},
-		{"save_config", func() error { return saveInstalledConfig(savePath, cfg, eng.Name()) }},
-	}
-
-	for _, step := range steps {
-		nd.start(step.stage)
-		if err := step.fn(); err != nil {
-			if errors.Is(err, context.Canceled) {
-				cleanupOnCancel()
-				return nd.fail(step.stage, newJSONError(ErrCodeCancelled, err.Error()))
-			}
-			return nd.fail(step.stage, err)
+	err := workflow.CreateInstance(eng, cfg, func() error {
+		return saveInstalledConfig(savePath, cfg, eng.Name())
+	}, opts)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nd.fail(lastStage, newJSONError(ErrCodeCancelled, err.Error()))
 		}
-		nd.done(step.stage)
+		return nd.fail(lastStage, err)
 	}
+	nd.done(lastStage)
 
+	if nd.broken() {
+		return errAborted
+	}
 	nd.complete(gatherStatusPayload(cfg, eng))
+	if nd.broken() {
+		return errAborted
+	}
 	return nil
 }
 

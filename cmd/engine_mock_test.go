@@ -120,12 +120,12 @@ func (m *mockEngine) ContainerStatus(name string) (string, error) {
 	return m.containerStatus[name], nil
 }
 
-func (m *mockEngine) TailLogs(name string, follow bool, tail int, w io.Writer) error {
+func (m *mockEngine) TailLogs(name string, follow bool, tail int, stdout, _ io.Writer) error {
 	if m.tailErr != nil {
 		return m.tailErr
 	}
 	for _, line := range m.tailLines {
-		if _, err := w.Write([]byte(line + "\n")); err != nil {
+		if _, err := stdout.Write([]byte(line + "\n")); err != nil {
 			return err
 		}
 	}

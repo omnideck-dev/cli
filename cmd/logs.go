@@ -2,9 +2,8 @@ package cmd
 
 import (
 	"os"
-	"os/signal"
-	"syscall"
 
+	"github.com/omnideck-dev/cli/engine"
 	"github.com/spf13/cobra"
 )
 
@@ -49,32 +48,34 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// Handle Ctrl+C cleanly: exit 0 on interrupt rather than letting cobra
-	// print an error about the terminated subprocess (or, under --json,
-	// emitting a spurious error for what is really just the caller closing
-	// the stream). Use a done channel so the goroutine is not leaked when
-	// TailLogs returns normally (e.g. --follow=false).
-	sigCh := make(chan os.Signal, 1)
-	done := make(chan struct{})
-	signal.Notify(sigCh, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		select {
-		case <-sigCh:
-			os.Exit(0)
-		case <-done:
-		}
-	}()
-	defer close(done)
-	defer signal.Stop(sigCh)
-
+	// A killed omnideck process kills the docker/podman log subprocess too
+	// (see engine.SetCancelContext, wired in cmd/root.go's Execute()), so
+	// Ctrl+C during --follow surfaces here as TailLogs returning an error for
+	// the subprocess we just killed ourselves. Report that as a clean exit
+	// rather than letting cobra print an error about a process we terminated
+	// on purpose.
 	if jsonFlag {
-		if tailErr := eng.TailLogs(cfg.ContainerName, follow, logsTail, newJSONLogWriter()); tailErr != nil {
+		w := newJSONLogWriter()
+		tailErr := eng.TailLogs(cfg.ContainerName, follow, logsTail, w, w)
+		if tailErr != nil {
+			if engine.CancelRequested() {
+				return nil
+			}
 			return writeJSONError(newJSONError(ErrCodeInternal, tailErr.Error()))
+		}
+		if w.enc.broken() {
+			return writeJSONError(newJSONError(ErrCodeInternal, w.enc.err.Error()))
 		}
 		return nil
 	}
 
-	return eng.TailLogs(cfg.ContainerName, logsFollow, logsTail, os.Stdout)
+	if tailErr := eng.TailLogs(cfg.ContainerName, logsFollow, logsTail, os.Stdout, os.Stderr); tailErr != nil {
+		if engine.CancelRequested() {
+			return nil
+		}
+		return tailErr
+	}
+	return nil
 }
 
 // resolveLogsFollow applies JSON_MODE_SPEC.md's default-follow safety

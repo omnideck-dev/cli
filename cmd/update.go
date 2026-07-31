@@ -158,6 +158,9 @@ func runUpdateJSON(eng engine.Engine, cfg *config.Config) error {
 	}
 
 	for _, step := range steps {
+		if nd.broken() {
+			return errAborted
+		}
 		nd.start(step.stage)
 		if err := step.fn(); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -168,6 +171,12 @@ func runUpdateJSON(eng engine.Engine, cfg *config.Config) error {
 		nd.done(step.stage)
 	}
 
+	if nd.broken() {
+		return errAborted
+	}
 	nd.complete(gatherStatusPayload(&next, eng))
+	if nd.broken() {
+		return errAborted
+	}
 	return nil
 }

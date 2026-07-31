@@ -236,6 +236,9 @@ func runRemoveJSON(eng engine.Engine, instance config.InstanceInfo, opts workflo
 	}
 	nd.done(lastStage)
 
+	if nd.broken() {
+		return errAborted
+	}
 	removedVolumes := result.RemovedVolumes
 	if removedVolumes == nil {
 		removedVolumes = []string{}
@@ -246,6 +249,9 @@ func runRemoveJSON(eng engine.Engine, instance config.InstanceInfo, opts workflo
 		RemovedVolumes:   removedVolumes,
 		BackupPath:       result.BackupPath,
 	})
+	if nd.broken() {
+		return errAborted
+	}
 	return nil
 }
 

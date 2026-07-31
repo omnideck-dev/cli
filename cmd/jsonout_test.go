@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"os"
@@ -199,6 +200,38 @@ func TestGatherListEntryRunningHasLiveFields(t *testing.T) {
 	}
 	if entry.Health != "healthy" {
 		t.Fatalf("health = %q, want healthy", entry.Health)
+	}
+}
+
+// TestGatherListEntryPausedHasLiveFields is the regression guard for a
+// paused instance silently losing its stats in list --json: paused is not
+// stopped, and Docker/Podman still return real, non-error stats for it.
+func TestGatherListEntryPausedHasLiveFields(t *testing.T) {
+	instance := config.InstanceInfo{
+		Name: "demo",
+		Config: &config.Config{
+			ContainerName: "demo",
+			Image:         "ghcr.io/omnideck-dev/omnideck:latest",
+			WebUIPort:     "2338",
+		},
+	}
+	eng := &mockEngine{
+		containerStatus: map[string]string{"demo": "paused"},
+		stats: map[string]mockStats{
+			"demo": {cpu: "0.00%", ram: "195.4MB", ramTotal: "1.074GB", ramPct: 0.18},
+		},
+		inspect: map[string]engine.InspectData{
+			"demo": {RestartCount: 1},
+		},
+	}
+
+	entry := gatherListEntry(eng, instance)
+
+	if entry.Status != "paused" {
+		t.Fatalf("status = %q, want paused", entry.Status)
+	}
+	if entry.CPU == nil || entry.RAM == nil || *entry.RAM != "195.4MB" {
+		t.Fatalf("a paused instance should still report live stats, got entry=%+v", entry)
 	}
 }
 
@@ -419,6 +452,49 @@ func TestJSONLogLineWriterBuffersPartialLines(t *testing.T) {
 	})
 	if out != "" {
 		t.Fatalf("expected no output before a newline, got %q", out)
+	}
+}
+
+// alwaysErrWriter simulates a consumer that closed its end of the pipe: every
+// write fails, the way a real broken NDJSON stdout pipe would.
+type alwaysErrWriter struct{ err error }
+
+func (w *alwaysErrWriter) Write([]byte) (int, error) { return 0, w.err }
+
+// TestNDJSONEncoderBrokenStopsEmittingAfterWriteFailure is the regression
+// guard for a broken output pipe going silently undetected: once a write to
+// the consumer fails, broken() must report it and further emits must not
+// attempt (or panic on) more writes.
+func TestNDJSONEncoderBrokenStopsEmittingAfterWriteFailure(t *testing.T) {
+	writeErr := errors.New("broken pipe")
+	bw := bufio.NewWriter(&alwaysErrWriter{err: writeErr})
+	nd := &ndjsonEncoder{w: bw, enc: json.NewEncoder(bw)}
+
+	if nd.broken() {
+		t.Fatal("a fresh encoder must not report broken")
+	}
+
+	nd.emit(stageEvent{Stage: "pull_image", State: "start"})
+	if !nd.broken() {
+		t.Fatal("expected broken() to be true after a failed write")
+	}
+	if nd.err == nil {
+		t.Fatal("expected the encoder to record the write error")
+	}
+
+	// A second emit must be a no-op, not attempt (or panic on) another write.
+	nd.emit(stageEvent{Stage: "run_container", State: "start"})
+	if !nd.broken() {
+		t.Fatal("encoder should remain broken")
+	}
+}
+
+func TestJSONLogLineWriterReturnsErrorOnceEncoderIsBroken(t *testing.T) {
+	bw := bufio.NewWriter(&alwaysErrWriter{err: errors.New("broken pipe")})
+	w := &jsonLogLineWriter{enc: &ndjsonEncoder{w: bw, enc: json.NewEncoder(bw)}}
+	_, err := w.Write([]byte("a line\n"))
+	if err == nil {
+		t.Fatal("expected Write to surface the broken pipe once the encoder fails")
 	}
 }
 
