@@ -10,16 +10,29 @@ import (
 )
 
 // fetchStats calls the engine synchronously and returns an instanceStatsMsg.
+//
+// CPU/RAM are only fetched while the container is running: Docker and Podman
+// both report 0%/0B for a stopped container without erroring, which would
+// otherwise render as a misleadingly precise "0.00%" instead of the dash a
+// stopped instance should show. When the container is running but the stats
+// call itself fails (e.g. a stale network namespace after the host restarts
+// out from under a long-lived container), statsUnavailable is set instead of
+// silently leaving the same blank fields a "not polled yet" state would show.
 func fetchStats(eng engine.Engine, name string, idx int) tea.Msg {
 	status, _ := eng.ContainerStatus(name)
 	if status == "" {
 		status = "unknown"
 	}
-	cpu, cpuPct, ram, ramTotal, ramPct, _ := eng.ContainerStats(name)
-	msg := instanceStatsMsg{
-		idx: idx, status: status,
-		cpu: cpu, cpuPct: cpuPct,
-		ram: ram, ramTotal: ramTotal, ramPct: ramPct,
+	msg := instanceStatsMsg{idx: idx, status: status}
+	if status == "running" {
+		cpu, cpuPct, ram, ramTotal, ramPct, err := eng.ContainerStats(name)
+		if err != nil {
+			msg.statsUnavailable = true
+		} else {
+			msg.cpu, msg.cpuPct = cpu, cpuPct
+			msg.ram, msg.ramTotal, msg.ramPct = ram, ramTotal, ramPct
+			msg.sampleOK = true
+		}
 	}
 	if inspect, err := eng.ContainerInspect(name); err == nil {
 		msg.health = inspect.HealthStatus
@@ -32,6 +45,39 @@ func fetchStats(eng engine.Engine, name string, idx int) tea.Msg {
 		}
 	}
 	return msg
+}
+
+// applyInstanceStats copies a fetched instanceStatsMsg onto inst, shared by
+// the periodic poll (instanceStatsMsg) and the immediate post-toggle refresh
+// (containerToggleDoneMsg) so both apply the same running/unavailable/history
+// rules instead of drifting apart.
+func applyInstanceStats(inst *InstanceState, stats instanceStatsMsg) {
+	inst.Status = stats.status
+	inst.CPU = stats.cpu
+	inst.CPUPct = stats.cpuPct
+	inst.RAM = stats.ram
+	inst.RAMTotal = stats.ramTotal
+	inst.RAMPct = stats.ramPct
+	inst.StatsUnavailable = stats.statsUnavailable
+	if stats.uptime != "" {
+		inst.Uptime = stats.uptime
+	}
+	if stats.restarts != "" {
+		inst.Restarts = stats.restarts
+	}
+	if stats.created != "" {
+		inst.Created = stats.created
+	}
+	if stats.health != "" {
+		inst.Health = stats.health
+	}
+	// Only a genuine fresh running-and-succeeded sample is worth recording —
+	// a stopped or stats-unavailable poll must not push a fake 0.0 into the
+	// sparkline history.
+	if stats.sampleOK {
+		inst.CPUHistory = pushHistory(inst.CPUHistory, stats.cpuPct)
+		inst.RAMHistory = pushHistory(inst.RAMHistory, stats.ramPct)
+	}
 }
 
 // pollStats returns a command that fetches status+stats for instance idx.

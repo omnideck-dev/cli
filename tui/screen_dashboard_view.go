@@ -297,6 +297,12 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 		"",
 		styles.TNTextMid.Render("network") + "  " + styles.TNTextSub.Render("↑ "+dashOr(inst.NetUp)+"  ↓ "+dashOr(inst.NetDown)),
 	}
+	// Distinguish "the engine couldn't read stats for a running instance"
+	// (e.g. a stale container network namespace) from "stopped, so there's
+	// nothing to show" — both would otherwise render as identical dashes.
+	if inst.StatsUnavailable {
+		resRows = append(resRows, "", styles.TNYellowTxt.Render("⚠ resources unavailable"))
+	}
 
 	// Pad columns to same height.
 	nRows := max(len(metaRows), len(resRows))

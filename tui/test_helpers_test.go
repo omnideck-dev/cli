@@ -22,6 +22,14 @@ type mockEngine struct {
 	fetchErr        error
 	volumes         map[string]bool
 	lastRunOptions  engine.RunOptions
+
+	statsCPU      string
+	statsCPUPct   float64
+	statsRAM      string
+	statsRAMTotal string
+	statsRAMPct   float64
+	statsErr      error
+	statsCalls    int
 }
 
 func (m *mockEngine) Name() string {
@@ -89,7 +97,11 @@ func (m *mockEngine) ContainerStatus(string) (string, error) {
 	return m.containerStatus, nil
 }
 func (m *mockEngine) ContainerStats(string) (string, float64, string, string, float64, error) {
-	return "", 0, "", "", 0, nil
+	m.statsCalls++
+	if m.statsErr != nil {
+		return "", 0, "", "", 0, m.statsErr
+	}
+	return m.statsCPU, m.statsCPUPct, m.statsRAM, m.statsRAMTotal, m.statsRAMPct, nil
 }
 func (m *mockEngine) FetchLogs(string, int) ([]string, error) {
 	return m.fetchLines, m.fetchErr
