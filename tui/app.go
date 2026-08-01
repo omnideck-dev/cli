@@ -96,6 +96,12 @@ type InstanceState struct {
 	Logs       []LogLine
 	CPUHistory []float64 // last 16 samples (0.0–1.0)
 	RAMHistory []float64 // last 16 samples (0.0–1.0)
+	// StatsUnavailable is true when the instance is running but the engine's
+	// last stats fetch failed (e.g. a stale container network namespace) —
+	// distinct from CPU/RAM being blank because the instance is simply
+	// stopped. The dashboard surfaces this instead of silently showing dashes
+	// indistinguishable from "not polled yet."
+	StatsUnavailable bool
 }
 
 // --- internal messages ---
@@ -115,6 +121,12 @@ type instanceStatsMsg struct {
 	restarts string
 	created  string
 	health   string
+	// statsUnavailable mirrors InstanceState.StatsUnavailable: the instance
+	// is running but the engine's stats call failed.
+	statsUnavailable bool
+	// sampleOK is true only for a genuine fresh running-and-succeeded stats
+	// reading — the one case a history sparkline sample should be recorded.
+	sampleOK bool
 }
 
 type instanceLogsMsg struct {

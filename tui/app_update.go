@@ -64,27 +64,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case instanceStatsMsg:
 		if msg.idx >= 0 && msg.idx < len(m.instances) {
-			inst := &m.instances[msg.idx]
-			inst.Status = msg.status
-			inst.CPU = msg.cpu
-			inst.CPUPct = msg.cpuPct
-			inst.RAM = msg.ram
-			inst.RAMTotal = msg.ramTotal
-			inst.RAMPct = msg.ramPct
-			if msg.uptime != "" {
-				inst.Uptime = msg.uptime
-			}
-			if msg.restarts != "" {
-				inst.Restarts = msg.restarts
-			}
-			if msg.created != "" {
-				inst.Created = msg.created
-			}
-			if msg.health != "" {
-				inst.Health = msg.health
-			}
-			inst.CPUHistory = pushHistory(inst.CPUHistory, msg.cpuPct)
-			inst.RAMHistory = pushHistory(inst.RAMHistory, msg.ramPct)
+			applyInstanceStats(&m.instances[msg.idx], msg)
 		}
 		return m, nil
 
@@ -196,26 +176,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		stats := msg.stats
 		if stats.idx >= 0 && stats.idx < len(m.instances) {
 			inst := &m.instances[stats.idx]
-			inst.Status = stats.status
-			inst.CPU = stats.cpu
-			inst.CPUPct = stats.cpuPct
-			inst.RAM = stats.ram
-			inst.RAMTotal = stats.ramTotal
-			inst.RAMPct = stats.ramPct
-			if stats.uptime != "" {
-				inst.Uptime = stats.uptime
-			}
-			if stats.restarts != "" {
-				inst.Restarts = stats.restarts
-			}
-			if stats.created != "" {
-				inst.Created = stats.created
-			}
-			if stats.health != "" {
-				inst.Health = stats.health
-			}
-			inst.CPUHistory = pushHistory(inst.CPUHistory, stats.cpuPct)
-			inst.RAMHistory = pushHistory(inst.RAMHistory, stats.ramPct)
+			applyInstanceStats(inst, stats)
 			action := "Stopped"
 			if stats.status == "running" {
 				action = "Started"

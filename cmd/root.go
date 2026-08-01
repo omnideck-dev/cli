@@ -1,9 +1,12 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/charmbracelet/x/term"
 	"github.com/omnideck-dev/cli/cmd/debug"
@@ -25,6 +28,7 @@ var (
 	nameFlag  string
 	noColor   bool
 	debugFlag bool
+	jsonFlag  bool
 
 	// LoadedConfig is the config loaded in PersistentPreRun (may be nil).
 	LoadedConfig *config.Config
@@ -52,8 +56,14 @@ func SetVersion(v, c, d string) {
 	dateStr = d
 }
 
-// Execute runs the root command.
+// Execute runs the root command. It wires a context tied to SIGINT/SIGTERM
+// that every engine-invoked subprocess is built with (see
+// engine.SetCancelContext), so a killed omnideck process also kills any
+// docker/podman subprocess it was waiting on instead of orphaning it.
 func Execute() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	engine.SetCancelContext(ctx)
 	if err := rootCmd.Execute(); err != nil {
 		os.Exit(1)
 	}
@@ -64,13 +74,29 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&nameFlag, "name", "n", "", "Instance name (e.g. omnideck, staging)")
 	rootCmd.PersistentFlags().BoolVar(&noColor, "no-color", false, "Disable color/style output")
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print raw container runtime commands and output")
+	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Emit machine-readable JSON/NDJSON instead of styled output; never prompts or launches a TUI (see JSON_MODE_SPEC.md)")
 	rootCmd.Flags().Bool("version", false, "Print version and exit")
 
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetBool("version")
 		if v {
+			if jsonFlag {
+				writeJSON(versionPayload{
+					Version:      versionStr,
+					Commit:       commitStr,
+					Date:         dateStr,
+					JSONContract: jsonContract,
+				})
+				return nil
+			}
 			fmt.Printf("omnideck version %s (%s) built %s\n", versionStr, commitStr, dateStr)
 			return nil
+		}
+		if jsonFlag {
+			// --json must never fall through to a TUI or plain-text help,
+			// regardless of what stdin looks like — see JSON_MODE_SPEC.md's
+			// "Bare omnideck --json (no subcommand)".
+			return writeJSONError(newJSONError(ErrCodeMissingSubcommand, "omnideck requires a subcommand in --json mode; run --help for the list"))
 		}
 		if isInteractive() {
 			instances, listErr := config.ListInstances()
@@ -91,6 +117,14 @@ func init() {
 		}
 		return cmd.Help()
 	}
+}
+
+// versionPayload is the --version --json shape.
+type versionPayload struct {
+	Version      string `json:"version"`
+	Commit       string `json:"commit"`
+	Date         string `json:"date"`
+	JSONContract int    `json:"jsonContract"`
 }
 
 type interactiveStart int
@@ -217,14 +251,26 @@ func requireConfigMulti() error {
 		return nil
 	}
 	if cfgPath != "" {
-		return fmt.Errorf("Omnideck could not load the config file %s; check that the path exists and that you can read it", cfgPath)
+		err := fmt.Errorf("Omnideck could not load the config file %s; check that the path exists and that you can read it", cfgPath)
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeNotInstalled, err.Error()))
+		}
+		return err
 	}
 	if nameFlag != "" {
-		return fmt.Errorf("no Omnideck installation named %q was found\nRun `omnideck list` to see the available names", nameFlag)
+		err := fmt.Errorf("no Omnideck installation named %q was found\nRun `omnideck list` to see the available names", nameFlag)
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeNotInstalled, err.Error()))
+		}
+		return err
 	}
 	instances, err := config.ListInstances()
 	if err != nil {
-		return fmt.Errorf("reading saved Omnideck installations: %w", err)
+		wrapped := fmt.Errorf("reading saved Omnideck installations: %w", err)
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, wrapped.Error()))
+		}
+		return wrapped
 	}
 	if len(instances) == 1 {
 		LoadedConfig = instances[0].Config
@@ -232,11 +278,17 @@ func requireConfigMulti() error {
 		return nil
 	}
 	if len(instances) > 1 {
+		names := make([]string, 0, len(instances))
+		for _, instance := range instances {
+			names = append(names, instance.Name)
+		}
+		// --json never opens the interactive picker, regardless of whether
+		// stdin looks like a terminal — see JSON_MODE_SPEC.md's
+		// requireConfigMulti() bypass.
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeAmbiguousInstance, "Multiple instances found — specify --name").withInstances(names))
+		}
 		if !isInteractive() {
-			names := make([]string, 0, len(instances))
-			for _, instance := range instances {
-				names = append(names, instance.Name)
-			}
 			return fmt.Errorf("more than one Omnideck installation exists; choose one with --name\nAvailable names: %s", strings.Join(names, ", "))
 		}
 		chosen, ok := tui.RunPicker(
@@ -251,6 +303,9 @@ func requireConfigMulti() error {
 		LoadedConfig = chosen.Config
 		ConfigPath = chosen.Path
 		return nil
+	}
+	if jsonFlag {
+		return writeJSONError(newJSONError(ErrCodeNotInstalled, "Omnideck is not set up. Run: omnideck add"))
 	}
 	return fmt.Errorf("Omnideck is not set up.\nRun: omnideck setup")
 }

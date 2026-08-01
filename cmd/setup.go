@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -15,24 +17,25 @@ import (
 )
 
 var (
-	setupImageFlag   string
-	setupPlainFlag   bool
-	setupPortFlag    string
-	setupMemoryFlag  string
-	setupShmFlag     string
-	setupRuntimeFlag string
-	setupEngineFlag  string // hidden compatibility alias for --runtime
+	setupImageFlag           string
+	setupPlainFlag           bool
+	setupPortFlag            string
+	setupMemoryFlag          string
+	setupShmFlag             string
+	setupRuntimeFlag         string
+	setupEngineFlag          string // hidden compatibility alias for --runtime
+	setupSuggestDefaultsFlag bool
 )
 
 var setupCmd = &cobra.Command{
-	Use:          "setup",
-	Aliases:      []string{"install"},
-	Short:        "Set up an Omnideck instance",
+	Use:          "add",
+	Aliases:      []string{"install", "setup"},
+	Short:        "Add an Omnideck instance",
 	SilenceUsage: true,
 	Long: `Walks through setting up one Omnideck instance.
 
 Use --plain for non-interactive / CI-CD setup:
-  omnideck setup --plain --name omnideck --port 2337`,
+  omnideck add --plain --name omnideck --port 2337`,
 	RunE: runSetup,
 }
 
@@ -46,22 +49,51 @@ func init() {
 	setupCmd.Flags().StringVar(&setupRuntimeFlag, "runtime", "", "override automatic container runtime selection: docker or podman (first setup only)")
 	setupCmd.Flags().StringVar(&setupEngineFlag, "engine", "", "deprecated alias for --runtime")
 	_ = setupCmd.Flags().MarkHidden("engine")
+	setupCmd.Flags().BoolVar(&setupSuggestDefaultsFlag, "suggest-defaults", false, "print the next available name/port without creating anything (for --json)")
 }
 
 func runSetup(_ *cobra.Command, _ []string) error {
 	requestedRuntime, err := setupRuntimeOverride(setupRuntimeFlag, setupEngineFlag)
 	if err != nil {
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		}
 		return err
 	}
 	instances, err := config.ListInstances()
 	if err != nil {
-		return fmt.Errorf("reading saved Omnideck installations: %w", err)
+		wrapped := fmt.Errorf("reading saved Omnideck installations: %w", err)
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, wrapped.Error()))
+		}
+		return wrapped
 	}
+
+	if setupSuggestDefaultsFlag {
+		defaults := workflow.NewInstanceDefaults(instances)
+		if jsonFlag {
+			writeJSON(suggestDefaultsPayload{Name: defaults.ContainerName, WebUIPort: defaults.WebUIPortOrDefault()})
+			return nil
+		}
+		fmt.Printf("Next available name: %s\n", defaults.ContainerName)
+		fmt.Printf("Next available port: %s\n", defaults.WebUIPortOrDefault())
+		return nil
+	}
+
 	preferredEngine, err := setupRuntimePreference(RuntimeName, requestedRuntime, len(instances))
 	if err != nil {
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		}
 		return err
 	}
-	if setupPlainFlag {
+	// --json implies the same non-interactive path as --plain — a caller
+	// never has to remember to pass both. --plain remains independently
+	// useful (plain text, no JSON) and may still be combined with --json.
+	if setupPlainFlag || jsonFlag {
+		if jsonFlag {
+			return runSetupJSON(preferredEngine, instances)
+		}
 		return runSetupPlain(preferredEngine, instances)
 	}
 
@@ -95,36 +127,34 @@ func runRuntimeSetup(instances []config.InstanceInfo) error {
 	return err
 }
 
-// runSetupPlain performs non-interactive setup suitable for CI/CD and scripts.
-// All settings come from flags or sensible defaults.
-func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) error {
-	probes := engine.ProbeAll()
-	selectedRuntime := preferredEngine
+// selectSetupEngine picks the ready engine to install against, matching the
+// preference/default resolution runSetupPlain has always used. It's shared
+// with runSetupJSON so both non-interactive paths pick identically.
+func selectSetupEngine(preferredEngine string) (eng engine.Engine, probes []engine.ProbeResult, selectedRuntime string, err error) {
+	probes = engine.ProbeAll()
+	selectedRuntime = preferredEngine
 	if selectedRuntime == "" {
 		selectedRuntime = engine.DefaultRuntimeForSetup(probes, engine.DetectHostPlatform())
 	}
-	available := engine.ReadyEngines(probes)
-	var eng engine.Engine
-	for _, candidate := range available {
+	for _, candidate := range engine.ReadyEngines(probes) {
 		if selectedRuntime == "" || candidate.Name() == selectedRuntime {
 			eng = candidate
 			break
 		}
 	}
 	if eng == nil {
-		printRuntimeSetupGuidanceFromProbes(selectedRuntime, probes)
 		if selectedRuntime != "" {
-			return fmt.Errorf("%s is not ready; complete the setup option above", selectedRuntime)
+			return nil, probes, selectedRuntime, fmt.Errorf("%s is not ready; complete the setup option above", selectedRuntime)
 		}
-		return fmt.Errorf("neither Podman nor Docker is ready; complete one of the setup options above")
+		return nil, probes, selectedRuntime, fmt.Errorf("neither Podman nor Docker is ready; complete one of the setup options above")
 	}
-	fmt.Printf("Runtime: %s\n", eng.Name())
-	for _, probe := range probes {
-		if probe.Name == eng.Name() && probe.Warning != "" {
-			fmt.Printf("Note: %s\n", probe.Warning)
-		}
-	}
+	return eng, probes, selectedRuntime, nil
+}
 
+// resolveSetupConfig builds the new instance's config from flags/defaults
+// and validates it, matching runSetupPlain's original behavior exactly.
+// Shared with runSetupJSON.
+func resolveSetupConfig(eng engine.Engine, instances []config.InstanceInfo) (*config.Config, error) {
 	cfg := workflow.NewInstanceDefaults(instances)
 	if nameFlag != "" {
 		cfg.ContainerName = nameFlag
@@ -144,59 +174,158 @@ func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) erro
 	if nameFlag == "" {
 		availableName, err := suggestAvailableRuntimeName(cfg.ContainerName, eng)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		cfg.ContainerName = availableName
 	}
 	if err := validatePlainSetup(cfg, eng); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// createStageLabel gives each workflow.CreateInstance stage the same
+// plain-language phrasing runRemovePlain/runUpdatePlain use for their steps.
+func createStageLabel(stage string) string {
+	switch stage {
+	case "check_availability":
+		return "Check that the name and browser address are available"
+	case "create_home_volume":
+		return "Prepare space for your files"
+	case "create_state_volume":
+		return "Prepare space for Omnideck data"
+	case "pull_image":
+		return "Download Omnideck"
+	case "run_container":
+		return "Start Omnideck"
+	case "save_config":
+		return "Remember these settings"
+	default:
+		return stage
+	}
+}
+
+// runSetupPlain performs non-interactive setup suitable for CI/CD and
+// scripts. All settings come from flags or sensible defaults. It shares
+// workflow.CreateInstance with runSetupStepsJSON so the two non-interactive
+// paths can never disagree about what creating an instance does or what
+// happens when it fails partway through.
+func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) error {
+	eng, probes, selectedRuntime, err := selectSetupEngine(preferredEngine)
+	if err != nil {
+		printRuntimeSetupGuidanceFromProbes(selectedRuntime, probes)
+		return err
+	}
+	fmt.Printf("Runtime: %s\n", eng.Name())
+	for _, probe := range probes {
+		if probe.Name == eng.Name() && probe.Warning != "" {
+			fmt.Printf("Note: %s\n", probe.Warning)
+		}
+	}
+
+	cfg, err := resolveSetupConfig(eng, instances)
+	if err != nil {
 		return err
 	}
 
 	savePath := config.InstancePath(cfg.ContainerName)
 
-	steps := []struct {
-		label string
-		fn    func() error
-	}{
-		{"Check that the name and browser address are available", func() error {
-			exists, err := eng.ContainerExists(cfg.ContainerName)
-			if err != nil {
-				return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
+	lastStage := ""
+	opts := workflow.CreateInstanceOptions{
+		OnStage: func(stage string) {
+			if lastStage != "" {
+				fmt.Println("ok")
 			}
-			if exists {
-				return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
-			}
-			if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-				return fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault())
-			}
-			return nil
-		}},
-		{"Prepare space for your files", func() error { return eng.CreateVolume(cfg.HomeVolumeName()) }},
-		{"Prepare space for Omnideck data", func() error { return eng.CreateVolume(cfg.StateVolumeName()) }},
-		{"Download Omnideck", func() error {
-			msgs := make(chan string, 32)
-			go func() {
-				for range msgs {
-				}
-			}()
-			err := eng.PullImage(cfg.Image, msgs)
-			close(msgs)
-			return err
-		}},
-		{"Start Omnideck", func() error { return eng.RunContainer(workflow.RunOptions(cfg)) }},
-		{"Remember these settings", func() error { return saveInstalledConfig(savePath, cfg, eng.Name()) }},
+			fmt.Printf("  → %s... ", createStageLabel(stage))
+			lastStage = stage
+		},
 	}
-
-	for _, step := range steps {
-		fmt.Printf("  → %s... ", step.label)
-		if err := step.fn(); err != nil {
-			fmt.Printf("FAILED\n    %v\n", err)
-			return err
-		}
-		fmt.Println("ok")
+	if err := workflow.CreateInstance(eng, cfg, func() error {
+		return saveInstalledConfig(savePath, cfg, eng.Name())
+	}, opts); err != nil {
+		fmt.Printf("FAILED\n    %v\n", err)
+		return err
 	}
+	fmt.Println("ok")
 
 	fmt.Printf("\n✓  Omnideck is ready: http://localhost:%s\n", cfg.WebUIPortOrDefault())
+	return nil
+}
+
+// suggestDefaultsPayload is "add --suggest-defaults --json"'s shape.
+type suggestDefaultsPayload struct {
+	Name      string `json:"name"`
+	WebUIPort string `json:"webUiPort"`
+}
+
+// runSetupJSON performs the same non-interactive setup as runSetupPlain but
+// emits NDJSON progress instead of printing text. The final "complete" event
+// carries a status --json-shaped result.
+//
+// On cancellation (SIGINT/SIGTERM) before the new instance's config has been
+// saved, workflow.CreateInstance best-effort removes whatever
+// container/volumes this run already created — nothing else will ever
+// discover them otherwise, since list/doctor/remove are all keyed off the
+// saved config file that a cancelled run never gets to write. See
+// JSON_MODE_SPEC.md's "Cancellation and teardown".
+func runSetupJSON(preferredEngine string, instances []config.InstanceInfo) error {
+	eng, _, _, err := selectSetupEngine(preferredEngine)
+	if err != nil {
+		return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))
+	}
+
+	cfg, err := resolveSetupConfig(eng, instances)
+	if err != nil {
+		return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+	}
+
+	return runSetupStepsJSON(eng, cfg, config.InstancePath(cfg.ContainerName))
+}
+
+// runSetupStepsJSON runs the actual create-volumes/pull/run/save sequence
+// once the engine and instance config are already resolved, sharing
+// workflow.CreateInstance with runSetupPlain. Split out from runSetupJSON so
+// the NDJSON/cancellation-cleanup logic is unit testable against a mock
+// engine without needing a real container runtime for engine selection.
+func runSetupStepsJSON(eng engine.Engine, cfg *config.Config, savePath string) error {
+	nd := newNDJSONEncoder()
+
+	lastStage := ""
+	opts := workflow.CreateInstanceOptions{
+		OnStage: func(stage string) {
+			if lastStage != "" {
+				nd.done(lastStage)
+			}
+			nd.start(stage)
+			lastStage = stage
+		},
+		OnPullProgress: func(line string) {
+			// PullImage already streams every raw docker/podman pull line;
+			// forward it as progress detail instead of discarding it the way
+			// runSetupPlain's text path does — a multi-minute pull otherwise
+			// looks identical to a hang.
+			nd.progress("pull_image", line)
+		},
+	}
+
+	err := workflow.CreateInstance(eng, cfg, func() error {
+		return saveInstalledConfig(savePath, cfg, eng.Name())
+	}, opts)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			return nd.fail(lastStage, newJSONError(ErrCodeCancelled, err.Error()))
+		}
+		return nd.fail(lastStage, err)
+	}
+	nd.done(lastStage)
+
+	if nd.broken() {
+		return errAborted
+	}
+	nd.complete(gatherStatusPayload(cfg, eng))
+	if nd.broken() {
+		return errAborted
+	}
 	return nil
 }
 

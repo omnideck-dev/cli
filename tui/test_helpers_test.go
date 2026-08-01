@@ -21,7 +21,16 @@ type mockEngine struct {
 	fetchLines      []string
 	fetchErr        error
 	volumes         map[string]bool
+	removedVolumes  []string
 	lastRunOptions  engine.RunOptions
+
+	statsCPU      string
+	statsCPUPct   float64
+	statsRAM      string
+	statsRAMTotal string
+	statsRAMPct   float64
+	statsErr      error
+	statsCalls    int
 }
 
 func (m *mockEngine) Name() string {
@@ -60,7 +69,7 @@ func (m *mockEngine) RemoveContainer(string) error {
 	}
 	return m.removeErr
 }
-func (m *mockEngine) TailLogs(string, bool, int) error { return nil }
+func (m *mockEngine) TailLogs(string, bool, int, io.Writer, io.Writer) error { return nil }
 func (m *mockEngine) ContainerExists(name string) (bool, error) {
 	if m.containerNames != nil {
 		return m.containerNames[name], nil
@@ -71,7 +80,10 @@ func (m *mockEngine) CreateVolume(string) error { return nil }
 func (m *mockEngine) VolumeExists(name string) (bool, error) {
 	return m.volumes[name], nil
 }
-func (m *mockEngine) RemoveVolume(string) error            { return nil }
+func (m *mockEngine) RemoveVolume(name string) error {
+	m.removedVolumes = append(m.removedVolumes, name)
+	return nil
+}
 func (m *mockEngine) ExportVolume(string, io.Writer) error { return nil }
 func (m *mockEngine) StartContainer(string) error {
 	if m.startErr == nil {
@@ -89,7 +101,11 @@ func (m *mockEngine) ContainerStatus(string) (string, error) {
 	return m.containerStatus, nil
 }
 func (m *mockEngine) ContainerStats(string) (string, float64, string, string, float64, error) {
-	return "", 0, "", "", 0, nil
+	m.statsCalls++
+	if m.statsErr != nil {
+		return "", 0, "", "", 0, m.statsErr
+	}
+	return m.statsCPU, m.statsCPUPct, m.statsRAM, m.statsRAMTotal, m.statsRAMPct, nil
 }
 func (m *mockEngine) FetchLogs(string, int) ([]string, error) {
 	return m.fetchLines, m.fetchErr

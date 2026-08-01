@@ -25,7 +25,17 @@ func runStart(_ *cobra.Command, _ []string) error {
 	cfg := LoadedConfig
 	eng, err := engineFromConfig(cfg.Engine)
 	if err != nil {
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))
+		}
 		return err
+	}
+
+	if jsonFlag {
+		return runLifecycleJSON(cfg, eng, func() error {
+			_, actionErr := workflow.EnsureStarted(eng, cfg.ContainerName)
+			return actionErr
+		})
 	}
 
 	fmt.Printf("Starting %s... ", cfg.ContainerName)

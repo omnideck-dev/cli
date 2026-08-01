@@ -163,12 +163,14 @@ func TestOneLegacyRuntime(t *testing.T) {
 	}
 }
 
-func TestInstallRemainsAnAliasForSetup(t *testing.T) {
-	command, _, err := rootCmd.Find([]string{"install"})
-	if err != nil {
-		t.Fatalf("Find(install): %v", err)
-	}
-	if command.Name() != "setup" {
-		t.Fatalf("install resolves to %q, want setup", command.Name())
+func TestInstallAndSetupRemainAliasesForAdd(t *testing.T) {
+	for _, alias := range []string{"install", "setup"} {
+		command, _, err := rootCmd.Find([]string{alias})
+		if err != nil {
+			t.Fatalf("Find(%s): %v", alias, err)
+		}
+		if command.Name() != "add" {
+			t.Fatalf("%s resolves to %q, want add", alias, command.Name())
+		}
 	}
 }

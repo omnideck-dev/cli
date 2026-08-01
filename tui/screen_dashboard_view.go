@@ -18,7 +18,7 @@ func (m AppModel) viewDashboard() string {
 	sb.WriteString("\n")
 
 	// Title row with status chips right-aligned.
-	title := styles.TNTextBold.Render("Instances")
+	title := styles.TNTextBold.Render("Decks")
 	sub := styles.TNFaintText.Render(" managed by this host")
 	titleLeft := title + sub
 
@@ -296,6 +296,12 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 		ramBar,
 		"",
 		styles.TNTextMid.Render("network") + "  " + styles.TNTextSub.Render("↑ "+dashOr(inst.NetUp)+"  ↓ "+dashOr(inst.NetDown)),
+	}
+	// Distinguish "the engine couldn't read stats for a running instance"
+	// (e.g. a stale container network namespace) from "stopped, so there's
+	// nothing to show" — both would otherwise render as identical dashes.
+	if inst.StatsUnavailable {
+		resRows = append(resRows, "", styles.TNYellowTxt.Render("⚠ resources unavailable"))
 	}
 
 	// Pad columns to same height.

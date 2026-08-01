@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 )
 
 // InstanceRemovalEngine is the narrow container-runtime surface needed to
@@ -32,6 +33,17 @@ type RemoveInstanceOptions struct {
 	BackupData bool
 	BackupDir  string
 	Now        func() time.Time
+	// OnStage, if set, is called as each major phase of removal begins
+	// ("stop_container", "backup", "remove_container", "delete_volumes") —
+	// only the phases that actually apply for these options fire. Callers
+	// that don't need progress reporting can leave this nil.
+	OnStage func(stage string)
+}
+
+func (o RemoveInstanceOptions) reportStage(stage string) {
+	if o.OnStage != nil {
+		o.OnStage(stage)
+	}
 }
 
 // RemoveInstanceResult reports the parts of removal that changed state.
@@ -48,8 +60,14 @@ var removalVolumeName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_.-]*$`)
 // Data volumes are retained unless DeleteData is explicitly true. The config
 // file is removed last so an interrupted operation remains visible and can be
 // retried instead of silently disappearing from Omnideck.
-func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opts RemoveInstanceOptions) (RemoveInstanceResult, error) {
-	var result RemoveInstanceResult
+//
+// If the failure was the shared process context being cancelled
+// (SIGINT/SIGTERM), the returned error satisfies
+// errors.Is(err, context.Canceled) — see engine.WrapIfCancelled's doc for why
+// a killed subprocess's own error can't be checked for that directly.
+func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opts RemoveInstanceOptions) (result RemoveInstanceResult, err error) {
+	defer func() { err = engine.WrapIfCancelled(err) }()
+
 	if eng == nil {
 		return result, fmt.Errorf("container runtime is not ready")
 	}
@@ -87,6 +105,7 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 		}
 	}
 
+	opts.reportStage("stop_container")
 	stopped, err := EnsureStopped(eng, cfg.ContainerName)
 	if err != nil {
 		return result, err
@@ -94,6 +113,7 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 	result.ContainerStopped = stopped
 
 	if opts.DeleteData && opts.BackupData && len(existingVolumes) > 0 {
+		opts.reportStage("backup")
 		backupPath, err := backupInstanceVolumes(eng, existingVolumes, cfg.ContainerName, opts)
 		if err != nil {
 			return result, fmt.Errorf("creating data backup: %w", err)
@@ -101,12 +121,16 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 		result.BackupPath = backupPath
 	}
 
+	opts.reportStage("remove_container")
 	removed, err := EnsureRemoved(eng, cfg.ContainerName)
 	if err != nil {
 		return result, fmt.Errorf("the container could not be removed, so its saved settings were kept: %w", err)
 	}
 	result.ContainerRemoved = removed
 
+	if len(existingVolumes) > 0 {
+		opts.reportStage("delete_volumes")
+	}
 	for _, volume := range existingVolumes {
 		if err := eng.RemoveVolume(volume); err != nil {
 			return result, fmt.Errorf("removing data volume %q: %w; saved instance settings were kept", volume, err)

@@ -105,6 +105,22 @@ func EnsureStarted(eng ContainerStartEngine, name string) (changed bool, err err
 	return true, nil
 }
 
+// IsActiveContainerStatus reports whether status is one a running Omnideck
+// instance can report while still doing meaningful work: "running" plainly,
+// but also "paused" (frozen, not exited — Docker/Podman still return real,
+// non-error CPU/memory stats for it) and "restarting" (mid-restart-policy
+// cycle). Every caller that needs to know "is this container live" — stats
+// fetching, EnsureStopped — shares this one definition instead of each
+// re-deriving its own list and drifting out of sync.
+func IsActiveContainerStatus(status string) bool {
+	switch status {
+	case "running", "paused", "restarting":
+		return true
+	default:
+		return false
+	}
+}
+
 // EnsureStopped stops name only when it exists and is in an active state.
 // Missing and already-stopped containers are successful no-ops.
 func EnsureStopped(eng ContainerStopEngine, name string) (changed bool, err error) {
@@ -119,15 +135,13 @@ func EnsureStopped(eng ContainerStopEngine, name string) (changed bool, err erro
 	if err != nil {
 		return false, fmt.Errorf("checking container %q status: %w", name, err)
 	}
-	switch status {
-	case "running", "paused", "restarting":
-		if err := eng.StopContainer(name); err != nil {
-			return false, fmt.Errorf("stopping container %q: %w", name, err)
-		}
-		return true, nil
-	default:
+	if !IsActiveContainerStatus(status) {
 		return false, nil
 	}
+	if err := eng.StopContainer(name); err != nil {
+		return false, fmt.Errorf("stopping container %q: %w", name, err)
+	}
+	return true, nil
 }
 
 // EnsureRemoved removes name when it exists. Missing containers are successful
@@ -149,7 +163,14 @@ func EnsureRemoved(eng ContainerRemoveEngine, name string) (changed bool, err er
 // Recreate replaces the current container with next. If the replacement fails
 // after an existing container was removed, Omnideck attempts to restore the
 // previous configuration before returning the error.
-func Recreate(eng ContainerEngine, current, next *config.Config) error {
+//
+// If the failure was the shared process context being cancelled
+// (SIGINT/SIGTERM), the returned error satisfies
+// errors.Is(err, context.Canceled) — see engine.WrapIfCancelled's doc for why
+// a killed subprocess's own error can't be checked for that directly.
+func Recreate(eng ContainerEngine, current, next *config.Config) (err error) {
+	defer func() { err = engine.WrapIfCancelled(err) }()
+
 	hadCurrent, err := eng.ContainerExists(current.ContainerName)
 	if err != nil {
 		return fmt.Errorf("checking the current container: %w", err)

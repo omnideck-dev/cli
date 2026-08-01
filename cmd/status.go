@@ -28,7 +28,21 @@ func runStatus(_ *cobra.Command, _ []string) error {
 
 	eng, err := engineFromConfig(cfg.Engine)
 	if err != nil {
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))
+		}
 		return err
+	}
+
+	if jsonFlag {
+		payload := gatherStatusPayload(cfg, eng)
+		writeJSON(payload)
+		if payload.Status != "running" {
+			// Same exit-code convention as the human path below: non-zero
+			// when not running, without a redundant stderr error line.
+			return errAborted
+		}
+		return nil
 	}
 
 	// Gather status concurrently.

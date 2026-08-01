@@ -51,6 +51,11 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 		runtimeName = cfg.Engine
 	}
 
+	if jsonFlag {
+		writeJSON(newConfigPayload(cfg, runtimeName))
+		return nil
+	}
+
 	kv := lipgloss.NewStyle().Width(18)
 	val := lipgloss.NewStyle()
 
@@ -77,26 +82,55 @@ func runConfigSet(_ *cobra.Command, args []string) error {
 	key, value := args[0], args[1]
 
 	if key == "container_name" {
-		return fmt.Errorf("an Omnideck name cannot be changed after setup; create another installation if you need a different name")
+		err := fmt.Errorf("an Omnideck name cannot be changed after setup; create another installation if you need a different name")
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		}
+		return err
 	}
 	if !isValidConfigKey(key) {
-		return fmt.Errorf("invalid key %q\nValid keys: %v", key, validConfigKeys)
+		err := fmt.Errorf("invalid key %q\nValid keys: %v", key, validConfigKeys)
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		}
+		return err
 	}
 	candidate := *LoadedConfig
 	if err := workflow.ApplySetting(&candidate, key, value); err != nil {
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		}
 		return err
 	}
 
 	if err := config.Save(ConfigPath, &candidate); err != nil {
-		return fmt.Errorf("saving config: %w", err)
+		wrapped := fmt.Errorf("saving config: %w", err)
+		if jsonFlag {
+			return writeJSONError(newJSONError(ErrCodeInternal, wrapped.Error()))
+		}
+		return wrapped
 	}
 	*LoadedConfig = candidate
+
+	if jsonFlag {
+		runtimeName := RuntimeName
+		if runtimeName == "" {
+			runtimeName = candidate.Engine
+		}
+		writeJSON(newConfigPayload(&candidate, runtimeName))
+		return nil
+	}
+
 	fmt.Printf("Set %s = %s\n", key, value)
 	fmt.Printf("Run `omnideck update --name %s` to restart Omnideck with this setting.\n", candidate.ContainerName)
 	return nil
 }
 
 func runConfigPath(_ *cobra.Command, _ []string) error {
+	if jsonFlag {
+		writeJSON(configPathPayload{Path: ConfigPath})
+		return nil
+	}
 	fmt.Println(ConfigPath)
 	return nil
 }

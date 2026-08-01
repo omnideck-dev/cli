@@ -1030,6 +1030,66 @@ func TestSettingsCanBeCustomized(t *testing.T) {
 	}
 }
 
+// runAllCmds executes cmd and, if it returns a tea.BatchMsg, recursively
+// executes every batched command too — Bubble Tea's runtime does this
+// dispatch for real programs, but a unit test driving tea.Batch's result
+// directly has to do it itself.
+func runAllCmds(cmd tea.Cmd) {
+	if cmd == nil {
+		return
+	}
+	if batch, ok := cmd().(tea.BatchMsg); ok {
+		for _, c := range batch {
+			runAllCmds(c)
+		}
+	}
+}
+
+func TestSetupFailureAfterBothVolumesRollsBackBothVolumes(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageApplying
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+	m.lastCompletedStep = setupStepStateVolume
+	eng := &mockEngine{}
+	m.eng = eng
+	cfg := m.buildConfig()
+
+	_, cmd := m.updateApplying(StepFailedMsg{Index: setupStepImage, Err: errors.New("pull failed")})
+	if cmd == nil {
+		t.Fatal("expected a rollback command when volumes were already created")
+	}
+	runAllCmds(cmd)
+
+	wantVolumes := map[string]bool{cfg.HomeVolumeName(): true, cfg.StateVolumeName(): true}
+	if len(eng.removedVolumes) != 2 {
+		t.Fatalf("removedVolumes = %v, want both volumes removed", eng.removedVolumes)
+	}
+	for _, v := range eng.removedVolumes {
+		if !wantVolumes[v] {
+			t.Fatalf("unexpected volume removed: %s", v)
+		}
+	}
+	if eng.containerExists {
+		t.Fatal("the container was never created, so rollback must not touch it")
+	}
+}
+
+func TestSetupFailureBeforeAnyVolumeNeedsNoRollback(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageApplying
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+	m.lastCompletedStep = setupStepAvailability
+	eng := &mockEngine{}
+	m.eng = eng
+
+	_, cmd := m.updateApplying(StepFailedMsg{Index: setupStepHomeVolume, Err: errors.New("disk full")})
+	runAllCmds(cmd)
+
+	if len(eng.removedVolumes) != 0 {
+		t.Fatalf("removedVolumes = %v, want none — nothing was created yet", eng.removedVolumes)
+	}
+}
+
 func TestInstallErrorOffersRetryAndShowsReportableDetails(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.Stage = SetupStageFailed

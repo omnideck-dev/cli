@@ -139,15 +139,15 @@ func (e *DockerEngine) ContainerStatus(name string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func (e *DockerEngine) TailLogs(name string, follow bool, tail int) error {
+func (e *DockerEngine) TailLogs(name string, follow bool, tail int, stdout, stderr io.Writer) error {
 	args := []string{"logs"}
 	if follow {
 		args = append(args, "--follow")
 	}
 	args = append(args, "--tail", fmt.Sprintf("%d", tail), name)
 	cmd := buildCmd("docker", args...)
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
 	return cmd.Run()
 }
 
@@ -210,7 +210,7 @@ func buildCmd(binary string, args ...string) *exec.Cmd {
 	if debug.Enabled() {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", binary, strings.Join(args, " "))
 	}
-	return exec.Command(binary, args...)
+	return exec.CommandContext(processCtx, binary, args...)
 }
 
 // Version returns the Docker version string.

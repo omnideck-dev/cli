@@ -51,7 +51,13 @@ type Engine interface {
 	StartContainer(name string) error
 	RemoveContainer(name string) error
 	ContainerStatus(name string) (string, error)
-	TailLogs(name string, follow bool, tail int) error
+	// TailLogs writes container log output to stdout/stderr as it's produced,
+	// keeping the two streams separate exactly as the container emitted them.
+	// Interactive callers pass os.Stdout/os.Stderr; --follow --json passes the
+	// same NDJSON-formatting writer for both, since a single JSON stream has
+	// no separate-stream concept — the engine stays agnostic of output format
+	// either way.
+	TailLogs(name string, follow bool, tail int, stdout, stderr io.Writer) error
 	Version() string
 	ImageDigest(image string) string
 	// ContainerStats returns live CPU and memory stats. cpu is e.g. "12.3%",
