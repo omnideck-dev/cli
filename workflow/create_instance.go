@@ -16,6 +16,7 @@ type InstanceCreationEngine interface {
 	CreateVolume(name string) error
 	RemoveVolume(name string) error
 	PullImage(image string, msgs chan<- string) error
+	ImageExists(image string) (bool, error)
 	RunContainer(opts engine.RunOptions) error
 	RemoveContainer(name string) error
 }
@@ -109,7 +110,17 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 	close(msgs)
 	<-forwarded
 	if pullErr != nil {
-		return pullErr
+		// A registry that cannot be reached is only fatal when the image is not
+		// already here. Setting up again offline, or repairing an installation
+		// whose container is gone, needs nothing downloaded — and an image
+		// named by digest cannot have changed since it was fetched.
+		present, existsErr := eng.ImageExists(cfg.Image)
+		if existsErr != nil || !present {
+			return pullErr
+		}
+		if opts.OnPullProgress != nil {
+			opts.OnPullProgress("Using the copy already on this computer")
+		}
 	}
 
 	opts.reportStage("run_container")

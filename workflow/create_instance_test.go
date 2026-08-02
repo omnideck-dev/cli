@@ -3,6 +3,7 @@ package workflow
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/omnideck-dev/cli/config"
@@ -16,9 +17,14 @@ type fakeCreationEngine struct {
 	createdVolumes  []string
 	removedVolumes  []string
 	pullErr         error
+	imagePresent    bool
 	pullMsgs        []string
 	runErr          error
 	removedContaner bool
+}
+
+func (f *fakeCreationEngine) ImageExists(string) (bool, error) {
+	return f.imagePresent, nil
 }
 
 func (f *fakeCreationEngine) ContainerExists(string) (bool, error) {
@@ -177,5 +183,40 @@ func TestCreateInstanceFailureDuringCancellationReportsContextCanceled(t *testin
 	}
 	if len(eng.removedVolumes) != 2 {
 		t.Fatalf("removedVolumes = %v, want both volumes cleaned up despite cancellation", eng.removedVolumes)
+	}
+}
+
+func TestCreateInstanceUsesTheLocalImageWhenTheRegistryCannotBeReached(t *testing.T) {
+	// Setting up again offline, or repairing an installation whose container is
+	// gone, needs nothing downloaded. An image named by digest cannot have
+	// changed since it was fetched, so the copy already here is the right one.
+	eng := &fakeCreationEngine{pullErr: errors.New("pinging container registry: Forbidden"), imagePresent: true}
+	cfg := testCreateConfig()
+
+	var progress []string
+	err := CreateInstance(eng, cfg, func() error { return nil }, CreateInstanceOptions{
+		OnPullProgress: func(line string) { progress = append(progress, line) },
+	})
+	if err != nil {
+		t.Fatalf("expected the local image to be used, got %v", err)
+	}
+	if len(eng.removedVolumes) != 0 || eng.removedContaner {
+		t.Fatal("nothing failed, so nothing should have been cleaned up")
+	}
+	if len(progress) == 0 || !strings.Contains(progress[len(progress)-1], "already on this computer") {
+		t.Fatalf("expected the fallback to be reported, got %v", progress)
+	}
+}
+
+func TestCreateInstanceFailsWhenTheImageIsNeitherFetchableNorPresent(t *testing.T) {
+	eng := &fakeCreationEngine{pullErr: errors.New("pinging container registry: Forbidden")}
+	cfg := testCreateConfig()
+
+	err := CreateInstance(eng, cfg, func() error { return nil }, CreateInstanceOptions{})
+	if err == nil {
+		t.Fatal("expected the unreachable registry to fail when nothing is here to use")
+	}
+	if len(eng.removedVolumes) != 2 {
+		t.Fatalf("removedVolumes = %v, want both volumes cleaned up", eng.removedVolumes)
 	}
 }

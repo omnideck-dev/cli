@@ -35,6 +35,15 @@ func (e *PodmanEngine) ContainerExists(name string) (bool, error) {
 	return strings.TrimSpace(string(out)) == name, nil
 }
 
+func (e *PodmanEngine) ImageExists(image string) (bool, error) {
+	cmd := buildCmd("podman", "image", "exists", image)
+	if err := cmd.Run(); err != nil {
+		// Absent is reported by exit status, and is not a failure to ask.
+		return false, nil
+	}
+	return true, nil
+}
+
 func (e *PodmanEngine) CreateVolume(name string) error {
 	return createVolumeIfMissing(name, e.VolumeExists, func() error {
 		cmd := buildCmd("podman", "volume", "create", name)
