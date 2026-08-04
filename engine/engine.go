@@ -43,6 +43,10 @@ type Engine interface {
 	RemoveVolume(name string) error
 	ExportVolume(name string, w io.Writer) error
 	PullImage(image string, msgs chan<- string) error
+	// ImageExists reports whether the image is already on this machine, so a
+	// registry that cannot be reached need not stop work that has everything
+	// it needs locally.
+	ImageExists(image string) (bool, error)
 	RunContainer(opts RunOptions) error
 	// CheckOllamaConnection tests the same container-to-host address Omnideck
 	// receives. It runs from inside an existing Omnideck container.

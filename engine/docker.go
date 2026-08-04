@@ -44,6 +44,15 @@ func (e *DockerEngine) ContainerExists(name string) (bool, error) {
 	return strings.TrimSpace(string(out)) == name, nil
 }
 
+func (e *DockerEngine) ImageExists(image string) (bool, error) {
+	// Docker has no "image exists"; inspecting one that is absent fails.
+	cmd := buildCmd("docker", "image", "inspect", image)
+	if err := cmd.Run(); err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
 func (e *DockerEngine) CreateVolume(name string) error {
 	cmd := buildCmd("docker", "volume", "create", name)
 	out, err := cmd.CombinedOutput()

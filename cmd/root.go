@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -46,6 +47,15 @@ var (
 Run omnideck without a command. It will open the right screen for first setup,
 repair, or managing an existing installation.`,
 		PersistentPreRun: persistentPreRun,
+		// A failing command has already said what went wrong, in the shape the
+		// caller asked for. Printing the whole usage block after it buries that
+		// message, and under --json it puts a wall of prose on stderr behind a
+		// single line of JSON.
+		SilenceUsage: true,
+		// Errors are printed by Execute instead, so the one error that carries
+		// no message can exit quietly rather than leaving a bare "Error:"
+		// behind the output the caller actually asked for.
+		SilenceErrors: true,
 	}
 )
 
@@ -65,6 +75,9 @@ func Execute() {
 	defer stop()
 	engine.SetCancelContext(ctx)
 	if err := rootCmd.Execute(); err != nil {
+		if !errors.Is(err, errAborted) {
+			fmt.Fprintln(os.Stderr, "Error:", err)
+		}
 		os.Exit(1)
 	}
 }

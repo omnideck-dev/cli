@@ -43,6 +43,7 @@ func (m *mockEngine) IsAvailable() bool                     { return true }
 func (m *mockEngine) HasPermission() bool                   { return true }
 func (m *mockEngine) Version() string                       { return "1.0" }
 func (m *mockEngine) ImageDigest(string) string             { return "" }
+func (m *mockEngine) ImageExists(string) (bool, error)      { return true, nil }
 func (m *mockEngine) PullImage(string, chan<- string) error { return nil }
 func (m *mockEngine) RunContainer(opts engine.RunOptions) error {
 	m.lastRunOptions = opts

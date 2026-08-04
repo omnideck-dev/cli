@@ -18,6 +18,8 @@ type mockEngine struct {
 	containerExists    map[string]bool
 	containerExistsErr error
 
+	imageExists bool
+
 	volumes           map[string]bool
 	volumeExistsErr   error
 	createVolumeErr   error
@@ -87,6 +89,8 @@ func (m *mockEngine) RemoveVolume(name string) error {
 	return m.removeVolumeErr
 }
 func (m *mockEngine) ExportVolume(string, io.Writer) error { return m.exportVolumeErr }
+
+func (m *mockEngine) ImageExists(string) (bool, error) { return m.imageExists, nil }
 
 func (m *mockEngine) PullImage(_ string, msgs chan<- string) error {
 	if msgs != nil {
