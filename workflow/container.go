@@ -7,6 +7,7 @@ package workflow
 import (
 	"fmt"
 	"runtime"
+	"strings"
 
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
@@ -181,7 +182,18 @@ func Recreate(eng ContainerEngine, current, next *config.Config) (err error) {
 	if _, err := EnsureRemoved(eng, current.ContainerName); err != nil {
 		return err
 	}
-	if err := eng.RunContainer(RunOptions(next)); err == nil {
+	runErr := eng.RunContainer(RunOptions(next))
+	if runErr != nil && isNameConflictError(runErr) {
+		// Podman can leave a name reserved in its storage layer for a
+		// container its own database no longer tracks (e.g. after an
+		// interrupted removal), so ContainerExists/EnsureRemoved above never
+		// saw anything to clean up: `podman ps -a` reads the database, not
+		// storage. The engine's own error tells us exactly what to do —
+		// remove that name directly — so force it once and retry.
+		_ = eng.RemoveContainer(next.ContainerName)
+		runErr = eng.RunContainer(RunOptions(next))
+	}
+	if err := runErr; err == nil {
 		return nil
 	} else if !hadCurrent {
 		return fmt.Errorf("starting the replacement container: %w", err)
@@ -194,4 +206,17 @@ func Recreate(eng ContainerEngine, current, next *config.Config) (err error) {
 		}
 		return fmt.Errorf("starting the replacement container: %w (the previous settings were restored)", applyErr)
 	}
+}
+
+// isNameConflictError reports whether err is a container-engine error saying
+// a container/storage record with the requested name already exists. Both
+// Docker ("Conflict. The container name ... is already in use by container
+// ...") and Podman ("the container name ... is already in use by ... an
+// external entity") phrase this the same way, so a single substring check
+// covers both engines.
+func isNameConflictError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "already in use by")
 }

@@ -95,6 +95,34 @@ func TestRecreateRestoresPreviousConfigWhenReplacementFails(t *testing.T) {
 	}
 }
 
+func TestRecreateRecoversFromNameConflictError(t *testing.T) {
+	// Models Podman leaving a name reserved in its storage layer for a
+	// container its own database no longer tracks: ContainerExists (backed
+	// by `podman ps -a`) reports nothing, so hadCurrent is false, but the
+	// first RunContainer still fails because the engine sees the name as
+	// taken. Recreate should force a removal by name and retry once instead
+	// of surfacing the conflict.
+	oldCfg := config.DefaultConfig()
+	newCfg := *oldCfg
+	newCfg.WebUIPort = "2448"
+	eng := &fakeContainerEngine{
+		exists: false,
+		runErrors: []error{
+			errors.New(`creating container storage: the container name "omnideck" is already in use by deadbeef: that name is already in use by an external entity`),
+			nil,
+		},
+	}
+	if err := Recreate(eng, oldCfg, &newCfg); err != nil {
+		t.Fatalf("Recreate() error = %v", err)
+	}
+	if eng.removed != 1 {
+		t.Fatalf("removed = %d, want 1 forced removal after the name conflict", eng.removed)
+	}
+	if len(eng.runOptions) != 2 {
+		t.Fatalf("run sequence = %#v, want a retry after the conflict", eng.runOptions)
+	}
+}
+
 func TestRecreateAndSaveRestoresContainerWhenSaveFails(t *testing.T) {
 	oldCfg := config.DefaultConfig()
 	newCfg := *oldCfg
