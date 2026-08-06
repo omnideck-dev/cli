@@ -101,6 +101,11 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 		"MISSING_REQUIRED_FLAG": true,
 		"MISSING_SUBCOMMAND":    true,
 		"CANCELLED":             true,
+		"RESTART_REQUIRED":      true,
+		"PERMISSION_DENIED":     true,
+		"DOWNLOAD_FAILED":       true,
+		"UNSUPPORTED":           true,
+		"RUNTIME_SETUP_FAILED":  true,
 		"INTERNAL_ERROR":        true,
 	}
 	got := map[string]bool{
@@ -111,6 +116,11 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 		ErrCodeMissingRequiredFlag: true,
 		ErrCodeMissingSubcommand:   true,
 		ErrCodeCancelled:           true,
+		ErrCodeRestartRequired:     true,
+		ErrCodePermissionDenied:    true,
+		ErrCodeDownloadFailed:      true,
+		ErrCodeUnsupported:         true,
+		ErrCodeRuntimeSetupFailed:  true,
 		ErrCodeInternal:            true,
 	}
 	if len(got) != len(want) {
@@ -136,7 +146,9 @@ func TestEveryJSONErrorResolvesToAClosedCode(t *testing.T) {
 	closed := map[string]bool{
 		ErrCodeAmbiguousInstance: true, ErrCodeNotInstalled: true, ErrCodeEngineNotFound: true,
 		ErrCodeContainerNotFound: true, ErrCodeMissingRequiredFlag: true, ErrCodeMissingSubcommand: true,
-		ErrCodeCancelled: true, ErrCodeInternal: true,
+		ErrCodeCancelled: true, ErrCodeRestartRequired: true, ErrCodePermissionDenied: true,
+		ErrCodeDownloadFailed: true, ErrCodeUnsupported: true, ErrCodeRuntimeSetupFailed: true,
+		ErrCodeInternal: true,
 	}
 	inputs := []error{
 		errors.New("some arbitrary internal failure"),

@@ -10,15 +10,14 @@ import (
 )
 
 func TestRunUpdateJSONSuccessEmitsStagesAndCompletes(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	origPath := ConfigPath
 	ConfigPath = config.InstancePath("demo")
 	defer func() { ConfigPath = origPath }()
-	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 
 	cfg := &config.Config{ContainerName: "demo", Image: "ghcr.io/omnideck-dev/omnideck:legacy", WebUIPort: "2337"}
 	eng := &mockEngine{
-		name:            "docker",
+		name:            "podman",
 		containerExists: map[string]bool{"demo": true},
 		containerStatus: map[string]string{"demo": "running"},
 		pullMsgs:        []string{"Pulling fs layer"},

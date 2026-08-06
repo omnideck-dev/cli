@@ -140,7 +140,7 @@ func TestTotalMemoryLinuxMocked(t *testing.T) {
 	}
 }
 
-// TestDefaultContainerMemory verifies the formula M = max(1, min(floor(0.2*RAM_GB), 8)).
+// TestDefaultContainerMemory verifies the documented host-RAM tiers.
 func TestDefaultContainerMemory(t *testing.T) {
 	cases := []struct {
 		totalMB int64

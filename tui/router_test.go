@@ -33,3 +33,23 @@ func TestRouterReplaceAndResetDoNotCreateFalseHistory(t *testing.T) {
 		t.Fatalf("reset = route %d, history %v", router.Current(), router.CanGoBack())
 	}
 }
+
+func TestRouterSeparatesInstallationFromControlPlane(t *testing.T) {
+	for _, route := range []Route{RouteDashboard, RouteLogs, RouteSettings, RouteDoctor, RouteMaintenance, RouteRemoval} {
+		if sectionForRoute(route) != SectionControlPlane {
+			t.Fatalf("route %d is not in the control plane", route)
+		}
+	}
+	if sectionForRoute(RouteSetup) != SectionInstallation {
+		t.Fatal("setup route is not in the installation section")
+	}
+
+	router := NewRouter(RouteDashboard)
+	router.Push(RouteSetup)
+	if router.Section() != SectionInstallation {
+		t.Fatal("router did not enter installation")
+	}
+	if _, ok := router.Back(); !ok || router.Section() != SectionControlPlane {
+		t.Fatal("router did not return to the control plane")
+	}
+}

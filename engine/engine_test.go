@@ -37,8 +37,7 @@ func stubEngines(t *testing.T, available ...string) {
 	})
 }
 
-// TestDetectNone verifies that Detect returns an error when neither docker nor
-// podman is on PATH.
+// TestDetectNone verifies that Detect returns an error when Podman is absent.
 func TestDetectNone(t *testing.T) {
 	stubEngines(t) // none available
 
@@ -48,8 +47,7 @@ func TestDetectNone(t *testing.T) {
 	}
 }
 
-// TestDetectPodmanFirst verifies that Podman is preferred when both are available.
-func TestDetectPodmanFirst(t *testing.T) {
+func TestDetectPodman(t *testing.T) {
 	stubEngines(t, "podman", "docker")
 
 	eng, err := Detect()
@@ -61,16 +59,11 @@ func TestDetectPodmanFirst(t *testing.T) {
 	}
 }
 
-// TestDetectDockerFallback verifies Docker is returned when Podman is absent.
-func TestDetectDockerFallback(t *testing.T) {
+func TestDetectDoesNotFallBackToDocker(t *testing.T) {
 	stubEngines(t, "docker")
 
-	eng, err := Detect()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if eng.Name() != "docker" {
-		t.Errorf("expected docker, got %q", eng.Name())
+	if eng, err := Detect(); err == nil || eng != nil {
+		t.Fatalf("Detect() = %v, %v; want Podman-only failure", eng, err)
 	}
 }
 
@@ -179,101 +172,6 @@ func TestPullPodmanImageDoesNotRetryOtherCredentialFailures(t *testing.T) {
 	}
 }
 
-// TestBuildRunArgsLinux verifies correct docker run args on Linux.
-func TestBuildRunArgsLinux(t *testing.T) {
-	opts := RunOptions{
-		Name:        "omnideck",
-		Image:       "ghcr.io/example/img:latest",
-		ShmSize:     "256m",
-		HomeVolume:  "omnideck-home",
-		StateVolume: "omnideck-state",
-		Restart:     "always",
-		WebUIPort:   "2337",
-		Platform:    "linux",
-	}
-
-	args := buildRunArgs("docker", opts)
-
-	assertContains(t, args, "--shm-size=256m")
-	assertContains(t, args, "--log-driver=local")
-	assertContains(t, args, "--log-opt=max-size=50m")
-	assertContains(t, args, "--log-opt=max-file=3")
-	assertContains(t, args, "2337:8080")
-	assertContains(t, args, "--add-host=host-gateway:host-gateway")
-	assertContains(t, args, "omnideck-home:/home/omnideck")
-	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
-	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host-gateway:11434")
-	assertContains(t, args, "PORT=8080")
-	assertNotContains(t, args, "--network")
-	assertNotContains(t, args, "--user")
-}
-
-// TestBuildRunArgsLinuxSecondInstance verifies a second instance maps a different host port.
-func TestBuildRunArgsLinuxSecondInstance(t *testing.T) {
-	opts := RunOptions{
-		Name:        "omnideck2",
-		Image:       "ghcr.io/example/img:latest",
-		ShmSize:     "256m",
-		HomeVolume:  "omnideck2-home",
-		StateVolume: "omnideck2-state",
-		WebUIPort:   "2338",
-		Platform:    "linux",
-	}
-
-	args := buildRunArgs("docker", opts)
-
-	assertContains(t, args, "2338:8080")
-	assertContains(t, args, "omnideck2-home:/home/omnideck")
-	assertContains(t, args, "omnideck2-state:/var/lib/omnideck")
-	// Internal PORT is always 8080 regardless of host port.
-	assertContains(t, args, "PORT=8080")
-}
-
-// TestBuildRunArgsMacOS verifies macOS-specific behaviour (no Linux host-gateway flag).
-func TestBuildRunArgsMacOS(t *testing.T) {
-	opts := RunOptions{
-		Name:        "omnideck",
-		Image:       "ghcr.io/example/img:latest",
-		ShmSize:     "256m",
-		HomeVolume:  "omnideck-home",
-		StateVolume: "omnideck-state",
-		WebUIPort:   "2337",
-		Platform:    "darwin",
-	}
-
-	args := buildRunArgs("docker", opts)
-
-	assertContains(t, args, "2337:8080")
-	assertContains(t, args, "omnideck-home:/home/omnideck")
-	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
-	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
-	assertNotContains(t, args, "--add-host=host-gateway:host-gateway")
-	assertNotContains(t, args, "--user")
-}
-
-// TestBuildRunArgsWindows verifies Windows uses host.docker.internal (Docker
-// Desktop resolves it automatically) and omits Linux-only flags.
-func TestBuildRunArgsWindows(t *testing.T) {
-	opts := RunOptions{
-		Name:        "omnideck",
-		Image:       "ghcr.io/example/img:latest",
-		ShmSize:     "256m",
-		HomeVolume:  "omnideck-home",
-		StateVolume: "omnideck-state",
-		WebUIPort:   "2337",
-		Platform:    "windows",
-	}
-
-	args := buildRunArgs("docker", opts)
-
-	assertContains(t, args, "2337:8080")
-	assertContains(t, args, "omnideck-home:/home/omnideck")
-	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
-	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
-	assertNotContains(t, args, "--add-host=host-gateway:host-gateway")
-	assertNotContains(t, args, "--user")
-}
-
 // TestBuildPodmanRunArgsDoesNotReplace verifies setup cannot remove an
 // unrelated container in a name-collision race.
 func TestBuildPodmanRunArgsDoesNotReplace(t *testing.T) {
@@ -291,7 +189,8 @@ func TestBuildPodmanRunArgsDoesNotReplace(t *testing.T) {
 	assertNotContains(t, args, "--replace")
 	assertContains(t, args, "--log-driver=k8s-file")
 	assertContains(t, args, "--log-opt=max-size=150mb")
-	assertContains(t, args, "2337:8080")
+	assertContains(t, args, "127.0.0.1:2337:8080")
+	assertContains(t, args, "ENABLE_DESKTOP=false")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
 	assertNotContains(t, args, "--network")
 	assertContains(t, args, "omnideck-home:/home/omnideck")
@@ -312,7 +211,8 @@ func TestBuildPodmanRunArgsMacOS(t *testing.T) {
 
 	args := buildPodmanRunArgs(opts)
 	assertNotContains(t, args, "--replace")
-	assertContains(t, args, "2337:8080")
+	assertContains(t, args, "127.0.0.1:2337:8080")
+	assertContains(t, args, "ENABLE_DESKTOP=false")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.docker.internal:11434")
 	assertContains(t, args, "omnideck-home:/home/omnideck")
 	assertContains(t, args, "omnideck-state:/var/lib/omnideck")
@@ -331,10 +231,54 @@ func TestBuildPodmanRunArgsWindows(t *testing.T) {
 		Platform:    "windows",
 	}
 
-	args := buildPodmanRunArgs(opts)
+	args := buildPodmanRunArgs(opts, "192.168.127.254")
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
+	assertContains(t, args, "--add-host")
+	assertContains(t, args, "host.containers.internal:192.168.127.254")
 	if got := defaultOllamaURL("podman", "windows"); got != "http://host.containers.internal:11434" {
 		t.Fatalf("Windows Podman Ollama URL = %q", got)
+	}
+}
+
+func TestBuildPodmanRunArgsDoesNotAddWindowsHostOverrideOnOtherPlatforms(t *testing.T) {
+	for _, platform := range []string{"darwin", "linux"} {
+		opts := RunOptions{
+			Name:        "omnideck",
+			Image:       "ghcr.io/example/img:latest",
+			ShmSize:     "256m",
+			HomeVolume:  "omnideck-home",
+			StateVolume: "omnideck-state",
+			Platform:    platform,
+		}
+		args := buildPodmanRunArgs(opts, "192.168.127.254")
+		assertNotContains(t, args, "--add-host")
+		assertNotContains(t, args, "host.containers.internal:192.168.127.254")
+	}
+}
+
+func TestParseWindowsPodmanHostAddress(t *testing.T) {
+	tests := []struct {
+		output string
+		want   string
+	}{
+		{"192.168.127.254 STREAM host.containers.internal\n", "192.168.127.254"},
+		{"192.168.127.254 DGRAM\n192.168.127.254 RAW\n", "192.168.127.254"},
+		{"999.168.127.254 STREAM invalid\n", ""},
+		{"no address", ""},
+	}
+	for _, tt := range tests {
+		if got := parseWindowsPodmanHostAddress(tt.output); got != tt.want {
+			t.Errorf("parseWindowsPodmanHostAddress(%q) = %q, want %q", tt.output, got, tt.want)
+		}
+	}
+}
+
+func TestUsesPodmanHostAlias(t *testing.T) {
+	if !usesPodmanHostAlias("", "windows") {
+		t.Fatal("default Windows Podman URL should use the Podman host alias")
+	}
+	if usesPodmanHostAlias("http://ollama.example:11434", "windows") {
+		t.Fatal("custom Ollama URL should not request a Windows host override")
 	}
 }
 
@@ -342,8 +286,8 @@ func TestNormalizeOllamaURL(t *testing.T) {
 	tests := []struct {
 		value, runtimeName, platform, want string
 	}{
-		{"", "docker", "linux", "http://host-gateway:11434"},
-		{"", "docker", "windows", "http://host.docker.internal:11434"},
+		{"", "podman", "linux", "http://host.containers.internal:11434"},
+		{"", "podman", "windows", "http://host.containers.internal:11434"},
 		{"", "podman", "darwin", "http://host.docker.internal:11434"},
 		{"localhost:11434", "podman", "windows", "http://localhost:11434"},
 		{"https://ollama.example", "podman", "windows", "https://ollama.example"},
@@ -351,39 +295,6 @@ func TestNormalizeOllamaURL(t *testing.T) {
 	for _, tt := range tests {
 		if got := normalizeOllamaURL(tt.value, tt.runtimeName, tt.platform); got != tt.want {
 			t.Errorf("normalizeOllamaURL(%q, %q, %q) = %q, want %q", tt.value, tt.runtimeName, tt.platform, got, tt.want)
-		}
-	}
-}
-
-// TestBuildRunArgsMemorySet verifies --memory is included when Memory is set.
-func TestBuildRunArgsMemorySet(t *testing.T) {
-	opts := RunOptions{
-		Name:        "omnideck",
-		Image:       "ghcr.io/example/img:latest",
-		Memory:      "4g",
-		ShmSize:     "2048m",
-		HomeVolume:  "omnideck-home",
-		StateVolume: "omnideck-state",
-		Platform:    "linux",
-	}
-	args := buildRunArgs("docker", opts)
-	assertContains(t, args, "--memory=4g")
-}
-
-// TestBuildRunArgsMemoryEmpty verifies --memory is omitted when Memory is not set.
-func TestBuildRunArgsMemoryEmpty(t *testing.T) {
-	opts := RunOptions{
-		Name:        "omnideck",
-		Image:       "ghcr.io/example/img:latest",
-		ShmSize:     "256m",
-		HomeVolume:  "omnideck-home",
-		StateVolume: "omnideck-state",
-		Platform:    "linux",
-	}
-	args := buildRunArgs("docker", opts)
-	for _, a := range args {
-		if len(a) >= 8 && a[:8] == "--memory" {
-			t.Errorf("expected no --memory flag, got %q", a)
 		}
 	}
 }

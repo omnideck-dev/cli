@@ -29,52 +29,18 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc", "q":
 			return m.exit(WorkflowCanceled)
 		case "enter", " ":
-			if m.quickCheckAlternative != "" {
-				m.preferredEngine = m.quickCheckAlternative
-				m.runtimeSetupEntry = runtimeSetupFromFirstRunChoice
-				m.configureRuntimeSetup()
-				return m, nil
-			}
 			if m.permErr != nil {
 				return m, nil // block advance if new engine has no permission
 			}
 			return m.afterRuntimeReady()
-		case "tab", "s":
-			if alternative := m.setupAlternativeRuntime(); alternative != "" {
-				if m.quickCheckAlternative == alternative {
-					m.quickCheckAlternative = ""
-				} else {
-					m.quickCheckAlternative = alternative
-				}
-				return m, nil
-			}
-			if m.preferredEngine != "" || len(m.availableEngines) < 2 {
-				return m, nil
-			}
-			for i, e := range m.availableEngines {
-				if e.Name() == m.eng.Name() {
-					m.eng = m.availableEngines[(i+1)%len(m.availableEngines)]
-					break
-				}
-			}
-			m.permErr = nil
-			m.permChecking = true
-			return m, runPermissionCheck(m.eng)
 		}
 
 	case engineCheckResult:
 		m.quickCheckDone++
 		m.runtimeProbes = msg.probes
-		if m.releaseMissingSavedRuntime() && msg.eng == nil {
-			msg.eng = readyEngineForSetup(msg.all, m.hostPlatform)
-			if msg.eng != nil {
-				msg.err = nil
-			}
-		}
 		m.eng = msg.eng
 		m.engErr = msg.err
 		m.availableEngines = msg.all
-		m.quickCheckAlternative = ""
 		// Run permission check only after engine is known.
 		if msg.eng != nil {
 			return m, runPermissionCheck(msg.eng)
@@ -111,7 +77,7 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.engErr != nil {
 			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
-			return m, nil
+			return m, m.startRuntimeSetup()
 		}
 		if m.permErr != nil && len(m.availableEngines) <= 1 {
 			if m.eng != nil {
@@ -123,50 +89,11 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
-			return m, nil
-		}
-		// Only ask the user to choose when both runtimes are installed. A
-		// missing alternative is not useful friction on first setup.
-		if m.preferredEngine == "" && (len(m.availableEngines) > 1 || m.setupAlternativeRuntime() != "") {
-			m.quickCheckReady = true
-			return m, nil
+			return m, m.startRuntimeSetup()
 		}
 		return m.afterRuntimeReady()
 	}
 	return m, nil
-}
-
-// releaseMissingSavedRuntime forgets a machine-wide preference only for the
-// current setup decision when that app has been uninstalled. An explicit
-// first-run --runtime choice remains locked. The new ready runtime is saved
-// only after setup confirms that it works.
-func (m *SetupModel) releaseMissingSavedRuntime() bool {
-	if m.setupMode == SetupFirstRun || m.preferredEngine == "" {
-		return false
-	}
-	for _, probe := range m.runtimeProbes {
-		if probe.Name == m.preferredEngine && probe.State == engine.RuntimeMissing {
-			m.preferredEngine = ""
-			return true
-		}
-	}
-	return false
-}
-
-// setupAlternativeRuntime returns a second installed runtime that is not ready
-// yet. Missing alternatives stay hidden; --runtime is the explicit override.
-// An installed shared runtime stays selected for existing instances. A saved
-// runtime that has been uninstalled is released by releaseMissingSavedRuntime.
-func (m SetupModel) setupAlternativeRuntime() string {
-	if m.setupMode != SetupFirstRun || m.preferredEngine != "" || len(m.existingNames) != 0 || m.eng == nil || len(m.availableEngines) != 1 {
-		return ""
-	}
-	for _, probe := range m.runtimeProbes {
-		if probe.Name != m.eng.Name() && probe.State != engine.RuntimeMissing && !probe.Ready() {
-			return probe.Name
-		}
-	}
-	return ""
 }
 
 func (m *SetupModel) maybeAdvanceQuickCheck() tea.Cmd {
@@ -192,21 +119,17 @@ func runEngineCheckFor(preferred string) tea.Cmd {
 			return engineCheckResult{all: usable, probes: probes, err: fmt.Errorf("%s is not ready", preferred)}
 		}
 		if len(usable) == 0 {
-			return engineCheckResult{probes: probes, err: fmt.Errorf("neither Podman nor Docker is ready")}
+			return engineCheckResult{probes: probes, err: fmt.Errorf("Podman is not ready")}
 		}
 		return engineCheckResult{eng: readyEngineForSetup(usable, engine.DetectHostPlatform()), all: usable, probes: probes}
 	}
 }
 
-func readyEngineForSetup(ready []engine.Engine, host engine.HostPlatform) engine.Engine {
-	recommended := engine.RecommendedRuntime(host)
+func readyEngineForSetup(ready []engine.Engine, _ engine.HostPlatform) engine.Engine {
 	for _, candidate := range ready {
-		if candidate.Name() == recommended {
+		if candidate.Name() == "podman" {
 			return candidate
 		}
-	}
-	if len(ready) > 0 {
-		return ready[0]
 	}
 	return nil
 }

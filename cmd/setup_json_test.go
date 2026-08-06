@@ -36,7 +36,7 @@ func decodeNDJSON(t *testing.T, out string) []map[string]any {
 func TestRunSetupStepsJSONSuccessEmitsAllStagesAndCompletes(t *testing.T) {
 	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
 	eng := &mockEngine{
-		name:            "docker",
+		name:            "podman",
 		containerStatus: map[string]string{"demo": "running"},
 		pullMsgs:        []string{"Pulling fs layer", "Download complete"},
 	}

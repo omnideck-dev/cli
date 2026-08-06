@@ -8,20 +8,25 @@ import (
 	"strings"
 )
 
-const ollamaAPICheckPath = "/api/tags"
+const (
+	ollamaAPICheckPath = "/api/tags"
+	podmanHostAlias    = "host.containers.internal"
+)
 
 func defaultOllamaURL(runtimeName, platform string) string {
-	host := "host.containers.internal:11434"
-	if runtimeName == "docker" {
-		if platform == "linux" {
-			host = "host-gateway:11434"
-		} else {
-			host = "host.docker.internal:11434"
-		}
-	} else if platform == "darwin" {
+	host := podmanHostAlias + ":11434"
+	if platform == "darwin" {
 		host = "host.docker.internal:11434"
 	}
+	_ = runtimeName
 	return "http://" + host
+}
+
+func usesPodmanHostAlias(value, platform string) bool {
+	url := normalizeOllamaURL(value, "podman", platform)
+	host := strings.TrimPrefix(strings.TrimPrefix(url, "http://"), "https://")
+	host = strings.SplitN(host, "/", 2)[0]
+	return strings.EqualFold(strings.SplitN(host, ":", 2)[0], podmanHostAlias)
 }
 
 func normalizeOllamaURL(value, runtimeName, platform string) string {

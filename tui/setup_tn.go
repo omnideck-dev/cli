@@ -10,10 +10,28 @@ import (
 	"github.com/omnideck-dev/cli/styles"
 )
 
+const (
+	setupPreparingTitle  = "Preparing your environment"
+	setupPreparingDetail = "Setting omnideck up on this computer. This usually takes a few minutes."
+	setupReadyTitle      = "omnideck is ready"
+	setupReadyDetail     = "Everything is prepared. Open omnideck whenever you’re ready."
+)
+
+func writeSetupIntro(sb *strings.Builder, w int, activity string) {
+	writeTNWrapped(sb, w, "  ", "  ", setupPreparingTitle, styles.TNTextBold)
+	writeTNWrapped(sb, w, "  ", "  ", setupPreparingDetail, styles.TNDimText)
+	if activity != "" {
+		sb.WriteString("\n")
+		writeTNWrapped(sb, w, "  ", "  ", activity, styles.TNTextSub)
+	}
+}
+
 // TNView renders setup in Tokyo Night style.
 // Called by AppModel.viewSetup() when Embedded == true.
 func (m SetupModel) TNView(w, _ int) string {
 	switch m.Stage {
+	case SetupStageWelcome:
+		return m.tnWelcome(w)
 	case SetupStageQuickCheck:
 		return m.tnQuickCheck(w)
 	case SetupStageRuntime:
@@ -32,11 +50,13 @@ func (m SetupModel) TNView(w, _ int) string {
 	return ""
 }
 
-func (m SetupModel) tnRuntimeSetup(w int) string {
+func (m SetupModel) tnRuntimeSetupLegacy(w int) string {
 	var sb strings.Builder
+	sb.WriteString("\n")
+	writeSetupIntro(&sb, w, "Getting your computer ready…")
 	if len(m.runtimePlans) == 0 {
 		sb.WriteString("\n")
-		name := "Podman or Docker"
+		name := "Podman"
 		if m.preferredEngine != "" {
 			name = runtimeNameForPeople(m.preferredEngine)
 		}
@@ -109,21 +129,15 @@ func (m SetupModel) tnRuntimeSetup(w int) string {
 	}
 
 	sb.WriteString("\n  " + styles.TNFaintText.Render("STEP 1 OF 2") + "\n")
-	setupHeading := "Choose Podman or Docker"
-	if len(m.runtimePlans) == 1 {
-		setupHeading = "Set up " + m.runtimePlans[0].Title
-	}
+	setupHeading := "Set up Podman"
 	sb.WriteString("  " + styles.TNTextBold.Render(setupHeading) + "\n")
 	sb.WriteString("\n  " + styles.TNTextSub.Render("Why this is needed") + "\n")
-	writeTNWrapped(&sb, w, "  ", "  ", "Omnideck runs as a container. This keeps the agent and its software isolated from the rest of your system. Podman or Docker runs that container; you only need one.", styles.TNDimText)
+	writeTNWrapped(&sb, w, "  ", "  ", "Omnideck runs as a container. This keeps the agent and its software isolated from the rest of your system. Podman is the software Omnideck uses to prepare that secure space.", styles.TNDimText)
 	sb.WriteString("\n")
 
 	sb.WriteString("  " + styles.TNTextSub.Render("This computer") + "\n")
 	for _, probe := range m.runtimeProbes {
-		name := "Docker"
-		if probe.Name == "podman" {
-			name = "Podman"
-		}
+		name := runtimeNameForPeople(probe.Name)
 		sb.WriteString("    " + styles.TNDimText.Render(padRight(name, 12)) + styles.TNDimText.Render(engineStateForPeople(probe.State)) + "\n")
 	}
 	optionHeading := "Choose one"
@@ -178,6 +192,97 @@ func (m SetupModel) tnRuntimeSetup(w int) string {
 	return sb.String()
 }
 
+func (m SetupModel) tnWelcome(w int) string {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	writeTNWrapped(&sb, w, "  ", "  ", "Welcome to omnideck", styles.TNTextBold)
+	writeTNWrapped(&sb, w, "  ", "  ", "A one-time setup will prepare everything omnideck needs on this computer.", styles.TNDimText)
+	sb.WriteString("\n")
+	writeTNWrapped(&sb, w, "  ", "  ", "Press Enter to set up omnideck.", styles.TNGreenTxt)
+	writeTNWrapped(&sb, w, "  ", "  ", "omnideck will detect what this computer needs and guide the entire setup.", styles.TNFaintText)
+	return sb.String()
+}
+
+func (m SetupModel) tnRuntimeSetup(w int) string {
+	var sb strings.Builder
+	sb.WriteString("\n")
+	if m.runtimeSetupStage == runtimeSetupRestart {
+		writeTNWrapped(&sb, w, "  ", "  ", "Restart needed", styles.TNTextBold)
+		writeTNWrapped(&sb, w, "  ", "  ", "Windows must restart to finish enabling required features. Save any open work, then restart now or later. If you restart now, omnideck reopens after you sign in and continues setup.", styles.TNDimText)
+		sb.WriteString("\n")
+		writeTNWrapped(&sb, w, "  > ", "    ", "Press Enter to restart now", styles.TNGreenTxt)
+		writeTNWrapped(&sb, w, "    ", "    ", "Press l to restart later", styles.TNFaintText)
+		return sb.String()
+	}
+
+	title := setupPreparingTitle
+	detail := setupPreparingDetail
+	if m.runtimeState == "permission" {
+		title = "Waiting for your permission"
+		detail = m.runtimeDetail
+	} else if m.runtimeState == "waiting" {
+		title = "Setup is still working"
+		detail = m.runtimeDetail
+	}
+	writeTNWrapped(&sb, w, "  ", "  ", title, styles.TNTextBold)
+	writeTNWrapped(&sb, w, "  ", "  ", detail, styles.TNDimText)
+	if m.runtimeActivity != "" {
+		sb.WriteString("\n")
+		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeActivity, styles.TNTextSub)
+	}
+	sb.WriteString("\n")
+
+	softwareDone := m.runtimeStage == engine.SetupStageEnvironment ||
+		m.runtimeStage == engine.SetupStageSoftware && m.runtimeState == "done"
+	softwareActive := !softwareDone && m.runtimeStage == engine.SetupStageSoftware
+	writeSetupPhaseRow(&sb, "Computer setup", softwareDone, softwareActive, m.spinnerModel)
+	if m.hostPlatform.OS != "linux" {
+		environmentDone := m.runtimeStage == engine.SetupStageEnvironment && m.runtimeState == "done"
+		environmentActive := m.runtimeStage == engine.SetupStageEnvironment && !environmentDone
+		writeSetupPhaseRow(&sb, "Secure space", environmentDone, environmentActive, m.spinnerModel)
+	}
+	writeSetupPhaseRow(&sb, "Application files", false, false, m.spinnerModel)
+	writeSetupPhaseRow(&sb, "Final checks", false, false, m.spinnerModel)
+
+	writeSetupProgressBar(&sb, runtimeOverallProgress(m), 28)
+	if m.runtimeDetail != "" && m.runtimeState != "permission" && m.runtimeState != "waiting" {
+		sb.WriteString("\n")
+		writeTNWrapped(&sb, w, "  ", "  ", m.runtimeDetail, styles.TNFaintText)
+	}
+	return sb.String()
+}
+
+func runtimeOverallProgress(m SetupModel) float64 {
+	softwareWeight := 25.0
+	environmentWeight := 15.0
+	total := 100.0
+	if m.hostPlatform.OS == "linux" {
+		environmentWeight = 0
+		total = 85
+	}
+	fraction := 0.0
+	if m.runtimeProgress != nil {
+		fraction = max(0, min(1, *m.runtimeProgress))
+	}
+	score := 0.0
+	if m.runtimeStage == engine.SetupStageEnvironment {
+		score = softwareWeight + environmentWeight*fraction
+	} else {
+		score = softwareWeight * fraction
+		if m.runtimeState == "done" {
+			score = softwareWeight
+		}
+	}
+	return score / total
+}
+
+func writeSetupProgressBar(sb *strings.Builder, fraction float64, width int) {
+	fraction = max(0, min(1, fraction))
+	filled := int(fraction * float64(width))
+	bar := strings.Repeat("=", filled) + strings.Repeat("-", width-filled)
+	sb.WriteString("\n  " + styles.TNBlueTxt.Render(bar) + " " + styles.TNFaintText.Render(fmt.Sprintf("%d%%", int(fraction*100))) + "\n")
+}
+
 func writeTNWrapped(sb *strings.Builder, width int, firstPrefix, continuationPrefix, value string, style lipgloss.Style) {
 	firstWidth := max(1, width-lipgloss.Width(firstPrefix))
 	continuationWidth := max(1, width-lipgloss.Width(continuationPrefix))
@@ -207,8 +312,27 @@ func friendlyOS(goos string) string {
 	}
 }
 
-func (m SetupModel) tnQuickCheck(_ int) string {
+func (m SetupModel) tnQuickCheck(w int) string {
+	if m.setupMode == SetupFirstRun {
+		var sb strings.Builder
+		sb.WriteString("\n")
+		writeSetupIntro(&sb, w, engine.SetupActivitySoftware)
+		sb.WriteString("\n")
+		spinner := m.spinnerModel
+		spinner.spinner = m.quickCheckSpinner
+		writeSetupPhaseRow(&sb, "Computer setup", false, true, spinner)
+		if m.hostPlatform.OS != "linux" {
+			writeSetupPhaseRow(&sb, "Secure space", false, false, spinner)
+		}
+		writeSetupPhaseRow(&sb, "Application files", false, false, spinner)
+		writeSetupPhaseRow(&sb, "Final checks", false, false, spinner)
+		writeSetupProgressBar(&sb, 0, 28)
+		return sb.String()
+	}
+
 	var sb strings.Builder
+	sb.WriteString("\n")
+	writeSetupIntro(&sb, w, "Getting your computer ready…")
 	sb.WriteString("\n")
 
 	type checkRow struct {
@@ -219,11 +343,11 @@ func (m SetupModel) tnQuickCheck(_ int) string {
 
 	engDone := m.eng != nil || m.engErr != nil
 	if engDone && m.eng != nil {
-		rows = append(rows, checkRow{"Podman or Docker", runtimeNameForPeople(m.eng.Name()) + " is ready", true, true, false})
+		rows = append(rows, checkRow{"Secure space", "Podman is ready", true, true, false})
 	} else if engDone {
-		rows = append(rows, checkRow{"Podman or Docker", "setup needed", false, true, false})
+		rows = append(rows, checkRow{"Secure space", "computer setup needed", false, true, false})
 	} else {
-		rows = append(rows, checkRow{"Podman or Docker", "", false, false, false})
+		rows = append(rows, checkRow{"Secure space", "", false, false, false})
 	}
 
 	if m.eng != nil {
@@ -274,38 +398,12 @@ func (m SetupModel) tnQuickCheck(_ int) string {
 			sb.WriteString("  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(label+r.detail) + "\n")
 		}
 	}
-	if m.quickCheckReady && m.preferredEngine == "" && len(m.availableEngines) > 1 {
-		sb.WriteString("\n  " + styles.TNTextSub.Render("Both Podman and Docker are ready.") + "\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press Tab to switch, or Enter to continue with "+runtimeNameForPeople(m.eng.Name())+".") + "\n")
-	} else if m.quickCheckReady && m.preferredEngine == "" {
-		if alternative := m.setupAlternativeRuntime(); alternative != "" {
-			currentName := runtimeNameForPeople(m.eng.Name())
-			alternativeName := runtimeNameForPeople(alternative)
-			sb.WriteString("\n  " + styles.TNTextSub.Render("Choose Podman or Docker") + "\n")
-			currentPrefix := "  " + styles.TNBlueTxt.Render("▸ ")
-			alternativePrefix := "    "
-			currentStyle := styles.TNTextBold
-			alternativeStyle := styles.TNDimText
-			if m.quickCheckAlternative != "" {
-				currentPrefix = "    "
-				alternativePrefix = "  " + styles.TNBlueTxt.Render("▸ ")
-				currentStyle = styles.TNDimText
-				alternativeStyle = styles.TNTextBold
-			}
-			sb.WriteString(currentPrefix + currentStyle.Render("Use "+currentName+" — Ready") + "\n")
-			sb.WriteString(alternativePrefix + alternativeStyle.Render("Set up "+alternativeName+" instead") + "\n")
-			sb.WriteString("\n  " + styles.TNFaintText.Render("Press Tab to choose, then Enter to continue.") + "\n")
-		}
-	}
 	return sb.String()
 }
 
 func runtimeNameForPeople(name string) string {
 	if name == "podman" {
 		return "Podman"
-	}
-	if name == "docker" {
-		return "Docker"
 	}
 	return name
 }
@@ -401,18 +499,64 @@ func (m SetupModel) tnReview(w int) string {
 	return sb.String()
 }
 
-func (m SetupModel) tnApplying(_ int) string {
+func (m SetupModel) tnApplying(w int) string {
 	var sb strings.Builder
 	sb.WriteString("\n")
-	for _, step := range m.spinnerModel.Steps {
-		sb.WriteString("  " + renderTNStep(step, m.spinnerModel) + "\n")
+	activity := "Downloading omnideck’s files…"
+	if m.spinnerModel.CurrentStep >= setupStepContainer {
+		activity = "Almost ready…"
+	}
+	writeSetupIntro(&sb, w, activity)
+	sb.WriteString("\n")
+
+	applicationDone := m.spinnerModel.CurrentStep > setupStepImage
+	writeSetupPhaseRow(&sb, "Computer setup", true, false, m.spinnerModel)
+	if m.hostPlatform.OS != "linux" {
+		writeSetupPhaseRow(&sb, "Secure space", true, false, m.spinnerModel)
+	}
+	writeSetupPhaseRow(&sb, "Application files", applicationDone, !applicationDone, m.spinnerModel)
+	writeSetupPhaseRow(&sb, "Final checks", false, applicationDone, m.spinnerModel)
+	writeSetupProgressBar(&sb, applyingOverallProgress(m), 28)
+
+	if current := m.spinnerModel.CurrentStep; current >= 0 && current < len(m.spinnerModel.Steps) {
+		sb.WriteString("\n")
+		writeTNWrapped(&sb, w, "  ", "  ", m.spinnerModel.Steps[current].Label, styles.TNFaintText)
 	}
 	return sb.String()
 }
 
+func applyingOverallProgress(m SetupModel) float64 {
+	softwareAndEnvironment := 0.40
+	downloadDone := 0.90
+	if m.hostPlatform.OS == "linux" {
+		softwareAndEnvironment = 25.0 / 85.0
+		downloadDone = 75.0 / 85.0
+	}
+	current := m.spinnerModel.CurrentStep
+	if current <= setupStepImage {
+		return softwareAndEnvironment
+	}
+	startupSteps := float64(setupStepSave - setupStepContainer + 1)
+	completed := float64(current - setupStepContainer)
+	return min(1, downloadDone+(1-downloadDone)*(completed/startupSteps))
+}
+
+func writeSetupPhaseRow(sb *strings.Builder, label string, done, active bool, spinner SpinnerModel) {
+	switch {
+	case done:
+		sb.WriteString("  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNDimText.Render(padRight(label, 22)+"Done") + "\n")
+	case active:
+		sb.WriteString("  " + spinner.spinner.View() + "  " + styles.TNBlueTxt.Render(label) + "\n")
+	default:
+		sb.WriteString("  " + styles.TNFaintText.Render("○  "+label+"  Not started") + "\n")
+	}
+}
+
 func (m SetupModel) tnComplete(w int) string {
 	var sb strings.Builder
-	sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render("Omnideck is ready!") + "\n\n")
+	sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render(setupReadyTitle) + "\n")
+	writeTNWrapped(&sb, w, "  ", "  ", setupReadyDetail, styles.TNDimText)
+	sb.WriteString("\n")
 
 	sb.WriteString("  " + styles.TNDimText.Render("Open Omnideck in your browser:") + "\n")
 	sb.WriteString("  " + styles.TNBlueTxt.Render("http://localhost:"+m.inputs[inputWebUIPort].Value()) + "\n\n")
@@ -443,7 +587,18 @@ func writeWindowsPodmanOllamaSteps(sb *strings.Builder, w int) {
 
 func (m SetupModel) tnFailed(w int) string {
 	var sb strings.Builder
-	sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render("Omnideck could not finish setup") + "\n\n")
+	title := "Setup didn’t finish"
+	detail := "Something stopped setup before it completed. Try again, or review the diagnostic details if it keeps happening."
+	if m.spinnerModel.CurrentStep == setupStepImage {
+		title = "The download didn’t finish"
+		detail = "Check your internet connection and try again. Anything already downloaded is kept."
+	} else if m.spinnerModel.CurrentStep >= setupStepContainer {
+		title = "omnideck didn’t finish starting"
+		detail = "Everything installed, but omnideck did not answer in time. Trying again runs the startup checks."
+	}
+	sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(title) + "\n")
+	writeTNWrapped(&sb, w, "  ", "  ", detail, styles.TNDimText)
+	sb.WriteString("\n")
 	if m.errorMsg != "" {
 		sb.WriteString("  It stopped while trying to: " + styles.TNTextSub.Render(m.errorMsg) + "\n")
 	}

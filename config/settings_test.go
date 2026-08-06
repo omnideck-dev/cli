@@ -26,7 +26,7 @@ func TestSaveAndLoadRuntime(t *testing.T) {
 	settingsPathOverride = filepath.Join(t.TempDir(), "nested", "settings.yaml")
 	defer func() { settingsPathOverride = original }()
 
-	if err := SaveRuntime("docker"); err != nil {
+	if err := SaveRuntime("podman"); err != nil {
 		t.Fatalf("SaveRuntime: %v", err)
 	}
 	if runtime.GOOS != "windows" {
@@ -37,8 +37,28 @@ func TestSaveAndLoadRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if settings.Runtime != "docker" {
-		t.Fatalf("Runtime = %q, want docker", settings.Runtime)
+	if settings.Runtime != "podman" {
+		t.Fatalf("Runtime = %q, want podman", settings.Runtime)
+	}
+}
+
+func TestLegacyDockerSettingMigratesToPodman(t *testing.T) {
+	original := settingsPathOverride
+	settingsPathOverride = filepath.Join(t.TempDir(), "settings.yaml")
+	defer func() { settingsPathOverride = original }()
+
+	if err := os.WriteFile(settingsPathOverride, []byte("runtime: docker\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := LoadSettings()
+	if err != nil {
+		t.Fatalf("LoadSettings: %v", err)
+	}
+	if settings.Runtime != "podman" {
+		t.Fatalf("legacy Runtime = %q, want podman", settings.Runtime)
+	}
+	if err := SaveRuntime("docker"); err == nil {
+		t.Fatal("new settings must reject Docker")
 	}
 }
 

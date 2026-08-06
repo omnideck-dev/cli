@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -160,13 +161,59 @@ func newAnonymousRegistryAuthFile() (string, func(), error) {
 }
 
 func (e *PodmanEngine) RunContainer(opts RunOptions) error {
-	args := buildPodmanRunArgs(opts)
+	windowsHostAddress := ""
+	if opts.Platform == "windows" && usesPodmanHostAlias(opts.OllamaHost, opts.Platform) {
+		address, err := resolveWindowsPodmanHostAddress()
+		if err != nil {
+			return err
+		}
+		windowsHostAddress = address
+	}
+
+	args := buildPodmanRunArgs(opts, windowsHostAddress)
 	cmd := buildCmd("podman", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return runtimeCommandError("podman run", err, out)
 	}
 	return nil
+}
+
+// resolveWindowsPodmanHostAddress asks the shared WSL-backed Podman machine
+// for the address it uses to reach Windows. Rootless pasta networking assigns
+// host.containers.internal a different, machine-local address inside a
+// container, so Windows containers need this explicit mapping.
+func resolveWindowsPodmanHostAddress() (string, error) {
+	cmd := buildCmd(
+		"podman",
+		"machine", "ssh", OmnideckMachineName,
+		"getent", "ahostsv4", podmanHostAlias,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf(
+			"Omnideck could not determine how the application container reaches Windows. Restart the %s Podman machine, then try again: %w",
+			OmnideckMachineName,
+			runtimeCommandError("Windows host address", err, out),
+		)
+	}
+	address := parseWindowsPodmanHostAddress(string(out))
+	if address == "" {
+		return "", fmt.Errorf(
+			"Omnideck could not determine how the application container reaches Windows. Restart the %s Podman machine, then try again",
+			OmnideckMachineName,
+		)
+	}
+	return address, nil
+}
+
+func parseWindowsPodmanHostAddress(output string) string {
+	for _, field := range strings.Fields(output) {
+		if address := net.ParseIP(field); address != nil && address.To4() != nil {
+			return address.String()
+		}
+	}
+	return ""
 }
 
 func (e *PodmanEngine) CheckOllamaConnection(name string) error {
@@ -243,7 +290,7 @@ func (e *PodmanEngine) ImageDigest(image string) string {
 
 // buildPodmanRunArgs builds args for `podman run`. It deliberately avoids
 // --replace so a name collision can never remove an unrelated container.
-func buildPodmanRunArgs(opts RunOptions) []string {
+func buildPodmanRunArgs(opts RunOptions, windowsHostAddress ...string) []string {
 	restart := opts.Restart
 	if restart == "" {
 		restart = "always"
@@ -264,9 +311,14 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 	if opts.Memory != "" {
 		args = append(args, "--memory="+opts.Memory)
 	}
+	if opts.Platform == "windows" && len(windowsHostAddress) > 0 && windowsHostAddress[0] != "" {
+		args = append(args, "--add-host", podmanHostAlias+":"+windowsHostAddress[0])
+	}
 
-	// Map host port → container port 8080 for multi-instance support.
-	args = append(args, "-p", hostPort+":8080")
+	// The web UI is private to this computer. Desktop embeds this address and
+	// the CLI prints it for a local browser; neither use case should expose the
+	// agent on the LAN merely because Podman's default bind is 0.0.0.0.
+	args = append(args, "-p", "127.0.0.1:"+hostPort+":8080")
 
 	args = append(args,
 		"-v", opts.HomeVolume+":/home/omnideck",
@@ -281,6 +333,9 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 
 	// PORT tells the container app which internal port to bind on.
 	args = append(args, "-e", "PORT=8080")
+	// The host browser or native Desktop shell owns the UI. Do not start a
+	// second desktop process inside the application container.
+	args = append(args, "-e", "ENABLE_DESKTOP=false")
 
 	args = append(args, opts.Image)
 	return args

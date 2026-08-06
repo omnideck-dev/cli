@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -23,6 +22,7 @@ const (
 	RuntimeStopped            RuntimeState = "stopped"
 	RuntimeMachineMissing     RuntimeState = "machine_missing"
 	RuntimeMachineStopped     RuntimeState = "machine_stopped"
+	RuntimeMachineNeedsUpdate RuntimeState = "machine_needs_update"
 	RuntimePermissionDenied   RuntimeState = "permission_denied"
 	RuntimeUnsupportedVersion RuntimeState = "unsupported_version"
 	RuntimeBroken             RuntimeState = "broken"
@@ -31,12 +31,17 @@ const (
 // ProbeResult is a diagnostic view of a container runtime. Unlike
 // Engine.IsAvailable, it preserves the reason a runtime cannot be used.
 type ProbeResult struct {
-	Name    string
-	State   RuntimeState
-	Path    string
-	Version string
-	Detail  string
-	Warning string
+	Name        string
+	State       RuntimeState
+	Path        string
+	Version     string
+	Detail      string
+	Warning     string
+	MachineName string
+	// MachineRunning is setup-policy input for safe repair plans. It is kept
+	// below the user-facing payload because callers only need the resulting
+	// commands, not another machine-state API.
+	MachineRunning bool
 }
 
 // Ready reports whether this runtime can be used immediately.
@@ -52,7 +57,7 @@ var probeCommand = func(name string, args ...string) ([]byte, error) {
 	return exec.CommandContext(ctx, name, args...).CombinedOutput()
 }
 
-// ProbeAll diagnoses Podman and Docker even when neither runtime is usable.
+// ProbeAll diagnoses Podman even when it is not yet usable.
 func ProbeAll() []ProbeResult {
 	return probeAllForOS(runtime.GOOS)
 }
@@ -62,24 +67,8 @@ func prepareRuntimeCommand(name string) {
 }
 
 func probeAllForOS(goos string) []ProbeResult {
-	names := []string{"podman", "docker"}
-	results := make([]ProbeResult, len(names))
-	// Refresh PATH before starting concurrent commands. An installer can finish
-	// while Omnideck is open, and serial updates avoid two probes overwriting
-	// each other's newly discovered path.
-	for _, name := range names {
-		refreshRuntimePath(name, goos)
-	}
-	var wg sync.WaitGroup
-	for i, name := range names {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			results[i] = probeRuntimeOnCurrentPath(name, goos)
-		}()
-	}
-	wg.Wait()
-	return results
+	refreshRuntimePath("podman", goos)
+	return []ProbeResult{probeRuntimeOnCurrentPath("podman", goos)}
 }
 
 // ReadyEngines converts successful probes into Engine implementations without
@@ -90,11 +79,8 @@ func ReadyEngines(probes []ProbeResult) []Engine {
 		if !probe.Ready() {
 			continue
 		}
-		switch probe.Name {
-		case "podman":
+		if probe.Name == "podman" {
 			engines = append(engines, &PodmanEngine{})
-		case "docker":
-			engines = append(engines, &DockerEngine{})
 		}
 	}
 	return engines
@@ -109,21 +95,29 @@ func probeRuntimeOnCurrentPath(name, goos string) ProbeResult {
 	result := ProbeResult{Name: name, State: RuntimeMissing}
 	path, err := probeLookPath(name)
 	if err != nil {
-		if goos == "windows" && name == "docker" {
-			if appPath := installedDockerDesktopPath(); appPath != "" {
-				result.Path = appPath
-				result.State = RuntimeStopped
-				result.Detail = "Docker Desktop is installed, but its command is not ready yet."
-			}
-		}
 		return result
 	}
 	result.Path = path
 	result.Version = probeVersion(name)
 
-	out, infoErr := probeCommand(name, "info")
+	infoArgs := []string{"info"}
+	if name == "podman" {
+		infoArgs = podmanCommandArgs(goos, infoArgs...)
+	}
+	out, infoErr := probeCommand(name, infoArgs...)
 	if infoErr == nil {
 		result.State = RuntimeReady
+		if policy := podmanPolicy(goos); policy.UsesMachine {
+			result.MachineName = OmnideckMachineName
+			if machines, ok := listPodmanMachines(); ok {
+				if machine, found := omnideckPodmanMachine(machines); found {
+					result.MachineRunning = machine.Running
+					if goos == "windows" && !machine.UserModeNetworking {
+						result.State = RuntimeMachineNeedsUpdate
+					}
+				}
+			}
+		}
 		applyVersionPolicy(&result, goos)
 		return result
 	}
@@ -136,16 +130,17 @@ func probeRuntimeOnCurrentPath(name, goos string) ProbeResult {
 		return result
 	}
 
-	if name == "podman" && (goos == "darwin" || goos == "windows") {
-		if state, ok := probePodmanMachine(); ok {
+	if name == "podman" && podmanPolicy(goos).UsesMachine {
+		if state, machineName, ok, running := probePodmanMachine(goos); ok {
 			result.State = state
+			result.MachineName = machineName
+			result.MachineRunning = running
 			return result
 		}
 	}
 
 	if containsAny(lower,
 		"cannot connect", "connection refused", "daemon is not running",
-		"is the docker daemon running", "is docker desktop running",
 		"podman machine is not running") {
 		result.State = RuntimeStopped
 		return result
@@ -156,22 +151,6 @@ func probeRuntimeOnCurrentPath(name, goos string) ProbeResult {
 		result.Detail = infoErr.Error()
 	}
 	return result
-}
-
-func installedDockerDesktopPath() string {
-	var candidates []string
-	if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-		candidates = append(candidates, filepath.Join(localAppData, "Programs", "DockerDesktop", "Docker Desktop.exe"))
-	}
-	if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
-		candidates = append(candidates, filepath.Join(programFiles, "Docker", "Docker", "Docker Desktop.exe"))
-	}
-	for _, candidate := range candidates {
-		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
-			return candidate
-		}
-	}
-	return ""
 }
 
 // refreshRuntimePath makes software installed while Omnideck is already open
@@ -186,19 +165,7 @@ func runtimePathCandidates(name, goos string) []string {
 	var candidates []string
 	switch goos {
 	case "windows":
-		switch name {
-		case "docker":
-			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
-				candidates = append(candidates,
-					filepath.Join(localAppData, "Programs", "DockerDesktop", "resources", "bin"),
-				)
-			}
-			if programFiles := os.Getenv("ProgramFiles"); programFiles != "" {
-				candidates = append(candidates,
-					filepath.Join(programFiles, "Docker", "Docker", "resources", "bin"),
-				)
-			}
-		case "podman":
+		if name == "podman" {
 			if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
 				candidates = append(candidates,
 					filepath.Join(localAppData, "Programs", "Podman"),
@@ -211,21 +178,11 @@ func runtimePathCandidates(name, goos string) []string {
 			}
 		}
 	case "darwin":
-		switch name {
-		case "podman":
+		if name == "podman" {
 			// Podman's official macOS package installs here and adds this
 			// directory to /etc/paths.d for future terminal sessions.
 			candidates = append(candidates,
 				"/opt/podman/bin",
-				"/opt/homebrew/bin",
-				"/usr/local/bin",
-			)
-		case "docker":
-			if home, err := os.UserHomeDir(); err == nil {
-				candidates = append(candidates, filepath.Join(home, ".docker", "bin"))
-			}
-			candidates = append(candidates,
-				"/Applications/Docker.app/Contents/Resources/bin",
 				"/opt/homebrew/bin",
 				"/usr/local/bin",
 			)
@@ -275,40 +232,57 @@ func probeVersion(name string) string {
 	return ""
 }
 
-func probePodmanMachine() (RuntimeState, bool) {
+type podmanMachine struct {
+	Name               string `json:"Name"`
+	Running            bool   `json:"Running"`
+	Default            bool   `json:"Default"`
+	UserModeNetworking bool   `json:"UserModeNetworking"`
+}
+
+func listPodmanMachines() ([]podmanMachine, bool) {
 	out, err := probeCommand("podman", "machine", "list", "--format", "json")
 	if err != nil {
-		return "", false
+		return nil, false
 	}
-	var machines []struct {
-		Running bool `json:"Running"`
-	}
+	var machines []podmanMachine
 	if err := json.Unmarshal(out, &machines); err != nil {
-		return "", false
+		return nil, false
 	}
-	if len(machines) == 0 {
-		return RuntimeMachineMissing, true
-	}
+	return machines, true
+}
+
+func omnideckPodmanMachine(machines []podmanMachine) (podmanMachine, bool) {
 	for _, machine := range machines {
-		if machine.Running {
-			// A running machine with a failed `podman info` needs diagnostics rather
-			// than another start attempt.
-			return RuntimeBroken, true
+		if machine.Name == OmnideckMachineName {
+			return machine, true
 		}
 	}
-	return RuntimeMachineStopped, true
+	return podmanMachine{}, false
+}
+
+func probePodmanMachine(goos string) (RuntimeState, string, bool, bool) {
+	machines, ok := listPodmanMachines()
+	if !ok {
+		return "", "", false, false
+	}
+	machine, found := omnideckPodmanMachine(machines)
+	if !found {
+		return RuntimeMachineMissing, OmnideckMachineName, true, false
+	}
+	if goos == "windows" && !machine.UserModeNetworking {
+		return RuntimeMachineNeedsUpdate, OmnideckMachineName, true, machine.Running
+	}
+	if machine.Running {
+		// A named running machine with a failed info probe can be safely restarted;
+		// setup targets only Omnideck's machine and preserves its data.
+		return RuntimeBroken, OmnideckMachineName, true, true
+	}
+	return RuntimeMachineStopped, OmnideckMachineName, true, false
 }
 
 func applyVersionPolicy(result *ProbeResult, goos string) {
-	major, minor, _, ok := parseVersion(result.Version)
-	if !ok {
-		return
-	}
-	if result.Name == "docker" && goos == "linux" && versionLess(major, minor, 20, 10) {
-		result.State = RuntimeUnsupportedVersion
-		result.Detail = "Docker 20.10 or newer is required for secure host-service networking on Linux."
-		return
-	}
+	_ = result
+	_ = goos
 }
 
 func parseVersion(value string) (int, int, int, bool) {
@@ -368,6 +342,8 @@ func RuntimeStateLabel(state RuntimeState) string {
 		return "Installed; one-time setup is not finished"
 	case RuntimeMachineStopped:
 		return "Installed, but not running"
+	case RuntimeMachineNeedsUpdate:
+		return "Installed; networking needs a one-time update"
 	case RuntimePermissionDenied:
 		return "Installed, but your account cannot use it"
 	case RuntimeUnsupportedVersion:

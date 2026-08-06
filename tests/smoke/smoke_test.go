@@ -34,6 +34,7 @@ func TestMain(m *testing.M) {
 	moduleRoot := findModuleRoot()
 
 	cmd := exec.Command("go", "build",
+		"-buildvcs=false",
 		"-ldflags", "-X main.version=test -X main.commit=abc1234 -X main.date=2025-01-01",
 		"-o", binaryPath,
 		".",
@@ -131,7 +132,7 @@ func TestNoArgsShowsHelp(t *testing.T) {
 }
 
 func TestSubcommandHelp(t *testing.T) {
-	for _, sub := range []string{"add", "install", "setup", "list", "start", "stop", "restart", "status", "logs", "doctor", "config", "update", "remove", "uninstall"} {
+	for _, sub := range []string{"add", "install", "setup", "list", "start", "stop", "restart", "status", "logs", "doctor", "config", "environment", "update", "remove", "uninstall"} {
 		t.Run(sub, func(t *testing.T) {
 			stdout, _, code := run(sub, "--help")
 			if code != 0 {
@@ -220,8 +221,8 @@ func TestVersionJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("--version --json did not produce valid JSON: %v\n%s", err, stdout)
 	}
-	if payload.JSONContract != 1 {
-		t.Fatalf("jsonContract = %d, want 1", payload.JSONContract)
+	if payload.JSONContract != 2 {
+		t.Fatalf("jsonContract = %d, want 2", payload.JSONContract)
 	}
 	if payload.Version != "test" || payload.Commit != "abc1234" {
 		t.Fatalf("unexpected version payload: %+v", payload)

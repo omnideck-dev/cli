@@ -1,341 +1,334 @@
 package engine
 
 import (
-	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestLinuxRecommendsRootlessPodman(t *testing.T) {
-	probes := []ProbeResult{
+func TestEveryPlatformRecommendsPodman(t *testing.T) {
+	for _, host := range []HostPlatform{
+		{OS: "windows", Arch: "amd64"},
+		{OS: "darwin", Arch: "arm64"},
+		{OS: "darwin", Arch: "amd64"},
+		{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04"},
+		{OS: "linux", Arch: "amd64", DistroID: "ubuntu", WSL: true},
+	} {
+		if got := RecommendedRuntime(host); got != "podman" {
+			t.Fatalf("RecommendedRuntime(%#v) = %q, want podman", host, got)
+		}
+	}
+}
+
+func TestSetupPlansIgnoreDockerProbes(t *testing.T) {
+	plans := BuildSetupPlans([]ProbeResult{
+		{Name: "docker", State: RuntimeReady},
 		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
+	}, HostPlatform{OS: "windows", Arch: "amd64"})
+	if len(plans) != 1 || plans[0].Runtime != "podman" || !plans[0].Recommended {
+		t.Fatalf("plans = %#v, want one recommended Podman plan", plans)
 	}
-	plans := BuildSetupPlans(probes, HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04"})
-	if len(plans) != 2 {
-		t.Fatalf("len(plans) = %d, want 2", len(plans))
-	}
-	if !plans[0].Recommended || plans[0].Runtime != "podman" {
-		t.Fatalf("recommended plan = %#v, want Podman", plans[0])
-	}
-	if len(plans[0].Commands) != 2 || plans[0].Commands[1].Name != "sudo" {
-		t.Fatalf("unexpected Ubuntu commands: %#v", plans[0].Commands)
-	}
-	if !strings.Contains(plans[0].Commands[1].Display, "apt-get install -y podman") {
-		t.Fatalf("install command = %q", plans[0].Commands[1].Display)
-	}
-	if len(plans[0].Steps) != 3 || !strings.Contains(plans[0].PermissionNote, "account password") {
-		t.Fatalf("Linux walkthrough is incomplete: %#v", plans[0])
-	}
-	if strings.Contains(strings.ToLower(plans[0].PermissionNote), "elevat") {
-		t.Fatalf("password explanation uses unexplained technical language: %q", plans[0].PermissionNote)
+	if got := DefaultRuntimeForSetup([]ProbeResult{{Name: "docker", State: RuntimeReady}}, HostPlatform{OS: "windows"}); got != "podman" {
+		t.Fatalf("DefaultRuntimeForSetup = %q, want podman", got)
 	}
 }
 
-func TestOldUbuntuDoesNotRunAnUnsupportedPackageInstall(t *testing.T) {
-	probes := []ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}
-	plan := BuildSetupPlans(probes, HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "20.04"})[0]
-	if len(plan.Commands) != 0 || !plan.Manual {
-		t.Fatalf("old Ubuntu should use official manual guidance: %#v", plan)
-	}
-}
-
-func TestWindowsRecommendsDockerDesktop(t *testing.T) {
-	probes := []ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}
-	plans := BuildSetupPlans(probes, HostPlatform{OS: "windows"})
-	if plans[0].Recommended {
-		t.Fatal("Podman should be an alternative on a fresh Windows setup")
-	}
-	if !plans[1].Recommended || plans[1].Runtime != "docker" {
-		t.Fatalf("recommended plan = %#v, want Docker", plans[1])
-	}
-	if !strings.Contains(plans[1].URL, "ms-windows-store://") || !strings.Contains(plans[1].URL, "XP8CBJ40XLBWKX") {
-		t.Fatalf("Windows Docker setup should open its official Store listing, URL = %q", plans[1].URL)
-	}
-	if len(plans[0].Steps) != 3 || !plans[0].DirectDownload || !strings.Contains(plans[0].URL, "podman-installer-windows-amd64.msi") {
-		t.Fatalf("Podman alternative must have its own plain walkthrough: %#v", plans[0])
-	}
-	if !strings.Contains(plans[0].Description, "WSL 2") || !strings.Contains(plans[0].SafetyNote, "Hyper-V") || !strings.Contains(plans[0].SafetyNote, "Windows Pro or Enterprise") {
-		t.Fatalf("Podman alternative must recommend WSL 2 and explain Hyper-V: %#v", plans[0])
-	}
-	if len(plans[1].Steps) != 3 || !strings.Contains(plans[1].PermissionNote, "administrator") {
-		t.Fatalf("Docker recommendation must explain its Windows setup: %#v", plans[1])
-	}
-}
-
-func TestDefaultRuntimeForSetupUsesInstalledRuntimeBeforePlatformDefault(t *testing.T) {
-	windows := HostPlatform{OS: "windows", Arch: "amd64"}
-	tests := []struct {
-		name   string
-		probes []ProbeResult
-		want   string
-	}{
-		{
-			name: "nothing installed uses Windows default",
-			probes: []ProbeResult{
-				{Name: "podman", State: RuntimeMissing},
-				{Name: "docker", State: RuntimeMissing},
-			},
-			want: "docker",
-		},
-		{
-			name: "one installed runtime is repaired",
-			probes: []ProbeResult{
-				{Name: "podman", State: RuntimeMachineStopped},
-				{Name: "docker", State: RuntimeMissing},
-			},
-			want: "podman",
-		},
-		{
-			name: "two installed runtimes require a choice",
-			probes: []ProbeResult{
-				{Name: "podman", State: RuntimeMachineStopped},
-				{Name: "docker", State: RuntimeStopped},
-			},
-			want: "",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := DefaultRuntimeForSetup(tt.probes, windows); got != tt.want {
-				t.Fatalf("DefaultRuntimeForSetup() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestWindowsPodmanMachineSetupExplainsItsProvider(t *testing.T) {
-	plans := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMachineMissing}}, HostPlatform{OS: "windows", Arch: "amd64"})
-	if len(plans) != 1 {
+func TestLinuxPodmanInstallUsesKnownPackageManager(t *testing.T) {
+	plans := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMissing}},
+		HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04"},
+	)
+	if len(plans) != 1 || len(plans[0].Commands) != 2 {
 		t.Fatalf("plans = %#v", plans)
 	}
-	plan := plans[0]
-	if !strings.Contains(plan.Steps[0], "WSL 2") || !strings.Contains(plan.SafetyNote, "Hyper-V") || !strings.Contains(plan.PermissionNote, "administrator") {
-		t.Fatalf("Windows Podman machine guidance is incomplete: %#v", plan)
+	if got := plans[0].Commands[1].Display; got != "sudo apt-get install -y podman" {
+		t.Fatalf("install command = %q", got)
+	}
+	if !plans[0].RequiresElevation || !strings.Contains(plans[0].PermissionNote, "account password") {
+		t.Fatalf("permission guidance = %#v", plans[0])
 	}
 }
 
-func TestMacAlternativesHaveCompleteWalkthroughs(t *testing.T) {
-	plans := BuildSetupPlans([]ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}, HostPlatform{OS: "darwin"})
-
-	for _, plan := range plans {
-		if len(plan.Steps) != 3 {
-			t.Fatalf("%s walkthrough has %d steps, want 3: %#v", plan.Runtime, len(plan.Steps), plan)
-		}
-		if !strings.Contains(plan.PermissionNote, "Mac password") {
-			t.Fatalf("%s walkthrough must explain a possible password request: %#v", plan.Runtime, plan)
+func TestUnknownOrOldLinuxUsesManualPodmanGuidance(t *testing.T) {
+	for _, host := range []HostPlatform{
+		{OS: "linux", DistroID: "unknown"},
+		{OS: "linux", DistroID: "ubuntu", Version: "20.04"},
+	} {
+		plan := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMissing}}, host)[0]
+		if !plan.Manual || len(plan.Commands) != 0 || !strings.Contains(plan.URL, "podman.io") {
+			t.Fatalf("manual plan = %#v", plan)
 		}
 	}
 }
 
-func TestAppleSiliconMacDownloadsTheOfficialPodmanInstaller(t *testing.T) {
-	plans := BuildSetupPlans([]ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}, HostPlatform{OS: "darwin", Arch: "arm64"})
-
-	if !plans[0].Recommended || !plans[0].DirectDownload || !strings.HasSuffix(plans[0].URL, "podman-installer-macos-arm64.pkg") {
-		t.Fatalf("unexpected Apple silicon Podman plan: %#v", plans[0])
-	}
-}
-
-func TestIntelMacRecommendsDocker(t *testing.T) {
-	plans := BuildSetupPlans([]ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}, HostPlatform{OS: "darwin", Arch: "amd64"})
-
-	if plans[0].Recommended || !plans[1].Recommended {
-		t.Fatalf("Intel Mac should recommend Docker: %#v", plans)
-	}
-	if !strings.Contains(plans[0].SafetyNote, "Intel Macs") {
-		t.Fatalf("Intel Podman alternative must explain its limitation: %#v", plans[0])
-	}
-}
-
-func TestWSLRecommendsDockerDesktop(t *testing.T) {
-	probes := []ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}
-	plans := BuildSetupPlans(probes, HostPlatform{OS: "linux", DistroID: "ubuntu", WSL: true})
-	if !plans[1].Recommended || !strings.Contains(plans[1].Description, "Docker Desktop") {
-		t.Fatalf("expected Docker Desktop recommendation under WSL, got %#v", plans[1])
-	}
-	if !strings.Contains(plans[1].URL, "ms-windows-store://") {
-		t.Fatalf("WSL Docker setup should open Microsoft Store, URL = %q", plans[1].URL)
-	}
-}
-
-func TestWindowsARMUsesDockerInstallerInsteadOfX64StoreListing(t *testing.T) {
-	url := dockerInstallURL(HostPlatform{OS: "windows", Arch: "arm64"})
-	if !strings.Contains(url, "windows-install") {
-		t.Fatalf("Windows ARM URL = %q, want Docker's installer page", url)
-	}
-}
-
-func TestStartDockerDesktopChecksPerUserAndAllUserLocations(t *testing.T) {
-	command := startDockerDesktopCommand()
-	if runtime.GOOS == "windows" {
-		if command.Name == "powershell.exe" || len(command.Args) != 0 {
-			t.Fatalf("Windows should launch Docker Desktop directly: %#v", command)
-		}
-		return
-	}
-	args := strings.Join(command.Args, " ")
-	if !strings.Contains(args, `LOCALAPPDATA\Programs\DockerDesktop`) {
-		t.Fatalf("start command does not check the per-user Docker location: %s", args)
-	}
-	if !strings.Contains(args, `ProgramFiles\Docker\Docker`) {
-		t.Fatalf("start command does not check the all-users Docker location: %s", args)
-	}
-}
-
-func TestInstalledPodmanMachineRecoveryBeatsPlatformDefault(t *testing.T) {
-	probes := []ProbeResult{
-		{Name: "podman", State: RuntimeMachineStopped},
-		{Name: "docker", State: RuntimeMissing},
-	}
-	plans := BuildSetupPlans(probes, HostPlatform{OS: "windows"})
-	if !plans[0].Recommended || plans[0].Commands[0].Display != "podman machine start" {
-		t.Fatalf("expected Podman recovery recommendation, got %#v", plans[0])
-	}
-}
-
-func TestPodmanMachineSetupDoesNotAskForADefaultConnection(t *testing.T) {
-	plans := BuildSetupPlans([]ProbeResult{
-		{Name: "podman", State: RuntimeMachineMissing},
-		{Name: "docker", State: RuntimeMissing},
-	}, HostPlatform{OS: "darwin"})
-
-	if got := plans[0].Commands[0].Display; got != "podman machine init --now --update-connection=true" {
-		t.Fatalf("machine setup command = %q", got)
-	}
-}
-
-func TestDockerPermissionPlanDoesNotChangeGroups(t *testing.T) {
-	probes := []ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimePermissionDenied},
-	}
-	plans := BuildSetupPlans(probes, HostPlatform{OS: "linux", DistroID: "ubuntu"})
-	dockerPlan := plans[1]
-	if len(dockerPlan.Commands) != 0 {
-		t.Fatalf("permission remediation must not run commands: %#v", dockerPlan.Commands)
-	}
-	if !strings.Contains(dockerPlan.SafetyNote, "full control") {
-		t.Fatalf("missing group security explanation: %q", dockerPlan.SafetyNote)
-	}
-}
-
-func TestStoppedDockerUsesSystemdOnlyWhenDetected(t *testing.T) {
-	probes := []ProbeResult{
-		{Name: "podman", State: RuntimeMissing},
-		{Name: "docker", State: RuntimeStopped},
-	}
-	withSystemd := BuildSetupPlans(probes, HostPlatform{OS: "linux", DistroID: "ubuntu", Systemd: true})[1]
-	if len(withSystemd.Commands) != 1 || withSystemd.Commands[0].Display != "sudo systemctl start docker" {
-		t.Fatalf("unexpected systemd recovery: %#v", withSystemd)
-	}
-	withoutSystemd := BuildSetupPlans(probes, HostPlatform{OS: "linux", DistroID: "ubuntu"})[1]
-	if len(withoutSystemd.Commands) != 0 || !withoutSystemd.Manual {
-		t.Fatalf("non-systemd hosts must not run systemctl: %#v", withoutSystemd)
-	}
-}
-
-func TestDockerURLMapsUbuntuDerivatives(t *testing.T) {
-	url := dockerInstallURL(HostPlatform{OS: "linux", DistroID: "pop"})
-	if url != "https://docs.docker.com/engine/install/ubuntu/" {
-		t.Fatalf("URL = %q", url)
-	}
-}
-
-func TestEverySupportedRuntimeStateHasACompleteNextStep(t *testing.T) {
+func TestLinuxDerivativesUseTheirDeclaredPackageFamily(t *testing.T) {
 	tests := []struct {
-		name    string
 		host    HostPlatform
-		runtime string
-		state   RuntimeState
+		manager string
 	}{
-		{"Windows Docker missing", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimeMissing},
-		{"Windows Docker stopped", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimeStopped},
-		{"Windows Docker permission", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimePermissionDenied},
-		{"Windows Docker broken", HostPlatform{OS: "windows", Arch: "amd64"}, "docker", RuntimeBroken},
-		{"Windows Podman missing", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeMissing},
-		{"Windows Podman machine missing", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeMachineMissing},
-		{"Windows Podman machine stopped", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeMachineStopped},
-		{"Windows Podman permission", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimePermissionDenied},
-		{"Windows Podman broken", HostPlatform{OS: "windows", Arch: "amd64"}, "podman", RuntimeBroken},
-		{"Mac Docker missing", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimeMissing},
-		{"Mac Docker stopped", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimeStopped},
-		{"Mac Docker permission", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimePermissionDenied},
-		{"Mac Docker broken", HostPlatform{OS: "darwin", Arch: "arm64"}, "docker", RuntimeBroken},
-		{"Mac Podman missing", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeMissing},
-		{"Mac Podman machine missing", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeMachineMissing},
-		{"Mac Podman machine stopped", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeMachineStopped},
-		{"Mac Podman permission", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimePermissionDenied},
-		{"Mac Podman broken", HostPlatform{OS: "darwin", Arch: "arm64"}, "podman", RuntimeBroken},
-		{"Linux Docker missing", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeMissing},
-		{"Linux Docker stopped", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeStopped},
-		{"Linux Docker permission", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimePermissionDenied},
-		{"Linux Docker old", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeUnsupportedVersion},
-		{"Linux Docker broken", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker", RuntimeBroken},
-		{"Linux Podman missing", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimeMissing},
-		{"Linux Podman stopped", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimeStopped},
-		{"Linux Podman permission", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimePermissionDenied},
-		{"Linux Podman broken", HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman", RuntimeBroken},
+		{HostPlatform{OS: "linux", DistroID: "kali", DistroLike: []string{"debian"}, Version: "2026.1"}, "apt-get"},
+		{HostPlatform{OS: "linux", DistroID: "nobara", DistroLike: []string{"fedora"}}, "dnf"},
+		{HostPlatform{OS: "linux", DistroID: "garuda", DistroLike: []string{"arch"}}, "pacman"},
 	}
+	for _, tt := range tests {
+		commands := podmanLinuxPackageCommands(tt.host)
+		if len(commands) == 0 || commands[0].Name != tt.manager {
+			t.Fatalf("commands for %#v = %#v, want %s", tt.host, commands, tt.manager)
+		}
+	}
+}
 
+func TestWindowsPodmanInstallerAndWSLGuidance(t *testing.T) {
+	for _, arch := range []string{"amd64", "arm64"} {
+		plan := BuildSetupPlans(
+			[]ProbeResult{{Name: "podman", State: RuntimeMissing}},
+			HostPlatform{OS: "windows", Arch: arch},
+		)[0]
+		if !plan.DirectDownload || !strings.HasSuffix(plan.URL, "podman-installer-windows-"+arch+".msi") {
+			t.Fatalf("%s plan = %#v", arch, plan)
+		}
+		if !strings.Contains(plan.Description, "WSL 2") || !strings.Contains(plan.SafetyNote, "Hyper-V") {
+			t.Fatalf("Windows guidance = %#v", plan)
+		}
+	}
+}
+
+func TestMacPodmanInstallPaths(t *testing.T) {
+	arm := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMissing}},
+		HostPlatform{OS: "darwin", Arch: "arm64"},
+	)[0]
+	if !arm.DirectDownload || !strings.HasSuffix(arm.URL, "podman-installer-macos-arm64.pkg") {
+		t.Fatalf("Apple Silicon plan = %#v", arm)
+	}
+	intel := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMissing}},
+		HostPlatform{OS: "darwin", Arch: "amd64"},
+	)[0]
+	if !intel.DirectDownload || !strings.HasSuffix(intel.URL, "podman-installer-macos-amd64.pkg") || strings.Contains(intel.Description, "Docker") {
+		t.Fatalf("Intel plan = %#v", intel)
+	}
+}
+
+func TestFreshWindowsMachineUsesSharedOmnideckDefaults(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMachineMissing}},
+		HostPlatform{OS: "windows", Arch: "amd64", CPUCount: 16, TotalMemoryMB: 32768},
+	)[0]
+	want := "podman machine init --provider wsl --user-mode-networking=true --rootful=false --now --tls-verify=true --update-connection=false omnideck-runtime"
+	if got := plan.Commands[0].Display; got != want {
+		t.Fatalf("machine init = %q, want %q", got, want)
+	}
+	if !strings.Contains(plan.Steps[0], "WSL 2") || !strings.Contains(plan.PermissionNote, "administrator") {
+		t.Fatalf("machine guidance = %#v", plan)
+	}
+}
+
+func TestFreshMacMachineSetsOnlyCompatibleMemoryAndSharedName(t *testing.T) {
+	tests := []struct {
+		name   string
+		host   HostPlatform
+		memory string
+	}{
+		{"small", HostPlatform{OS: "darwin", CPUCount: 1, TotalMemoryMB: 8192}, "4096"},
+		{"medium", HostPlatform{OS: "darwin", CPUCount: 8, TotalMemoryMB: 12288}, "5120"},
+		{"large", HostPlatform{OS: "darwin", CPUCount: 12, TotalMemoryMB: 32768}, "6144"},
+	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			other := "docker"
-			if tt.runtime == "docker" {
-				other = "podman"
-			}
-			plans := BuildSetupPlans([]ProbeResult{
-				{Name: tt.runtime, State: tt.state},
-				{Name: other, State: RuntimeReady},
-			}, tt.host)
-			if len(plans) != 1 {
-				t.Fatalf("plan count = %d, want 1: %#v", len(plans), plans)
-			}
-			plan := plans[0]
-			if plan.Runtime != tt.runtime || plan.State != tt.state {
-				t.Fatalf("plan identity = %s/%s, want %s/%s", plan.Runtime, plan.State, tt.runtime, tt.state)
-			}
-			if plan.Title == "" || plan.Action == "" || plan.Description == "" || len(plan.Steps) == 0 {
-				t.Fatalf("user walkthrough is incomplete: %#v", plan)
-			}
-			if len(plan.Commands) == 0 && plan.URL == "" {
-				t.Fatalf("plan has no safe action: %#v", plan)
-			}
-			for _, command := range plan.Commands {
-				if command.Name == "" || command.Display == "" {
-					t.Fatalf("command is incomplete: %#v", command)
+			command := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMachineMissing}}, tt.host)[0].Commands[0].Display
+			for _, want := range []string{"--memory " + tt.memory, "--update-connection=false", OmnideckMachineName} {
+				if !strings.Contains(command, want) {
+					t.Fatalf("command %q does not contain %q", command, want)
 				}
 			}
-			if plan.URL != "" && !strings.Contains(plan.URL, "://") {
-				t.Fatalf("URL is not actionable: %q", plan.URL)
+			for _, omitted := range []string{"--cpus", "--disk-size", "--provider", "--user-mode-networking"} {
+				if strings.Contains(command, omitted) {
+					t.Fatalf("macOS command should leave %s to Podman: %q", omitted, command)
+				}
 			}
 		})
 	}
 }
 
-func TestWindowsPodmanInstallerMatchesOfficialReleaseAssets(t *testing.T) {
-	for _, arch := range []string{"amd64", "arm64"} {
-		plans := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMissing}}, HostPlatform{OS: "windows", Arch: arch})
-		want := "podman-installer-windows-" + arch + ".msi"
-		if len(plans) != 1 || !strings.HasSuffix(plans[0].URL, want) {
-			t.Fatalf("%s installer = %#v, want suffix %q", arch, plans, want)
+func TestMacContainerDefaultsFitInsideMachineMemory(t *testing.T) {
+	tests := []struct {
+		totalMB       int64
+		container     string
+		machineMemory int64
+	}{
+		{4096, "1g", 4096},
+		{8192, "2g", 4096},
+		{12288, "3g", 5120},
+		{32768, "4g", 6144},
+		{65536, "4g", 6144},
+	}
+	for _, tt := range tests {
+		got := DefaultRuntimeResources(HostPlatform{OS: "darwin", TotalMemoryMB: tt.totalMB})
+		if got.ContainerMemory != tt.container || got.MachineMemoryMB != tt.machineMemory {
+			t.Fatalf("host memory %d MB defaults = %#v", tt.totalMB, got)
 		}
+		containerGB, _ := strconv.ParseInt(strings.TrimSuffix(got.ContainerMemory, "g"), 10, 64)
+		if got.MachineMemoryMB < containerGB*1024+2048 {
+			t.Fatalf("machine memory %d MB does not leave 2 GiB above container limit %s", got.MachineMemoryMB, got.ContainerMemory)
+		}
+	}
+}
+
+func TestWindowsContainerDefaultsFitInsideWSLDefaults(t *testing.T) {
+	// Without a user .wslconfig, WSL exposes up to half of host memory. Keep at
+	// least one GiB for the WSL guest above the container's cgroup limit; the
+	// Windows host retains the other half independently.
+	for _, totalMB := range []int64{4096, 8192, 16384, 32768, 65536} {
+		got := DefaultRuntimeResources(HostPlatform{OS: "windows", TotalMemoryMB: totalMB})
+		containerGB, _ := strconv.ParseInt(strings.TrimSuffix(got.ContainerMemory, "g"), 10, 64)
+		wslDefaultMB := totalMB / 2
+		if containerGB*1024+1024 > wslDefaultMB {
+			t.Fatalf("host memory %d MB gives WSL about %d MB but container limit %s leaves less than 1 GiB guest headroom", totalMB, wslDefaultMB, got.ContainerMemory)
+		}
+		if got.MachineCPUs != 0 || got.MachineMemoryMB != 0 || got.MachineDiskGB != 0 {
+			t.Fatalf("Windows must leave machine sizing to WSL, got %#v", got)
+		}
+	}
+}
+
+func TestRuntimeResourceDefaultsAreExplicitPerPlatform(t *testing.T) {
+	tests := []struct {
+		name         string
+		host         HostPlatform
+		mode         string
+		memory       string
+		shm          string
+		machineCPUs  int
+		machineMemMB int64
+		machineDisk  int
+	}{
+		{
+			name: "Windows uses WSL sizing",
+			host: HostPlatform{OS: "windows", CPUCount: 16, TotalMemoryMB: 32 * 1024},
+			mode: "wsl-managed", memory: "4g", shm: "2048m",
+		},
+		{
+			name: "large Mac keeps VM headroom",
+			host: HostPlatform{OS: "darwin", CPUCount: 12, TotalMemoryMB: 64 * 1024},
+			mode: "podman-managed", memory: "4g", shm: "2048m",
+			machineMemMB: 6144,
+		},
+		{
+			name: "Linux uses the host directly",
+			host: HostPlatform{OS: "linux", CPUCount: 8, TotalMemoryMB: 16 * 1024},
+			mode: "host-native", memory: "3g", shm: "1536m",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DefaultRuntimeResources(tt.host)
+			if got.MachineMode != tt.mode || got.ContainerMemory != tt.memory || got.ContainerSHMSize != tt.shm ||
+				got.MachineCPUs != tt.machineCPUs || got.MachineMemoryMB != tt.machineMemMB || got.MachineDiskGB != tt.machineDisk {
+				t.Fatalf("defaults = %#v", got)
+			}
+		})
+	}
+}
+
+func TestStoppedMachineStartsTheSharedOmnideckMachine(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMachineStopped, MachineName: "developer-machine"}},
+		HostPlatform{OS: "windows"},
+	)[0]
+	if got := plan.Commands[0].Display; got != "podman machine start omnideck-runtime" {
+		t.Fatalf("start command = %q; it must target the shared Omnideck machine", got)
+	}
+}
+
+func TestWindowsNetworkingMigrationOnlyChangesTheSharedMachine(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMachineNeedsUpdate, MachineName: "developer-machine", MachineRunning: true}},
+		HostPlatform{OS: "windows"},
+	)[0]
+	want := []string{
+		"podman machine stop omnideck-runtime",
+		"podman machine set --user-mode-networking=true --rootful=false omnideck-runtime",
+		"podman machine start omnideck-runtime",
+	}
+	if len(plan.Commands) != len(want) {
+		t.Fatalf("commands = %#v, want %d commands", plan.Commands, len(want))
+	}
+	for index, display := range want {
+		if plan.Commands[index].Display != display {
+			t.Fatalf("command %d = %q, want %q", index, plan.Commands[index].Display, display)
+		}
+	}
+}
+
+func TestStoppedWindowsNetworkingMigrationDoesNotStopMachineAgain(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMachineNeedsUpdate, MachineRunning: false}},
+		HostPlatform{OS: "windows"},
+	)[0]
+	if len(plan.Commands) != 2 || strings.Contains(plan.Commands[0].Display, " machine stop ") {
+		t.Fatalf("commands = %#v", plan.Commands)
+	}
+}
+
+func TestBrokenMachineRepairIsPlatformSpecific(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin"} {
+		plan := BuildSetupPlans(
+			[]ProbeResult{{Name: "podman", State: RuntimeBroken}},
+			HostPlatform{OS: goos},
+		)[0]
+		if len(plan.Commands) != 2 || plan.Manual {
+			t.Fatalf("%s plan = %#v", goos, plan)
+		}
+		for _, command := range plan.Commands {
+			if !strings.HasSuffix(command.Display, " omnideck-runtime") {
+				t.Fatalf("%s repair targets another machine: %q", goos, command.Display)
+			}
+		}
+	}
+
+	linuxPlan := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeBroken}},
+		HostPlatform{OS: "linux"},
+	)[0]
+	if !linuxPlan.Manual || len(linuxPlan.Commands) != 0 {
+		t.Fatalf("Linux must not run Podman machine commands: %#v", linuxPlan)
+	}
+}
+
+func TestEveryPodmanStateHasACompleteNextStep(t *testing.T) {
+	tests := []struct {
+		host  HostPlatform
+		state RuntimeState
+	}{
+		{HostPlatform{OS: "windows", Arch: "amd64"}, RuntimeMissing},
+		{HostPlatform{OS: "windows"}, RuntimeMachineMissing},
+		{HostPlatform{OS: "windows"}, RuntimeMachineStopped},
+		{HostPlatform{OS: "windows"}, RuntimeMachineNeedsUpdate},
+		{HostPlatform{OS: "windows"}, RuntimePermissionDenied},
+		{HostPlatform{OS: "windows"}, RuntimeBroken},
+		{HostPlatform{OS: "darwin", Arch: "arm64"}, RuntimeMissing},
+		{HostPlatform{OS: "darwin", Arch: "amd64"}, RuntimeMissing},
+		{HostPlatform{OS: "darwin"}, RuntimeMachineMissing},
+		{HostPlatform{OS: "darwin"}, RuntimeMachineStopped},
+		{HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04"}, RuntimeMissing},
+		{HostPlatform{OS: "linux"}, RuntimeStopped},
+		{HostPlatform{OS: "linux"}, RuntimePermissionDenied},
+		{HostPlatform{OS: "linux"}, RuntimeBroken},
+	}
+	for _, tt := range tests {
+		plan := BuildSetupPlans([]ProbeResult{{Name: "podman", State: tt.state}}, tt.host)[0]
+		if plan.Title == "" || plan.Action == "" || plan.Description == "" || len(plan.Steps) == 0 {
+			t.Fatalf("incomplete plan for %s/%s: %#v", tt.host.OS, tt.state, plan)
+		}
+		if len(plan.Commands) == 0 && plan.URL == "" {
+			t.Fatalf("plan has no safe action: %#v", plan)
+		}
+	}
+}
+
+func TestVersionHelpers(t *testing.T) {
+	if !versionAtLeast("24.04", 20, 10) || versionAtLeast("20.04", 20, 10) {
+		t.Fatal("versionAtLeast comparison is incorrect")
 	}
 }

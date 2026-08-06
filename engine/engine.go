@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ type RunOptions struct {
 	HomeVolume  string
 	StateVolume string
 	Restart     string // "always"
-	OllamaHost  string // 127.0.0.1 or host.docker.internal
+	OllamaHost  string // optional explicit host URL
 	WebUIPort   string // host port for the web UI (e.g. "8080")
 	Platform    string // runtime.GOOS
 }
@@ -32,7 +33,7 @@ type InspectData struct {
 	HealthStatus string // "healthy", "unhealthy", "starting", "" = no healthcheck
 }
 
-// Engine abstracts Docker/Podman operations.
+// Engine abstracts the Podman operations Omnideck needs.
 type Engine interface {
 	Name() string
 	IsAvailable() bool
@@ -70,31 +71,27 @@ type Engine interface {
 	ContainerInspect(name string) (InspectData, error)
 }
 
-// Detect tries Podman first, then Docker. Returns an error if neither is found.
+// Detect returns the Podman engine when it is ready. Omnideck deliberately
+// uses one runtime on every platform so the desktop and CLI always see the
+// same machines, containers, images, and volumes.
 func Detect() (Engine, error) {
 	all := DetectAll()
 	if len(all) == 0 {
-		return nil, errors.New("neither Podman nor Docker was found.\nInstall Podman: https://podman.io/docs/installation")
+		return nil, errors.New("Podman is not ready.\nRun `omnideck` for guided setup")
 	}
 	return all[0], nil
 }
 
-// DetectAll returns all available container engines (Podman first, then Docker).
+// DetectAll returns Podman when it is ready.
 func DetectAll() []Engine {
-	var engines []Engine
 	podman := &PodmanEngine{}
 	if podman.IsAvailable() {
-		engines = append(engines, podman)
+		return []Engine{podman}
 	}
-	docker := &DockerEngine{}
-	if docker.IsAvailable() {
-		engines = append(engines, docker)
-	}
-	return engines
+	return nil
 }
 
-// ByName returns the engine matching the given name ("docker" or "podman"),
-// or an error if that engine is not available.
+// ByName returns Podman, the only runtime supported by Omnideck.
 func ByName(name string) (Engine, error) {
 	switch name {
 	case "podman":
@@ -103,14 +100,8 @@ func ByName(name string) (Engine, error) {
 			return nil, errors.New("podman not found")
 		}
 		return e, nil
-	case "docker":
-		e := &DockerEngine{}
-		if !e.IsAvailable() {
-			return nil, errors.New("docker not found")
-		}
-		return e, nil
 	default:
-		return nil, fmt.Errorf("unknown container runtime %q (must be docker or podman)", name)
+		return nil, fmt.Errorf("unknown container runtime %q (Omnideck uses Podman)", name)
 	}
 }
 
@@ -120,7 +111,11 @@ var lookPath = exec.LookPath
 // runInfo executes "<name> info" to verify the daemon is running.
 // It is a variable so tests can override it without spawning real processes.
 var runInfo = func(name string) error {
-	return exec.Command(name, "info").Run()
+	args := []string{"info"}
+	if name == "podman" {
+		args = podmanCommandArgs(runtime.GOOS, args...)
+	}
+	return exec.Command(name, args...).Run()
 }
 
 // parsePctFloat strips a trailing "%" and returns the value as a [0,1] fraction.
@@ -131,7 +126,7 @@ func parsePctFloat(s string) float64 {
 }
 
 // parseMemBytes parses memory strings like "500MiB", "1.24GiB", "2.1GB" to bytes.
-// Docker/Podman report memory as e.g. "500MiB / 15.5GiB" from {{.MemUsage}}.
+// Podman reports memory as e.g. "500MiB / 15.5GiB" from {{.MemUsage}}.
 func parseMemBytes(s string) float64 {
 	s = strings.TrimSpace(s)
 	for _, m := range []struct {
@@ -153,7 +148,7 @@ func parseMemBytes(s string) float64 {
 }
 
 // inspectTimeFormats lists the time layouts tried when parsing inspect timestamps.
-// Docker emits RFC3339Nano; Podman emits a space-separated layout with a named TZ.
+// Podman versions can emit RFC3339Nano or a space-separated layout with a named TZ.
 var inspectTimeFormats = []string{
 	time.RFC3339Nano,
 	"2006-01-02 15:04:05.999999999 -0700 MST",

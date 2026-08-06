@@ -18,11 +18,29 @@ func ValidContainerName(name string) bool {
 // ValidMemorySize accepts the memory syntax supported by Docker and Podman in
 // Omnideck configuration, such as 512m or 2g.
 func ValidMemorySize(value string) bool {
+	_, ok := MemorySizeMB(value)
+	return ok
+}
+
+// MemorySizeMB parses the memory syntax accepted by Omnideck into MiB.
+func MemorySizeMB(value string) (int64, bool) {
 	if !memorySizePattern.MatchString(value) {
-		return false
+		return 0, false
 	}
-	amount, err := strconv.Atoi(value[:len(value)-1])
-	return err == nil && amount > 0
+	amount, err := strconv.ParseInt(value[:len(value)-1], 10, 64)
+	if err != nil || amount <= 0 {
+		return 0, false
+	}
+	switch value[len(value)-1] {
+	case 'g', 'G':
+		return amount * 1024, true
+	case 'm', 'M':
+		return amount, true
+	case 'k', 'K':
+		return (amount + 1023) / 1024, true
+	default:
+		return 0, false
+	}
 }
 
 // ValidPort reports whether value is a valid TCP port number.

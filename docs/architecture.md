@@ -1,29 +1,27 @@
 # CLI architecture
 
-The CLI is organized around user workflows, with Docker and Podman treated as
-replaceable infrastructure. User-facing code should request an Omnideck outcome
-such as “ensure this instance is stopped” instead of interpreting raw runtime
-errors itself.
+The CLI is organized around user workflows with Podman as its one container
+runtime. User-facing code should request an Omnideck outcome such as “ensure
+this instance is stopped” instead of interpreting raw runtime errors itself.
 
 ## Request path
 
 ```text
 main.go
   └─ cmd/                   Cobra commands and bare-command routing
-       ├─ first use ──────> tui/ Setup
-       ├─ runtime broken ─> tui/ Setup (runtime-repair mode)
-       ├─ instance broken > tui/ Doctor > tui/ Maintenance (repair mode)
-       └─ returning user ─> tui/ AppModel
-                                ├─ Dashboard screen
-                                ├─ Logs screen
-                                ├─ Settings screen
-                                ├─ Doctor screen
-                                ├─ Setup workflow screen
-                                ├─ Maintenance workflow screen
-                                └─ Remove-instance workflow screen
+       ├─ first use ──────> tui/ AppModel > InstallationSection
+       ├─ runtime broken ─> tui/ AppModel > InstallationSection (repair)
+       ├─ instance broken > tui/ AppModel > ControlPlaneSection > Doctor
+       └─ returning user ─> tui/ AppModel > ControlPlaneSection
+                                                   ├─ Dashboard
+                                                   ├─ Logs
+                                                   ├─ Settings
+                                                   ├─ Doctor
+                                                   ├─ Maintenance
+                                                   └─ Removal
 
 workflow/                 Shared lifecycle, settings, and diagnosis operations
-engine/                   Raw Docker and Podman commands and host setup plans
+engine/                   Raw Podman commands, platform policy, and setup plans
 
 config/                   Platform-native persisted settings
 checks/                   Host checks and input validation
@@ -34,13 +32,20 @@ styles/                   Terminal presentation primitives
 interactive application shell; there is no separate launcher with duplicate
 start, stop, status, logs, or Doctor implementations.
 
-## TUI navigation
+## TUI sections and navigation
 
-`AppModel` owns shared instance state and a small stack-based `Router`. The
-Dashboard is the root screen. Logs, Settings, Doctor, Setup, Maintenance, and Removal
-are full screens. Pushing a screen records its caller, so Back returns to the
-actual previous screen—for example, Repair opened by Doctor returns to Doctor
-for another health check.
+`AppModel` is a thin shell around two durable sections and a small stack-based
+`Router`:
+
+- `InstallationSection` owns the first-run and runtime-repair walkthrough. The
+  desktop is the canonical setup experience; this section adapts its phases,
+  copy, progress, and failures to a terminal.
+- `ControlPlaneSection` owns day-to-day management after setup: Dashboard,
+  Logs, Settings, Doctor, Maintenance, and Removal.
+
+Every route belongs to exactly one section. Pushing a screen records its
+caller, so Back returns to the actual previous screen—for example, Repair
+opened by Doctor returns to Doctor for another health check.
 
 Setup, Maintenance, and Removal remain independent Bubble Tea workflow models hosted by
 the application shell. Their exit messages distinguish completion from
@@ -59,9 +64,10 @@ being in Setup's runtime-selection state.
 
 | Workflow | States or modes |
 | --- | --- |
+| Application sections | Installation or Control Plane |
 | Application router | Dashboard, Logs, Settings, Doctor, Setup, Maintenance, Removal routes |
-| Setup | Quick check, Runtime, Settings, Review, Applying, Complete, Failed |
-| Runtime setup | Choose, Review, Working, Waiting |
+| Setup | Welcome, Quick check, Runtime, Settings, Review, Applying, Complete, Failed |
+| Runtime setup | Working or Restart needed |
 | Settings | Editing, Applying |
 | Doctor | Checking, Results, Acting |
 | Maintenance | Update or Repair mode; Review, Applying, Complete, Failed |
@@ -74,11 +80,15 @@ should not be constructed and then mutated into another journey by its caller.
 
 ## Container lifecycle rules
 
-`engine.Engine` is intentionally a thin adapter over Docker or Podman. Raw
-runtime behavior differs—for example, stopping an already stopped container can
-be an error. `workflow/` provides the application semantics used everywhere:
+`engine.Engine` is intentionally a thin adapter over Podman. Raw runtime
+behavior still differs from application semantics—for example, stopping an
+already stopped container can be an error. `workflow/` provides the application
+semantics used everywhere:
 
 - `EnsureStarted`, `EnsureStopped`, and `EnsureRemoved` are idempotent.
+- `EnsureInstance` is the idempotent create/start/repair/update transaction used
+  by Desktop and automation. It owns image pulls, volumes, replacement,
+  rollback, and persistence.
 - `RunOptions` is the only config-to-container mapping. It leaves the
   container-facing Ollama hostname to the selected engine and host platform.
 - `Recreate` removes and replaces a container, then attempts to restore the
@@ -93,11 +103,60 @@ be an error. `workflow/` provides the application semantics used everywhere:
 Commands and TUI screens should call these operations rather than calling raw
 start/stop/remove methods or rebuilding `engine.RunOptions` themselves.
 
+## Platform runtime policy
+
+Host differences are contained in `engine` and represented as setup plans or a
+small Podman platform policy. Views do not construct platform commands.
+
+- Windows and macOS always use the named `omnideck-runtime` Podman machine and
+  explicitly select its connection for container operations.
+- Creating that machine does not replace an existing user's default Podman
+  connection. An unrelated developer machine is never adopted.
+- Linux uses native Podman directly and never receives machine or connection
+  flags.
+- Windows machine creation uses the WSL provider and user-mode networking.
+  macOS leaves CPU and sparse-disk defaults to Podman and sets only a detected
+  memory ceiling that remains 2 GB above the container limit.
+- Apple Silicon and Intel macOS select separately reviewed official installer
+  assets. Linux distribution selection and privilege escalation are separate
+  policies, so derivatives can follow `ID_LIKE` and root is never forced
+  through `sudo`.
+- Linux Desktop setup uses a graphical PolicyKit request. The interactive CLI
+  may fall back to `sudo` because it owns a real terminal; the Desktop backend
+  never launches a password prompt into an invisible pipe.
+
+`engine.EnsureRuntime` owns prerequisite installation, machine creation and
+repair, progress events, verification, and typed failures. The TUI calls it
+directly. The versioned `runtime status --json` and `runtime ensure --json`
+commands expose the same backend to Desktop. Bare `omnideck` routes a fresh or
+broken computer into this workflow automatically; users do not invoke the
+internal runtime command.
+
+Runtime-contract schema 4 also carries `DefaultRuntimeResources`: the shared
+container memory/shared-memory policy plus the platform-specific origin of
+machine resources. Desktop must consume those values instead of carrying its
+own container defaults.
+
+Desktop is a native browser shell and update presenter, not a second runtime
+implementation. It selects an immutable release image, renders the shared
+progress stream, and invokes `runtime ensure`, `status`, `start`, and
+`environment ensure` through its bundled CLI. It never invokes Podman, manages
+the named machine, creates volumes, or writes instance YAML itself. A Desktop
+update is therefore applied through the same transaction used for a fresh
+install and repair.
+
+Each front end renders the shared events in its native UI. Desktop handles its
+own restart button and one-time relaunch; the direct CLI registers its own
+RunOnce resume only after the user chooses **Restart now** in the TUI. The CLI
+resume command explicitly opens a new visible console before starting the TUI;
+it never assumes that Windows RunOnce supplied interactive terminal handles.
+
 ## Persistence and transactions
 
-`config/` stores one shared runtime choice plus one YAML file per instance in
-the operating system's conventional user config directory. Instance data lives
-in named container volumes and is not stored in the YAML file.
+`config/` stores one YAML file per instance in the operating system's
+conventional user config directory. A legacy runtime setting may still be read
+and migrated, but new installations always use Podman. Instance data lives in
+named container volumes and is not stored in the YAML file.
 
 Settings apply is ordered as a small transaction:
 

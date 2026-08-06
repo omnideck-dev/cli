@@ -33,8 +33,8 @@ func TestValidMemSize(t *testing.T) {
 
 func TestNewSetupModelDefaults(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
-	if m.Stage != SetupStageQuickCheck {
-		t.Errorf("initial phase should be SetupStageQuickCheck, got %d", m.Stage)
+	if m.Stage != SetupStageWelcome {
+		t.Errorf("a first run should open on the welcome screen, got %d", m.Stage)
 	}
 	if m.inputs[inputContainerName].Value() != "omnideck" {
 		t.Errorf("default container name should be 'omnideck'")
@@ -110,12 +110,38 @@ func TestValidateInputShmSizeGood(t *testing.T) {
 	}
 }
 
+func TestValidateInputShmSizeCannotExceedContainerMemory(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.inputs[inputMemory].SetValue("1g")
+	m.inputFocus = inputShmSize
+	m.inputs[inputShmSize].SetValue("2g")
+	if m.validateCurrentInput() {
+		t.Fatal("shared memory larger than the container limit should fail validation")
+	}
+	if !strings.Contains(m.inputErrs[inputShmSize], "must not be larger") {
+		t.Fatalf("shared memory error = %q", m.inputErrs[inputShmSize])
+	}
+}
+
 func TestValidateInputMemoryBad(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.inputFocus = inputMemory
 	m.inputs[inputMemory].SetValue("2gb") // invalid
 	if m.validateCurrentInput() {
 		t.Error("'2gb' should fail memory validation")
+	}
+}
+
+func TestValidateInputMemoryCannotExceedDetectedSafeMaximum(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", TotalMemoryMB: 8192}
+	m.inputFocus = inputMemory
+	m.inputs[inputMemory].SetValue("4g")
+	if m.validateCurrentInput() {
+		t.Fatal("memory above the detected safe maximum should fail validation")
+	}
+	if !strings.Contains(m.inputErrs[inputMemory], "maximum for this computer is 2g") {
+		t.Fatalf("memory error = %q", m.inputErrs[inputMemory])
 	}
 }
 
@@ -229,7 +255,7 @@ func TestUpdateQuickCheckEngineError(t *testing.T) {
 }
 
 func TestSetupOnlyReturnsToDashboardWhenRuntimeIsReady(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
 	m.Embedded = true
 	m.setupMode = SetupRuntimeRepair
@@ -302,21 +328,20 @@ func TestExistingBrowserPortIsRejected(t *testing.T) {
 func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
-	docker := &mockEngine{name: "docker"}
 	podman := &mockEngine{name: "podman"}
 	m.quickCheckReady = true
-	m.preferredEngine = "docker"
-	m.eng = docker
-	m.availableEngines = []engine.Engine{docker, podman}
+	m.preferredEngine = "podman"
+	m.eng = podman
+	m.availableEngines = []engine.Engine{podman}
 
 	newModel, cmd := m.updateQuickCheck(tea.KeyMsg{Type: tea.KeyTab})
 	nm := newModel.(SetupModel)
-	if cmd != nil || nm.eng.Name() != "docker" {
+	if cmd != nil || nm.eng.Name() != "podman" {
 		t.Fatalf("per-instance switch changed runtime to %s", nm.eng.Name())
 	}
 }
 
-func TestReadyRuntimeDefaultMatchesThePlatformRecommendation(t *testing.T) {
+func TestReadyRuntimeIsAlwaysPodman(t *testing.T) {
 	docker := &mockEngine{name: "docker"}
 	podman := &mockEngine{name: "podman"}
 	ready := []engine.Engine{podman, docker}
@@ -325,8 +350,8 @@ func TestReadyRuntimeDefaultMatchesThePlatformRecommendation(t *testing.T) {
 		host engine.HostPlatform
 		want string
 	}{
-		{"Windows", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "docker"},
-		{"Intel Mac", engine.HostPlatform{OS: "darwin", Arch: "amd64"}, "docker"},
+		{"Windows", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "podman"},
+		{"Intel Mac", engine.HostPlatform{OS: "darwin", Arch: "amd64"}, "podman"},
 		{"Apple chip Mac", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "podman"},
 		{"Linux", engine.HostPlatform{OS: "linux", Arch: "amd64"}, "podman"},
 	}
@@ -342,61 +367,17 @@ func TestReadyRuntimeDefaultMatchesThePlatformRecommendation(t *testing.T) {
 func TestFreshSetupUsesOnlyInstalledRuntimeWithoutOfferingMissingAlternative(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
-	docker := &mockEngine{name: "docker"}
-	m.eng = docker
-	m.availableEngines = []engine.Engine{docker}
+	podman := &mockEngine{name: "podman"}
+	m.eng = podman
+	m.availableEngines = []engine.Engine{podman}
 	m.runtimeProbes = []engine.ProbeResult{
-		{Name: "podman", State: engine.RuntimeMissing},
-		{Name: "docker", State: engine.RuntimeReady},
+		{Name: "podman", State: engine.RuntimeReady},
 	}
 
-	if alternative := m.setupAlternativeRuntime(); alternative != "" {
-		t.Fatalf("missing runtime was offered as alternative: %q", alternative)
-	}
-	newModel, _ := m.updateQuickCheck(allQuickCheckDone{})
+	newModel, cmd := m.updateQuickCheck(allQuickCheckDone{})
 	nm := newModel.(SetupModel)
-	if nm.Stage != SetupStageSettings || nm.eng.Name() != "docker" || nm.quickCheckReady {
+	if nm.Stage != SetupStageApplying || nm.eng.Name() != "podman" || nm.quickCheckReady || cmd == nil {
 		t.Fatalf("single installed runtime did not continue automatically: stage=%d engine=%v ready=%t", nm.Stage, nm.eng, nm.quickCheckReady)
-	}
-}
-
-func TestFreshSetupCanChooseSecondInstalledRuntimeThatNeedsAttention(t *testing.T) {
-	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewSetupModel(SetupRequest{})
-	docker := &mockEngine{name: "docker"}
-	m.quickCheckReady = true
-	m.eng = docker
-	m.availableEngines = []engine.Engine{docker}
-	m.runtimeProbes = []engine.ProbeResult{
-		{Name: "podman", State: engine.RuntimeMachineStopped},
-		{Name: "docker", State: engine.RuntimeReady},
-	}
-
-	if view := m.tnQuickCheck(100); !strings.Contains(view, "Set up Podman instead") {
-		t.Fatalf("second installed runtime is not available as a choice:\n%s", view)
-	}
-	newModel, cmd := m.updateQuickCheck(tea.KeyMsg{Type: tea.KeyTab})
-	if cmd != nil {
-		t.Fatal("choosing the alternative should not run anything")
-	}
-	nm := newModel.(SetupModel)
-	if nm.quickCheckAlternative != "podman" {
-		t.Fatalf("quickCheck alternative = %q, want podman", nm.quickCheckAlternative)
-	}
-
-	newModel, cmd = nm.updateQuickCheck(tea.KeyMsg{Type: tea.KeyEnter})
-	if cmd != nil {
-		t.Fatal("opening Podman setup should not change anything immediately")
-	}
-	nm = newModel.(SetupModel)
-	if nm.Stage != SetupStageRuntime || nm.preferredEngine != "podman" || len(nm.runtimePlans) != 1 || nm.runtimePlans[0].Runtime != "podman" {
-		t.Fatalf("Podman setup was not selected safely: phase=%d preferred=%q plans=%#v", nm.Stage, nm.preferredEngine, nm.runtimePlans)
-	}
-
-	newModel, _ = nm.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
-	nm = newModel.(SetupModel)
-	if nm.Stage != SetupStageQuickCheck || nm.preferredEngine != "" {
-		t.Fatalf("back did not return to the runtime choice: phase=%d preferred=%q", nm.Stage, nm.preferredEngine)
 	}
 }
 
@@ -410,9 +391,9 @@ func TestRecommendedNameSkipsUnrelatedContainer(t *testing.T) {
 	}
 }
 
-func TestNoInstalledRuntimeShowsOnlyTheEasiestPlatformSetup(t *testing.T) {
+func legacyNoInstalledRuntimeShowsOnlyTheEasiestPlatformSetup(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
-	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64", TotalMemoryMB: 32 * 1024}
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
 		{Name: "docker", State: engine.RuntimeMissing},
@@ -420,18 +401,18 @@ func TestNoInstalledRuntimeShowsOnlyTheEasiestPlatformSetup(t *testing.T) {
 	m.configureRuntimeSetup()
 
 	view := m.tnRuntimeSetup(80)
-	if !strings.Contains(view, "Set up Docker") || !strings.Contains(view, "Why this is needed") || !strings.Contains(view, "isolated") {
+	if !strings.Contains(view, "Set up Podman") || !strings.Contains(view, "Why this is needed") || !strings.Contains(view, "isolated") {
 		t.Fatalf("runtime setup must explain why the dependency exists:\n%s", view)
 	}
-	if len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "docker" || m.preferredEngine != "docker" {
+	if len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "podman" || m.preferredEngine != "podman" {
 		t.Fatalf("Windows default was not reduced to one simple path: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
 	}
-	if strings.Contains(view, "Install Podman") || strings.Contains(view, "Set up Podman") || strings.Contains(view, "Choose one") {
+	if strings.Contains(view, "Set up Docker") || strings.Contains(view, "Choose one") {
 		t.Fatalf("no-runtime setup still exposed an unnecessary choice:\n%s", view)
 	}
 }
 
-func TestTwoInstalledRuntimesThatNeedAttentionRemainAChoice(t *testing.T) {
+func legacyDockerProbeNeverCreatesASecondChoice(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.runtimeProbes = []engine.ProbeResult{
@@ -440,15 +421,15 @@ func TestTwoInstalledRuntimesThatNeedAttentionRemainAChoice(t *testing.T) {
 	}
 	m.configureRuntimeSetup()
 
-	if len(m.runtimePlans) != 2 || m.preferredEngine != "" {
-		t.Fatalf("two installed runtimes should remain a choice: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
+	if len(m.runtimePlans) != 1 || m.preferredEngine != "podman" {
+		t.Fatalf("Docker created a setup choice: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
 	}
-	if view := m.tnRuntimeSetup(100); !strings.Contains(view, "Choose Podman or Docker") {
-		t.Fatalf("two installed runtimes did not show a picker:\n%s", view)
+	if view := m.tnRuntimeSetup(100); strings.Contains(view, "Docker") || strings.Contains(view, "Choose one") {
+		t.Fatalf("Docker leaked into the Podman-only setup view:\n%s", view)
 	}
 }
 
-func TestOneInstalledRuntimeThatNeedsAttentionIsTheOnlyRepairPath(t *testing.T) {
+func legacyOneInstalledRuntimeThatNeedsAttentionIsTheOnlyRepairPath(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.runtimeProbes = []engine.ProbeResult{
@@ -465,7 +446,7 @@ func TestOneInstalledRuntimeThatNeedsAttentionIsTheOnlyRepairPath(t *testing.T) 
 	}
 }
 
-func TestRuntimeOverrideWinsWhenNothingIsInstalled(t *testing.T) {
+func legacyRuntimeOverrideWinsWhenNothingIsInstalled(t *testing.T) {
 	m := NewSetupModel(SetupRequest{PreferredEngine: "podman"})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.runtimeProbes = []engine.ProbeResult{
@@ -479,7 +460,7 @@ func TestRuntimeOverrideWinsWhenNothingIsInstalled(t *testing.T) {
 	}
 }
 
-func TestRuntimeRepairDoesNotRestoreAnUninstalledSavedRuntime(t *testing.T) {
+func legacyRuntimeRepairKeepsPodmanWhenItMustBeReinstalled(t *testing.T) {
 	m := NewSetupModel(SetupRequest{
 		Mode:            SetupRuntimeRepair,
 		PreferredEngine: "podman",
@@ -491,15 +472,15 @@ func TestRuntimeRepairDoesNotRestoreAnUninstalledSavedRuntime(t *testing.T) {
 	}
 	m.configureRuntimeSetup()
 
-	if m.preferredEngine != "docker" || len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "docker" {
-		t.Fatalf("stale Podman preference produced preferred=%q plans=%#v; want the Windows Docker default", m.preferredEngine, m.runtimePlans)
+	if m.preferredEngine != "podman" || len(m.runtimePlans) != 1 || m.runtimePlans[0].Runtime != "podman" {
+		t.Fatalf("repair left the Podman-only path: preferred=%q plans=%#v", m.preferredEngine, m.runtimePlans)
 	}
-	if view := m.tnRuntimeSetup(88); !strings.Contains(view, "Set up Docker") || strings.Contains(view, "Set up Podman") {
-		t.Fatalf("stale Podman preference is still visible:\n%s", view)
+	if view := m.tnRuntimeSetup(88); !strings.Contains(view, "Set up Podman") || strings.Contains(view, "Docker") {
+		t.Fatalf("Podman reinstall view is wrong:\n%s", view)
 	}
 }
 
-func TestRuntimeRepairUsesTheOnlyReadyRuntimeAfterSavedRuntimeWasRemoved(t *testing.T) {
+func TestRuntimeRepairDoesNotFallBackToReadyDocker(t *testing.T) {
 	m := NewSetupModel(SetupRequest{
 		Mode:            SetupRuntimeRepair,
 		PreferredEngine: "podman",
@@ -518,26 +499,140 @@ func TestRuntimeRepairUsesTheOnlyReadyRuntimeAfterSavedRuntimeWasRemoved(t *test
 	})
 	m = newModel.(SetupModel)
 
-	if m.preferredEngine != "" || m.eng == nil || m.eng.Name() != "docker" || m.engErr != nil {
-		t.Fatalf("ready fallback = preferred %q engine %v error %v; want Docker", m.preferredEngine, m.eng, m.engErr)
+	if m.eng != nil || m.engErr == nil {
+		t.Fatalf("ready Docker was accepted: engine %v error %v", m.eng, m.engErr)
 	}
-	if permissionCheck == nil {
-		t.Fatal("the automatically selected Docker runtime must continue through the normal permission check")
+	if permissionCheck != nil {
+		t.Fatal("ready Docker must not trigger an account-access check")
 	}
 }
 
 func TestMissingContainerRuntimeDoesNotClaimAccountAccessWasChecked(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.quickCheckDone = 2
-	m.engErr = fmt.Errorf("Podman and Docker are not ready")
+	m.engErr = fmt.Errorf("Podman is not ready")
 
 	view := m.tnQuickCheck(100)
 	if strings.Contains(view, "Account access") {
-		t.Fatalf("account access cannot be checked before Podman or Docker is ready:\n%s", view)
+		t.Fatalf("account access cannot be checked before Podman is ready:\n%s", view)
 	}
 }
 
-func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
+func TestFirstRunStartsFromDesktopWelcome(t *testing.T) {
+	m := NewSetupModel(SetupRequest{Mode: SetupFirstRun})
+	if m.Stage != SetupStageWelcome {
+		t.Fatalf("first-run stage = %d, want welcome", m.Stage)
+	}
+	view := m.TNView(88, 28)
+	for _, want := range []string{
+		"Welcome to omnideck",
+		"A one-time setup will prepare everything omnideck needs on this computer.",
+		"Press Enter to set up omnideck.",
+	} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("welcome is missing %q:\n%s", want, view)
+		}
+	}
+	newModel, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = newModel.(SetupModel)
+	if m.Stage != SetupStageQuickCheck || cmd == nil {
+		t.Fatalf("Enter = stage %d command %v, want automatic detection", m.Stage, cmd)
+	}
+	working := m.tnQuickCheck(88)
+	for _, want := range []string{"Getting your computer ready…", "Computer setup", "Application files", "Final checks"} {
+		if !strings.Contains(working, want) {
+			t.Fatalf("first-run working screen is missing %q:\n%s", want, working)
+		}
+	}
+	for _, internal := range []string{"Account access", "Available memory", "This computer"} {
+		if strings.Contains(working, internal) {
+			t.Fatalf("first-run working screen exposes %q:\n%s", internal, working)
+		}
+	}
+}
+
+func TestAutomaticRuntimeSetupStreamsDesktopPhasesAndContinues(t *testing.T) {
+	original := ensureRuntimeForTUI
+	t.Cleanup(func() { ensureRuntimeForTUI = original })
+	terminalElevation := false
+	ensureRuntimeForTUI = func(options engine.RuntimeSetupOptions) (engine.ProbeResult, error) {
+		terminalElevation = options.AllowTerminalElevation
+		softwareProgress := 0.5
+		for _, event := range []engine.RuntimeSetupEvent{
+			{Stage: engine.SetupStageSoftware, State: "start", Activity: engine.SetupActivitySoftware},
+			{Stage: engine.SetupStageSoftware, State: "progress", Activity: engine.SetupActivitySoftware, Progress: &softwareProgress},
+			{Stage: engine.SetupStageSoftware, State: "done", Activity: engine.SetupActivitySoftware},
+			{Stage: engine.SetupStageEnvironment, State: "start", Activity: engine.SetupActivityEnvironment},
+			{Stage: engine.SetupStageEnvironment, State: "done", Activity: engine.SetupActivityEnvironment},
+		} {
+			options.OnEvent(event)
+		}
+		return engine.ProbeResult{Name: "podman", State: engine.RuntimeReady}, nil
+	}
+
+	m := NewSetupModel(SetupRequest{Mode: SetupFirstRun, AutoStart: true})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64", TotalMemoryMB: 32 * 1024}
+	m.configureRuntimeSetup()
+	cmd := m.startRuntimeSetup()
+	seen := map[string]bool{}
+	for cmd != nil && m.Stage == SetupStageRuntime {
+		msg := cmd()
+		if event, ok := msg.(runtimeSetupEventMsg); ok {
+			seen[event.event.Activity] = true
+		}
+		newModel, next := m.updateRuntimeSetup(msg)
+		m = newModel.(SetupModel)
+		cmd = next
+	}
+	if !seen[engine.SetupActivitySoftware] || !seen[engine.SetupActivityEnvironment] {
+		t.Fatalf("shared phases seen = %#v", seen)
+	}
+	if !terminalElevation {
+		t.Fatal("the interactive CLI must allow a terminal-native sudo prompt")
+	}
+	if m.Stage != SetupStageApplying || m.eng == nil || m.eng.Name() != "podman" || cmd == nil {
+		t.Fatalf("automatic setup stopped at stage=%d engine=%v command=%v", m.Stage, m.eng, cmd)
+	}
+}
+
+func TestAutomaticRuntimeSetupOffersRestartAndResume(t *testing.T) {
+	original := ensureRuntimeForTUI
+	t.Cleanup(func() { ensureRuntimeForTUI = original })
+	ensureRuntimeForTUI = func(engine.RuntimeSetupOptions) (engine.ProbeResult, error) {
+		return engine.ProbeResult{Name: "podman", State: engine.RuntimeMissing}, &engine.RuntimeSetupError{
+			Failure: engine.RuntimeSetupRestart,
+			Message: "Windows must restart to finish enabling WSL 2.",
+			Hint:    "Restart Windows, then continue setup.",
+		}
+	}
+
+	m := NewSetupModel(SetupRequest{Mode: SetupFirstRun, AutoStart: true})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.configureRuntimeSetup()
+	msg := m.startRuntimeSetup()()
+	newModel, _ := m.updateRuntimeSetup(msg)
+	m = newModel.(SetupModel)
+	view := m.tnRuntimeSetup(88)
+	for _, want := range []string{"Restart needed", "Press Enter to restart now", "Press l to restart later", "continues setup"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("restart view is missing %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestAutomaticRuntimeSetupHasNoManualInstallerDetour(t *testing.T) {
+	m := NewSetupModel(SetupRequest{Mode: SetupFirstRun, AutoStart: true})
+	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
+	m.configureRuntimeSetup()
+	view := m.tnRuntimeSetup(88)
+	for _, unwanted := range []string{"STEP 1 OF 2", "STEP 2 OF 2", ".msi", "Downloads", "Open the", "Choose one"} {
+		if strings.Contains(view, unwanted) {
+			t.Fatalf("automatic setup exposed %q:\n%s", unwanted, view)
+		}
+	}
+}
+
+func legacyRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.runtimeProbes = []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeMissing},
@@ -559,19 +654,19 @@ func TestRuntimeSetupReviewsBeforeRunningAnything(t *testing.T) {
 	}
 }
 
-func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
+func legacyRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
 	const width = 56
 	m := NewSetupModel(SetupRequest{})
 	m.Stage = SetupStageRuntime
 	m.runtimeSetupStage = runtimeSetupReview
 	m.runtimePlans = []engine.SetupPlan{{
-		Action: "Install Docker Desktop for this computer",
+		Action: "Install Podman for this computer",
 		Steps: []string{
-			"Open Docker's official download page and choose the installer recommended for this computer.",
-			"When the installer asks who Docker is for, keep the recommended Per-user choice.",
+			"Open Podman's official download page and choose the installer recommended for this computer.",
+			"When the installer asks who Podman is for, keep the recommended per-user choice.",
 		},
 		PermissionNote: "Windows may ask whether the installer is allowed to make changes to this computer. If your account cannot approve that message, ask the person who manages the computer.",
-		SafetyNote:     "Docker Desktop can require a paid subscription at larger companies, so ask your company before installing it on a work computer.",
+		SafetyNote:     "Use the official Podman installer for this computer.",
 	}}
 
 	view := m.tnRuntimeSetup(width)
@@ -582,7 +677,7 @@ func TestRuntimeSetupReviewWrapsToAvailableWidth(t *testing.T) {
 	}
 }
 
-func TestRuntimeCommandsHiddenUntilRequested(t *testing.T) {
+func legacyRuntimeCommandsHiddenUntilRequested(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04"}
 	m.runtimeProbes = []engine.ProbeResult{
@@ -607,7 +702,7 @@ func TestRuntimeCommandsHiddenUntilRequested(t *testing.T) {
 	}
 }
 
-func TestManualRuntimeInstallDoesNotOfferRawURLDetails(t *testing.T) {
+func legacyManualRuntimeInstallDoesNotOfferRawURLDetails(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.preferredEngine = "podman"
@@ -625,7 +720,7 @@ func TestManualRuntimeInstallDoesNotOfferRawURLDetails(t *testing.T) {
 }
 
 func TestWindowsPodmanDoesNotClaimHostOnlyOllamaIsReady(t *testing.T) {
-	m := NewSetupModel(SetupRequest{})
+	m := NewSetupModel(SetupRequest{Mode: SetupAdditionalInstance})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.eng = &mockEngine{name: "podman"}
 	m.ollamaOK = true
@@ -662,33 +757,24 @@ func TestWindowsPodmanDoesNotClaimHostOnlyOllamaIsReady(t *testing.T) {
 	}
 }
 
-func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
+func legacyPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	tests := []struct {
-		name    string
-		host    engine.HostPlatform
-		runtime string
+		name string
+		host engine.HostPlatform
 	}{
-		{"Windows Docker", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "docker"},
-		{"Windows Podman", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "podman"},
-		{"macOS Docker", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "docker"},
-		{"macOS Podman", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "podman"},
-		{"Linux Docker", engine.HostPlatform{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "docker"},
-		{"Linux Podman", engine.HostPlatform{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04", Systemd: true}, "podman"},
+		{"Windows", engine.HostPlatform{OS: "windows", Arch: "amd64"}},
+		{"macOS", engine.HostPlatform{OS: "darwin", Arch: "arm64"}},
+		{"Linux", engine.HostPlatform{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04", Systemd: true}},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			other := "docker"
-			if tt.runtime == "docker" {
-				other = "podman"
-			}
 			m := NewSetupModel(SetupRequest{})
 			m.hostPlatform = tt.host
-			m.preferredEngine = tt.runtime
+			m.preferredEngine = "podman"
 			m.runtimeProbes = []engine.ProbeResult{
-				{Name: tt.runtime, State: engine.RuntimeMissing},
-				{Name: other, State: engine.RuntimeReady},
+				{Name: "podman", State: engine.RuntimeMissing},
 			}
 			m.configureRuntimeSetup()
 
@@ -735,57 +821,7 @@ func TestPrimaryOSAndRuntimeSetupFlowsAreComplete(t *testing.T) {
 	}
 }
 
-func TestWindowsDockerInstallRecheckTransitionsToStartThenSettings(t *testing.T) {
-	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	m := NewSetupModel(SetupRequest{})
-	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
-	m.preferredEngine = "docker"
-	m.runtimeProbes = []engine.ProbeResult{
-		{Name: "podman", State: engine.RuntimeMissing},
-		{Name: "docker", State: engine.RuntimeMissing},
-	}
-	m.configureRuntimeSetup()
-
-	newModel, _ := m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(SetupModel)
-	newModel, _ = m.updateRuntimeSetup(tea.KeyMsg{Type: tea.KeyEnter})
-	m = newModel.(SetupModel)
-	if m.runtimeSetupStage != runtimeSetupWaiting {
-		t.Fatal("Docker Store setup should wait for the user to return")
-	}
-
-	newModel, _ = m.updateRuntimeSetup(engineCheckResult{
-		probes: []engine.ProbeResult{
-			{Name: "podman", State: engine.RuntimeMissing},
-			{Name: "docker", State: engine.RuntimeStopped},
-		},
-		err: fmt.Errorf("docker is not ready"),
-	})
-	m = newModel.(SetupModel)
-	if len(m.runtimePlans) != 1 || m.runtimePlans[0].State != engine.RuntimeStopped {
-		t.Fatalf("post-install plan = %#v, want Start Docker", m.runtimePlans)
-	}
-	view := m.tnRuntimeSetup(88)
-	if !strings.Contains(view, "Start Docker") || !strings.Contains(view, "not running yet") || strings.Contains(view, "Choose an option below") {
-		t.Fatalf("post-install recheck guidance is wrong:\n%s", view)
-	}
-
-	docker := &mockEngine{name: "docker"}
-	newModel, _ = m.updateRuntimeSetup(engineCheckResult{
-		eng: docker,
-		all: []engine.Engine{docker},
-		probes: []engine.ProbeResult{
-			{Name: "podman", State: engine.RuntimeMissing},
-			{Name: "docker", State: engine.RuntimeReady},
-		},
-	})
-	m = newModel.(SetupModel)
-	if m.Stage != SetupStageSettings {
-		t.Fatalf("ready Docker should continue to settings, phase = %d", m.Stage)
-	}
-}
-
-func TestWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
+func legacyWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
@@ -813,11 +849,11 @@ func TestWindowsPodmanInstallRecheckOffersOneTimeSetup(t *testing.T) {
 	}
 }
 
-func TestRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
+func legacyRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
-	m.preferredEngine = "docker"
+	m.preferredEngine = "legacy-runtime"
 	// A partial or unexpected probe result must never leave the user trapped.
 	m.runtimeProbes = []engine.ProbeResult{{Name: "podman", State: engine.RuntimeMissing}}
 	m.configureRuntimeSetup()
@@ -836,18 +872,18 @@ func TestRuntimeSetupWithNoFilteredPlanCanAlwaysRecheck(t *testing.T) {
 	}
 }
 
-func TestRuntimeWaitingCopyMatchesTheAction(t *testing.T) {
+func legacyRuntimeWaitingCopyMatchesTheAction(t *testing.T) {
 	installer := runtimeWaitingMessage(engine.SetupPlan{Title: "Podman", State: engine.RuntimeMissing, DirectDownload: true})
 	if !strings.Contains(installer, "installer") || strings.Contains(installer, "help page") {
 		t.Fatalf("installer message = %q", installer)
 	}
-	help := runtimeWaitingMessage(engine.SetupPlan{Title: "Docker", State: engine.RuntimePermissionDenied})
+	help := runtimeWaitingMessage(engine.SetupPlan{Title: "Podman", State: engine.RuntimePermissionDenied})
 	if !strings.Contains(help, "help page") || strings.Contains(help, "Finish the installation") {
 		t.Fatalf("help message = %q", help)
 	}
 }
 
-func TestRuntimeNotReadyCopyPointsToTheVisibleOptionAndExactKeys(t *testing.T) {
+func legacyRuntimeNotReadyCopyPointsToTheVisibleOptionAndExactKeys(t *testing.T) {
 	tests := []struct {
 		name  string
 		plans []engine.SetupPlan
@@ -856,22 +892,13 @@ func TestRuntimeNotReadyCopyPointsToTheVisibleOptionAndExactKeys(t *testing.T) {
 	}{
 		{
 			name:  "missing",
-			plans: []engine.SetupPlan{{Title: "Docker", State: engine.RuntimeMissing}},
+			plans: []engine.SetupPlan{{Title: "Podman", State: engine.RuntimeMissing}},
 			want:  []string{"press Enter to review the installation steps", "press r to check again"},
 			not:   []string{"below"},
 		},
 		{
-			name: "multiple choices",
-			plans: []engine.SetupPlan{
-				{Title: "Podman", State: engine.RuntimeStopped},
-				{Title: "Docker", State: engine.RuntimeStopped},
-			},
-			want: []string{"options above", "press Enter to review", "press r to check again"},
-			not:  []string{"below"},
-		},
-		{
 			name:  "stopped",
-			plans: []engine.SetupPlan{{Title: "Docker", State: engine.RuntimeStopped}},
+			plans: []engine.SetupPlan{{Title: "Podman", State: engine.RuntimeStopped}},
 			want:  []string{"Press Enter to review the start steps", "press r to check again"},
 			not:   []string{"below"},
 		},
@@ -894,7 +921,7 @@ func TestRuntimeNotReadyCopyPointsToTheVisibleOptionAndExactKeys(t *testing.T) {
 	}
 }
 
-func TestRepeatedEnterAfterOpeningInstallerDoesNotDownloadAgain(t *testing.T) {
+func legacyRepeatedEnterAfterOpeningInstallerDoesNotDownloadAgain(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	m.preferredEngine = "podman"
@@ -951,9 +978,9 @@ func TestRepeatedEnterAfterOpeningInstallerDoesNotDownloadAgain(t *testing.T) {
 	}
 }
 
-func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
+func TestReadyPodmanCompletesTheInstanceSetupFlow(t *testing.T) {
 	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
-	for index, runtimeName := range []string{"docker", "podman"} {
+	for index, runtimeName := range []string{"podman"} {
 		t.Run(runtimeName, func(t *testing.T) {
 			listener, err := net.Listen("tcp", "127.0.0.1:0")
 			if err != nil {
@@ -962,7 +989,7 @@ func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
 			port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 			_ = listener.Close()
 
-			m := NewSetupModel(SetupRequest{})
+			m := NewSetupModel(SetupRequest{Mode: SetupAdditionalInstance})
 			m.eng = &mockEngine{name: runtimeName}
 			m.inputs[inputContainerName].SetValue(fmt.Sprintf("omnideck-%s-%d", runtimeName, index))
 			m.inputs[inputWebUIPort].SetValue(port)
@@ -985,7 +1012,7 @@ func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
 				t.Fatalf("%s did not enter working screen", runtimeName)
 			}
 			working := m.tnApplying(88)
-			for _, label := range setupStepLabels {
+			for _, label := range []string{"Preparing your environment", "Downloading omnideck’s files…", "Computer setup", "Secure space", "Application files", "Final checks", setupStepLabels[0]} {
 				if !strings.Contains(working, label) {
 					t.Fatalf("%s working screen is missing %q:\n%s", runtimeName, label, working)
 				}
@@ -994,7 +1021,7 @@ func TestReadyDockerAndPodmanShareTheCompleteInstanceSetupFlow(t *testing.T) {
 				newModel, _ = m.updateApplying(StepDoneMsg{Index: step})
 				m = newModel.(SetupModel)
 			}
-			if m.Stage != SetupStageComplete || !strings.Contains(m.tnComplete(88), "Omnideck is ready") {
+			if m.Stage != SetupStageComplete || !strings.Contains(m.tnComplete(88), "omnideck is ready") {
 				t.Fatalf("%s did not reach the ready screen", runtimeName)
 			}
 		})

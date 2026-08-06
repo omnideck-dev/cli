@@ -189,22 +189,8 @@ type AppModel struct {
 	router        Router
 	dialog        *ConfirmDialog
 
-	DashboardScreenState
-	LogsScreenState
-	SettingsScreenState
-	DoctorScreenState
-
-	eng       engine.Engine
-	instances []InstanceState
-	selected  int // index into instances
-
-	// Toast notification
-	toast string
-
-	// Workflow screen models.
-	setupModel       SetupModel
-	maintenanceModel MaintenanceModel
-	removalModel     RemovalModel
+	InstallationSection
+	ControlPlaneSection
 }
 
 // CurrentInstance returns a pointer to the selected instance, or nil.
@@ -228,14 +214,16 @@ func NewAppModel(eng engine.Engine, instances []config.InstanceInfo) AppModel {
 	sp.Spinner = spinner.Dot
 	sp.Style = lipgloss.NewStyle().Foreground(styles.TNBlue)
 	return AppModel{
-		eng:       eng,
-		instances: states,
-		DoctorScreenState: DoctorScreenState{
-			doctorSpinner: sp,
-		},
-		DashboardScreenState: DashboardScreenState{
-			expanded:  make(map[string]bool),
-			chipFocus: -1,
+		ControlPlaneSection: ControlPlaneSection{
+			eng:       eng,
+			instances: states,
+			DoctorScreenState: DoctorScreenState{
+				doctorSpinner: sp,
+			},
+			DashboardScreenState: DashboardScreenState{
+				expanded:  make(map[string]bool),
+				chipFocus: -1,
+			},
 		},
 		router: NewRouter(RouteDashboard),
 	}
@@ -253,13 +241,14 @@ func NewAppModelForDoctor(eng engine.Engine, instances []config.InstanceInfo, se
 }
 
 // NewAppModelForSetup creates an application that opens directly in Setup.
-func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string) AppModel {
+func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string, autoStart ...bool) AppModel {
 	m := NewAppModel(eng, instances)
 	cfg := workflow.NewInstanceDefaults(instances)
 	mode := SetupAdditionalInstance
 	if len(instances) == 0 {
 		mode = SetupFirstRun
 	}
+	resume := len(autoStart) > 0 && autoStart[0]
 	im := NewSetupModel(SetupRequest{
 		Initial:           cfg,
 		ImageOverride:     imageOverride,
@@ -267,6 +256,7 @@ func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, ima
 		Mode:              mode,
 		PreferredEngine:   preferredEngine,
 		Embedded:          true,
+		AutoStart:         resume,
 	})
 	m.setupModel = im
 	m.router.Replace(RouteSetup)

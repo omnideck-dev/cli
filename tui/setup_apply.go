@@ -34,13 +34,7 @@ func (m SetupModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputs[m.inputFocus].Focus()
 				return m, nil
 			}
-			m.Stage = SetupStageApplying
-			m.lastCompletedStep = -1
-			m.errorMsg = ""
-			m.errorDetail = ""
-			m.errorShowDetails = false
-			m.spinnerModel = NewSpinnerModel(setupStepLabels, defaultFlavorMessages)
-			return m, tea.Batch(m.spinnerModel.Init(), m.startSetupStep(0))
+			return m.beginApplying()
 		}
 	}
 	return m, nil
@@ -173,6 +167,10 @@ func (m SetupModel) updateFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			m.errorShowDetails = !m.errorShowDetails
 		case "r":
+			if m.failureFromRuntime {
+				m.configureRuntimeSetup()
+				return m, m.startRuntimeSetup()
+			}
 			m.Stage = SetupStageReview
 		case "b", "enter", "esc", "q", "ctrl+c":
 			return m.exit(WorkflowCanceled)

@@ -46,7 +46,7 @@ func init() {
 	setupCmd.Flags().StringVar(&setupPortFlag, "port", "", "web UI host port (default: 2337)")
 	setupCmd.Flags().StringVar(&setupMemoryFlag, "memory", "", "container memory limit (e.g. 2g)")
 	setupCmd.Flags().StringVar(&setupShmFlag, "shm-size", "", "shared memory size (e.g. 1024m)")
-	setupCmd.Flags().StringVar(&setupRuntimeFlag, "runtime", "", "override automatic container runtime selection: docker or podman (first setup only)")
+	setupCmd.Flags().StringVar(&setupRuntimeFlag, "runtime", "", "container runtime (Omnideck uses podman)")
 	setupCmd.Flags().StringVar(&setupEngineFlag, "engine", "", "deprecated alias for --runtime")
 	_ = setupCmd.Flags().MarkHidden("engine")
 	setupCmd.Flags().BoolVar(&setupSuggestDefaultsFlag, "suggest-defaults", false, "print the next available name/port without creating anything (for --json)")
@@ -97,7 +97,7 @@ func runSetup(_ *cobra.Command, _ []string) error {
 		return runSetupPlain(preferredEngine, instances)
 	}
 
-	model := tui.NewAppModelForSetup(nil, instances, setupImageFlag, preferredEngine)
+	model := tui.NewAppModelForSetup(nil, instances, setupImageFlag, preferredEngine, resumeSetupFlag)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
@@ -111,8 +111,8 @@ func setupRuntimeOverride(runtimeFlag, legacyEngineFlag string) (string, error) 
 	if requested == "" {
 		requested = legacyEngineFlag
 	}
-	if requested != "" && requested != "docker" && requested != "podman" {
-		return "", fmt.Errorf("--runtime must be docker or podman")
+	if requested != "" && requested != "podman" {
+		return "", fmt.Errorf("--runtime must be podman; Docker is no longer supported")
 	}
 	return requested, nil
 }
@@ -146,7 +146,7 @@ func selectSetupEngine(preferredEngine string) (eng engine.Engine, probes []engi
 		if selectedRuntime != "" {
 			return nil, probes, selectedRuntime, fmt.Errorf("%s is not ready; complete the setup option above", selectedRuntime)
 		}
-		return nil, probes, selectedRuntime, fmt.Errorf("neither Podman nor Docker is ready; complete one of the setup options above")
+		return nil, probes, selectedRuntime, fmt.Errorf("Podman is not ready; complete the setup option above")
 	}
 	return eng, probes, selectedRuntime, nil
 }
@@ -361,7 +361,7 @@ func printRuntimeSetupGuidanceFromProbes(preferred string, probes []engine.Probe
 	plans := engine.BuildSetupPlans(probes, engine.DetectHostPlatform())
 	fmt.Println("Omnideck runs inside a container.")
 	fmt.Println("The container keeps the agent and its software isolated from the rest of your system.")
-	fmt.Println("Podman or Docker is needed to run the container. You only need one of them.")
+	fmt.Println("Podman runs that container and is the only runtime Omnideck uses.")
 	fmt.Println()
 	for _, probe := range probes {
 		if preferred == "" || probe.Name == preferred {

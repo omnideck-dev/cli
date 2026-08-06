@@ -26,10 +26,11 @@ func TestSetupUsesRuntimeFlagAndHidesLegacyEngineAlias(t *testing.T) {
 	}{
 		{name: "automatic", want: ""},
 		{name: "runtime", runtimeFlag: "podman", want: "podman"},
-		{name: "legacy alias", legacyFlag: "docker", want: "docker"},
-		{name: "matching flags", runtimeFlag: "docker", legacyFlag: "docker", want: "docker"},
+		{name: "legacy alias", legacyFlag: "podman", want: "podman"},
+		{name: "matching flags", runtimeFlag: "podman", legacyFlag: "podman", want: "podman"},
 		{name: "conflicting flags", runtimeFlag: "docker", legacyFlag: "podman", wantErrSubstr: "use only --runtime"},
-		{name: "invalid runtime", runtimeFlag: "containerd", wantErrSubstr: "--runtime must be docker or podman"},
+		{name: "Docker rejected", runtimeFlag: "docker", wantErrSubstr: "must be podman"},
+		{name: "invalid runtime", runtimeFlag: "containerd", wantErrSubstr: "must be podman"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -48,11 +49,11 @@ func TestSetupUsesRuntimeFlagAndHidesLegacyEngineAlias(t *testing.T) {
 }
 
 func TestSaveInstalledConfigRecordsMachineWideRuntime(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
 	path := filepath.Join(t.TempDir(), "instance.yaml")
 	cfg := config.DefaultConfig()
 
-	if err := saveInstalledConfig(path, cfg, "docker"); err != nil {
+	if err := saveInstalledConfig(path, cfg, "podman"); err != nil {
 		t.Fatalf("saveInstalledConfig: %v", err)
 	}
 
@@ -70,28 +71,28 @@ func TestSaveInstalledConfigRecordsMachineWideRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadSettings: %v", err)
 	}
-	if settings.Runtime != "docker" {
-		t.Fatalf("machine-wide Runtime = %q, want docker", settings.Runtime)
+	if settings.Runtime != "podman" {
+		t.Fatalf("machine-wide Runtime = %q, want podman", settings.Runtime)
 	}
 }
 
 func TestFreshSetupCanChooseAgainAfterLastInstanceIsRemoved(t *testing.T) {
-	got, err := setupRuntimePreference("docker", "", 0)
+	got, err := setupRuntimePreference("podman", "", 0)
 	if err != nil || got != "" {
 		t.Fatalf("fresh setup preference = %q, %v; want an open choice", got, err)
 	}
-	got, err = setupRuntimePreference("docker", "podman", 0)
+	got, err = setupRuntimePreference("podman", "podman", 0)
 	if err != nil || got != "podman" {
 		t.Fatalf("fresh requested preference = %q, %v; want podman", got, err)
 	}
 }
 
 func TestExistingInstancesKeepTheirSharedRuntime(t *testing.T) {
-	got, err := setupRuntimePreference("docker", "", 1)
-	if err != nil || got != "docker" {
-		t.Fatalf("existing preference = %q, %v; want docker", got, err)
+	got, err := setupRuntimePreference("podman", "", 1)
+	if err != nil || got != "podman" {
+		t.Fatalf("existing preference = %q, %v; want podman", got, err)
 	}
-	if _, err := setupRuntimePreference("docker", "podman", 1); err == nil {
-		t.Fatal("an existing Docker installation must not silently switch to Podman")
+	if _, err := setupRuntimePreference("podman", "docker", 1); err == nil {
+		t.Fatal("an existing installation must not accept Docker")
 	}
 }

@@ -60,6 +60,23 @@ func TestVolumeNotFoundOnlyMatchesMissingVolume(t *testing.T) {
 	}
 }
 
+func TestPodmanCommandsSelectTheSharedMachineOnlyOnDesktopVMPlatforms(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin"} {
+		got := podmanCommandArgs(goos, "container", "list")
+		want := "--connection omnideck-runtime container list"
+		if strings.Join(got, " ") != want {
+			t.Fatalf("%s args = %q, want %q", goos, got, want)
+		}
+		machine := podmanCommandArgs(goos, "machine", "start", OmnideckMachineName)
+		if strings.Join(machine, " ") != "machine start omnideck-runtime" {
+			t.Fatalf("%s machine args = %q", goos, machine)
+		}
+	}
+	if got := podmanCommandArgs("linux", "container", "list"); strings.Join(got, " ") != "container list" {
+		t.Fatalf("linux args = %q", got)
+	}
+}
+
 func commandHelper(t *testing.T) *exec.Cmd {
 	t.Helper()
 	cmd := exec.Command(os.Args[0], "-test.run=TestCommandHelperProcess")

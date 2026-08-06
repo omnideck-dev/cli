@@ -13,6 +13,22 @@ const (
 	RouteRemoval
 )
 
+// Section is the durable top-level TUI boundary. Routes may grow within either
+// section without mixing installation state into the everyday control plane.
+type Section int
+
+const (
+	SectionControlPlane Section = iota
+	SectionInstallation
+)
+
+func sectionForRoute(route Route) Section {
+	if route == RouteSetup {
+		return SectionInstallation
+	}
+	return SectionControlPlane
+}
+
 // Router owns screen history for the TUI application shell. Workflows push a
 // route when they temporarily leave the current screen; Back returns to the
 // actual caller instead of assuming every journey began on the dashboard.
@@ -27,6 +43,10 @@ func NewRouter(initial Route) Router {
 
 func (r Router) Current() Route {
 	return r.current
+}
+
+func (r Router) Section() Section {
+	return sectionForRoute(r.current)
 }
 
 func (r Router) CanGoBack() bool {

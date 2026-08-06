@@ -6,7 +6,8 @@ import tea "github.com/charmbracelet/bubbletea"
 type SetupStage int
 
 const (
-	SetupStageQuickCheck SetupStage = iota
+	SetupStageWelcome SetupStage = iota
+	SetupStageQuickCheck
 	SetupStageRuntime
 	SetupStageSettings
 	SetupStageReview

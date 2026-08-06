@@ -138,6 +138,8 @@ func (m AppModel) breadcrumb() string {
 		return "Doctor"
 	case RouteSetup:
 		switch m.setupModel.Stage {
+		case SetupStageWelcome:
+			return "Setup"
 		case SetupStageQuickCheck:
 			return "Setup · Quick check"
 		case SetupStageRuntime:
@@ -241,11 +243,12 @@ func (m AppModel) footerHints() string {
 		return keyHints(hints)
 	case RouteSetup:
 		switch m.setupModel.Stage {
-		case SetupStageQuickCheck:
-			if m.setupModel.quickCheckReady && m.setupModel.preferredEngine == "" && (len(m.setupModel.availableEngines) > 1 || m.setupModel.setupAlternativeRuntime() != "") {
-				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"esc", "cancel"}})
-			}
+		case SetupStageWelcome:
+			return keyHints([][2]string{{"enter", "set up omnideck"}, {"q", "cancel"}})
 		case SetupStageRuntime:
+			if m.setupModel.runtimeSetupStage == runtimeSetupRestart {
+				return keyHints([][2]string{{"enter", "restart now"}, {"l", "restart later"}})
+			}
 			if m.setupModel.runtimeSetupStage == runtimeSetupWorking {
 				return keyHints([][2]string{{"working", "please wait"}})
 			}

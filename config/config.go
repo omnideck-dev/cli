@@ -13,6 +13,10 @@ import (
 // Config holds all persisted settings for omnideck.
 type Config struct {
 	ContainerName string `yaml:"container_name"`
+	// LayoutVersion identifies CLI-owned container wiring (ports, environment,
+	// host routing, and other run-time-only settings). A bump forces the next
+	// environment reconciliation to rebuild an older container once.
+	LayoutVersion int    `yaml:"layout_version,omitempty"`
 	HomeVolume    string `yaml:"home_volume,omitempty"`
 	StateVolume   string `yaml:"state_volume,omitempty"`
 	Memory        string `yaml:"memory"` // container --memory limit (e.g. "2g")
@@ -29,6 +33,10 @@ type Config struct {
 // The latest tag is intentionally a moving channel: setup and update should
 // always fetch the newest published Omnideck application image.
 const DefaultImage = "ghcr.io/omnideck-dev/omnideck:latest"
+
+// CurrentContainerLayout is bumped whenever RunOptions/engine wiring changes
+// in a way an already-created container cannot acquire by being restarted.
+const CurrentContainerLayout = 1
 
 // legacyImagePrefixes are image repositories that DefaultImage supersedes.
 // A config still pointing at one of these (regardless of tag) is migrated to
@@ -246,6 +254,7 @@ func DefaultPath() string {
 func DefaultConfig() *Config {
 	return &Config{
 		ContainerName: "omnideck",
+		LayoutVersion: CurrentContainerLayout,
 		Memory:        "2g",
 		ShmSize:       "1024m",
 		WebUIPort:     "2337",

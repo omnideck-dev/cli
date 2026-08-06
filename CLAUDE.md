@@ -2,7 +2,7 @@
 
 ## What This Is
 
-`omnideck-cli` is a Go CLI that installs and manages the **Omnideck** container application. The binary is named `omnideck` (not `omnideck-cli` — that's just the repo name). It uses Cobra for commands, Bubble Tea for TUI, and shells out to Docker or Podman.
+`omnideck-cli` is a Go CLI that installs and manages the **Omnideck** container application. The binary is named `omnideck` (not `omnideck-cli` — that's just the repo name). It uses Cobra for commands, Bubble Tea for TUI, and shells out to Podman.
 
 ## Full Spec
 
@@ -36,7 +36,9 @@ omnideck-cli/
 │   ├── config.go
 │   └── instance.go          # Instance-scoped commands, including safe removal
 ├── tui/
-│   ├── app.go               # Application shell and shared instance state
+│   ├── app.go               # Thin application shell and shared messages
+│   ├── section_installation.go # First-run/runtime-repair section
+│   ├── section_control.go   # Dashboard and management section
 │   ├── app_update.go        # Global messages and route dispatch
 │   ├── app_view.go          # Shared frame and route rendering
 │   ├── router.go            # Stack-based screen navigation
@@ -56,8 +58,8 @@ omnideck-cli/
 │   └── settings.go          # Shared settings validation/mutation
 ├── engine/
 │   ├── engine.go            # Engine interface
-│   ├── docker.go            # Docker shell-out implementation
 │   ├── podman.go            # Podman shell-out implementation
+│   ├── platform.go          # Named-machine/connection policy
 │   └── setup.go             # Platform-specific runtime detection/setup plans
 ├── checks/
 │   ├── ollama.go            # TCP dial check, OS-aware host
@@ -92,7 +94,7 @@ github.com/charmbracelet/lipgloss
 gopkg.in/yaml.v3
 ```
 
-No Docker SDK—the engine adapters intentionally shell out to the installed CLI.
+No Podman SDK—the engine adapter intentionally shells out to the installed CLI.
 Keep external dependencies minimal.
 
 ---
@@ -102,9 +104,10 @@ Keep external dependencies minimal.
 Runtime command construction is covered by cross-platform tests in `engine/`.
 Current important differences include:
 
-- Docker on Linux maps `host-gateway`; Docker Desktop uses
-  `host.docker.internal`.
-- Podman uses its runtime-specific host alias, with a macOS override.
+- Windows and macOS explicitly select the `omnideck-runtime` Podman connection;
+  Linux uses native Podman without a machine or connection flag.
+- Podman uses its runtime-specific host alias, with platform-specific handling
+  for reaching host services.
 - Runtime installation and recovery plans differ across Linux distributions,
   macOS architectures, Windows, and WSL.
 - Host memory detection uses an OS-specific implementation.
@@ -116,8 +119,8 @@ hardcode a Linux-only command or flag in user-facing workflow code.
 
 ## Engine Interface
 
-All Docker/Podman operations go through the `engine.Engine` interface. No
-command should call `exec.Command("docker", ...)` directly. User-facing
+All Podman operations go through the `engine.Engine` interface. No
+command should call `exec.Command("podman", ...)` directly. User-facing
 commands and screens should normally call `workflow/` operations rather than
 interpreting raw engine errors or rebuilding `engine.RunOptions` themselves.
 
@@ -130,7 +133,8 @@ which keeps tests small and prevents accidental coupling.
 ## TUI and Workflow Conventions
 
 - All TUI programs use `tea.NewProgram(model, tea.WithAltScreen())`
-- `AppModel` is the one interactive shell; the Dashboard is only its root screen
+- `AppModel` is the one interactive shell around Installation and Control Plane sections
+- Installation owns first-run/runtime repair; Control Plane owns the Dashboard and management screens
 - Logs, Settings, Doctor, Setup, and Maintenance are full screens managed by `Router`
 - Back navigation must pop the router so nested workflows return to their caller
 - Use `ConfirmDialog` only for short blocking decisions; substantial journeys are screens
@@ -152,8 +156,8 @@ which keeps tests small and prevents accidental coupling.
 require an installed instance (`start`, `stop`, `status`, etc.) use
 `requireConfigMulti`: one instance is selected automatically, multiple
 instances use an interactive picker, and non-interactive calls require
-`--name`. The shared Docker/Podman choice lives in `settings.yaml`, not in each
-new instance file.
+`--name`. Legacy Docker settings are migrated to Podman; new configurations do
+not expose a runtime choice.
 
 ```go
 type Config struct {
