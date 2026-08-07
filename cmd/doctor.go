@@ -33,11 +33,7 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 			return err
 		}
 	}
-	engName := ""
-	if LoadedConfig != nil {
-		engName = LoadedConfig.Engine
-	}
-	detectedEng, _ := engineFromConfig(engName)
+	detectedEng, _ := detectReadyEngine()
 
 	results := workflow.Diagnose(LoadedConfig, detectedEng)
 

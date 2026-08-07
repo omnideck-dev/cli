@@ -89,7 +89,6 @@ type SetupModel struct {
 	// Runtime setup state.
 	runtimeProbes      []engine.ProbeResult
 	runtimeSetupStage  runtimeSetupStage
-	preferredEngine    string
 	hostPlatform       engine.HostPlatform
 	runtimeEvents      chan tea.Msg
 	runtimeStage       string
@@ -134,15 +133,12 @@ const (
 	inputCount
 )
 
-// SetupRequest contains every input needed to create a setup workflow. Keeping
-// mode and runtime selection here prevents callers from constructing the model
-// and then mutating it into a different journey.
+// SetupRequest contains every input needed to create a setup workflow.
 type SetupRequest struct {
 	Initial           *config.Config
 	ImageOverride     string
 	ExistingInstances []config.InstanceInfo
 	Mode              SetupMode
-	PreferredEngine   string
 	Embedded          bool
 	WindowWidth       int
 	WindowHeight      int
@@ -227,7 +223,6 @@ func NewSetupModel(req SetupRequest) SetupModel {
 		existingNames:     existingNames,
 		existingPorts:     existingPorts,
 		imageOverride:     req.ImageOverride,
-		preferredEngine:   req.PreferredEngine,
 		hostPlatform:      hostPlatform,
 		autoStart:         req.AutoStart,
 		BaseModel:         BaseModel{WindowWidth: req.WindowWidth, WindowHeight: req.WindowHeight},
@@ -244,7 +239,7 @@ func (m SetupModel) Init() tea.Cmd {
 func (m SetupModel) startQuickChecks() tea.Cmd {
 	return tea.Batch(
 		m.quickCheckSpinner.Tick,
-		runEngineCheckFor(m.preferredEngine),
+		runEngineCheck,
 		runOllamaCheck,
 		runMemoryCheck,
 	)

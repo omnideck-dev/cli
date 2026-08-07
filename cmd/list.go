@@ -37,7 +37,7 @@ func runList(_ *cobra.Command, _ []string) error {
 		// ever applies here, and an empty install base is `[]`, not an error.
 		var eng engine.Engine
 		if len(instances) > 0 {
-			if candidate, detectErr := engineFromConfig(configuredEngineName(LoadedConfig, instances)); detectErr == nil {
+			if candidate, detectErr := detectReadyEngine(); detectErr == nil {
 				eng = candidate
 			}
 		}
@@ -52,7 +52,7 @@ func runList(_ *cobra.Command, _ []string) error {
 	}
 
 	var eng engine.Engine
-	if candidate, detectErr := engineFromConfig(configuredEngineName(LoadedConfig, instances)); detectErr == nil {
+	if candidate, detectErr := detectReadyEngine(); detectErr == nil {
 		eng = candidate
 	}
 

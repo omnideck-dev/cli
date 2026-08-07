@@ -109,43 +109,20 @@ func TestNonInteractiveMultipleInstancesRequireAName(t *testing.T) {
 	}
 }
 
-func TestConfiguredEngineName(t *testing.T) {
-	originalRuntime := RuntimeName
-	RuntimeName = ""
-	defer func() { RuntimeName = originalRuntime }()
-	instances := []config.InstanceInfo{
-		{Name: "omnideck", Config: &config.Config{Engine: "podman"}},
-	}
-
-	if got := configuredEngineName(&config.Config{Engine: "podman"}, instances); got != "podman" {
-		t.Fatalf("explicitly loaded engine = %q, want podman", got)
-	}
-	if got := configuredEngineName(nil, instances); got != "podman" {
-		t.Fatalf("instance engine = %q, want podman", got)
-	}
-	if got := configuredEngineName(nil, nil); got != "" {
-		t.Fatalf("missing engine = %q, want empty", got)
-	}
-	RuntimeName = "podman"
-	if got := configuredEngineName(nil, instances); got != "podman" {
-		t.Fatalf("machine-wide runtime = %q, want podman", got)
-	}
-}
-
-func TestReadyEngineFromProbesHonorsTheSharedRuntime(t *testing.T) {
+func TestReadyEngineFromProbesUsesOnlyPodman(t *testing.T) {
 	probes := []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeReady},
 		{Name: "docker", State: engine.RuntimeReady}, // ignored compatibility fixture
 	}
-	eng, err := readyEngineFromProbes("podman", probes)
+	eng, err := readyEngineFromProbes(probes)
 	if err != nil || eng == nil || eng.Name() != "podman" {
 		t.Fatalf("ready Podman = %v, %v", eng, err)
 	}
 	probes[0].State = engine.RuntimeMissing
-	if _, err := readyEngineFromProbes("podman", probes); err == nil || !strings.Contains(err.Error(), "Podman: Not installed") {
+	if _, err := readyEngineFromProbes(probes); err == nil || !strings.Contains(err.Error(), "Podman: Not installed") {
 		t.Fatalf("missing saved Podman error = %v", err)
 	}
-	if eng, err := readyEngineFromProbes("", probes); err == nil || eng != nil {
+	if eng, err := readyEngineFromProbes([]engine.ProbeResult{{Name: "docker", State: engine.RuntimeReady}}); err == nil || eng != nil {
 		t.Fatalf("automatic engine = %v, %v; Docker must be ignored", eng, err)
 	}
 }

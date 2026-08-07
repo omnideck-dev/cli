@@ -26,7 +26,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}
 	cfg := LoadedConfig
 
-	eng, err := engineFromConfig(cfg.Engine)
+	eng, err := detectReadyEngine()
 	if err != nil {
 		if jsonFlag {
 			return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))

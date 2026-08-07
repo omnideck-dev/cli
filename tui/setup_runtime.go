@@ -22,7 +22,6 @@ func (m *SetupModel) configureRuntimeSetup() {
 	m.runtimeDetail = ""
 	m.runtimeProgress = nil
 	m.failureFromRuntime = false
-	m.preferredEngine = "podman"
 	m.spinnerModel = NewSpinnerModel(nil, nil)
 	m.spinnerModel.spinner = m.quickCheckSpinner
 }

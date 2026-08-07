@@ -30,7 +30,7 @@ func TestSuggestInstallDefaultsForAdditionalInstance(t *testing.T) {
 }
 
 func TestSetupScreenUsesFirstRunLanguage(t *testing.T) {
-	m := NewAppModelForSetup(nil, nil, "", "")
+	m := NewAppModelForSetup(nil, nil, "")
 	if m.setupModel.setupMode != SetupFirstRun {
 		t.Fatalf("setup mode = %d, want first run", m.setupModel.setupMode)
 	}
@@ -52,7 +52,7 @@ func TestSetupScreenUsesAdditionalInstanceLanguage(t *testing.T) {
 	instances := []config.InstanceInfo{
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
 	}
-	m := NewAppModelForSetup(nil, instances, "", "")
+	m := NewAppModelForSetup(nil, instances, "")
 	if m.setupModel.setupMode != SetupAdditionalInstance {
 		t.Fatalf("setup mode = %d, want additional instance", m.setupModel.setupMode)
 	}
@@ -71,7 +71,7 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 	instances := []config.InstanceInfo{
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", Engine: "podman", WebUIPort: "2337"}},
 	}
-	m := NewAppModelForRuntimeSetup(instances, "podman")
+	m := NewAppModelForRuntimeSetup(instances)
 	if m.setupModel.setupMode != SetupRuntimeRepair {
 		t.Fatalf("setup mode = %d, want runtime repair", m.setupModel.setupMode)
 	}
@@ -84,7 +84,7 @@ func TestRuntimeRepairUsesSetupHeader(t *testing.T) {
 }
 
 func TestSetupViewFitsAStandardTerminalAndKeepsItsFooter(t *testing.T) {
-	m := NewAppModelForSetup(nil, nil, "", "")
+	m := NewAppModelForSetup(nil, nil, "")
 	m.width, m.height = 80, 24
 	m.setupModel.hostPlatform = engine.HostPlatform{OS: "linux", DistroID: "debian", Arch: "amd64"}
 	m.setupModel.runtimeProbes = []engine.ProbeResult{

@@ -168,8 +168,8 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 	if cmd == nil || nm.router.Current() != RouteSetup {
 		t.Fatal("Doctor action should open guided runtime setup")
 	}
-	if nm.setupModel.setupMode != SetupRuntimeRepair || nm.setupModel.preferredEngine != "podman" {
-		t.Fatalf("Doctor opened the wrong setup journey: mode=%d preferred=%q", nm.setupModel.setupMode, nm.setupModel.preferredEngine)
+	if nm.setupModel.setupMode != SetupRuntimeRepair {
+		t.Fatalf("Doctor opened the wrong setup journey: mode=%d", nm.setupModel.setupMode)
 	}
 }
 

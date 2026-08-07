@@ -76,10 +76,10 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, existsErr)
 	}
 	if exists {
-		return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
+		return classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName))
 	}
 	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-		return fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault())
+		return classifyError(ErrPortInUse, fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault()))
 	}
 
 	opts.reportStage("create_home_volume")
@@ -109,12 +109,12 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 	close(msgs)
 	<-forwarded
 	if pullErr != nil {
-		return pullErr
+		return classifyError(ErrImageDownload, pullErr)
 	}
 
 	opts.reportStage("run_container")
 	if err := eng.RunContainer(RunOptions(cfg)); err != nil {
-		return err
+		return classifyContainerRunError(err)
 	}
 	containerCreated = true
 

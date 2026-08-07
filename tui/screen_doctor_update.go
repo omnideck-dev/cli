@@ -68,7 +68,7 @@ func (m AppModel) runDoctorAction(result CheckResult) (tea.Model, tea.Cmd) {
 	switch result.Action {
 	case DoctorActionRuntimeSetup:
 		if len(m.instances) == 0 {
-			return m.startEmbeddedSetupWithRuntime(result.ActionValue)
+			return m.startEmbeddedSetup()
 		}
 		inst := m.CurrentInstance()
 		cfg := config.DefaultConfig()
@@ -83,7 +83,6 @@ func (m AppModel) runDoctorAction(result CheckResult) (tea.Model, tea.Cmd) {
 			Initial:           cfg,
 			ExistingInstances: instances,
 			Mode:              SetupRuntimeRepair,
-			PreferredEngine:   result.ActionValue,
 			Embedded:          true,
 			WindowWidth:       m.width,
 			WindowHeight:      m.height,

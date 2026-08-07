@@ -340,7 +340,7 @@ func formatUptime(d time.Duration) string {
 //
 // ContainerStatus and ContainerInspect are independent engine calls, so
 // they're fetched concurrently rather than one after another — each is its
-// own docker/podman subprocess, and gatherListEntries already expects to be
+// own Podman subprocess, and gatherListEntries already expects to be
 // polled repeatedly by a live dashboard.
 func gatherListEntry(eng engine.Engine, instance config.InstanceInfo) listEntry {
 	entry := listEntry{Name: instance.Name, Status: "unknown"}

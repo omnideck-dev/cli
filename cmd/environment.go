@@ -141,14 +141,15 @@ func environmentJSONError(err error) *jsonCmdError {
 	}
 	message := err.Error()
 	lower := strings.ToLower(message)
-	if strings.Contains(lower, "already using port") ||
+	if errors.Is(err, workflow.ErrPortInUse) ||
+		strings.Contains(lower, "already using port") ||
 		strings.Contains(lower, "address already in use") ||
 		strings.Contains(lower, "already allocated") ||
 		strings.Contains(lower, "cannot listen on the tcp port") ||
 		strings.Contains(lower, "ports are not available") {
 		return newJSONError(ErrCodePortInUse, message).withHint("Choose another local port and retry.")
 	}
-	if strings.Contains(lower, "already uses the name") {
+	if errors.Is(err, workflow.ErrContainerConflict) || strings.Contains(lower, "already uses the name") {
 		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name or remove the unrelated container.")
 	}
 	return newJSONError(ErrCodeInternal, message)
@@ -156,7 +157,7 @@ func environmentJSONError(err error) *jsonCmdError {
 
 func environmentStageJSONError(stage string, err error) *jsonCmdError {
 	structured := environmentJSONError(err)
-	if structured.payload.Code == ErrCodeInternal && stage == "pull_image" {
+	if structured.payload.Code == ErrCodeInternal && (errors.Is(err, workflow.ErrImageDownload) || stage == "pull_image") {
 		return newJSONError(ErrCodeDownloadFailed, err.Error()).withHint("Check the internet connection, then retry. Anything already prepared will be kept.")
 	}
 	return structured

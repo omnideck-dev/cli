@@ -70,10 +70,10 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 	}
 	matching := SameInstanceConfig(current, desired)
 	if current == nil && exists {
-		return result, fmt.Errorf("another container already uses the name %q", desired.ContainerName)
+		return result, classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q", desired.ContainerName))
 	}
 	if (!exists || current == nil || current.WebUIPortOrDefault() != desired.WebUIPortOrDefault()) && !checks.PortAvailable(desired.WebUIPortOrDefault()) {
-		return result, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault())
+		return result, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault()))
 	}
 
 	if matching && exists {
@@ -135,14 +135,14 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 	close(msgs)
 	<-forwarded
 	if pullErr != nil {
-		return result, pullErr
+		return result, classifyError(ErrImageDownload, pullErr)
 	}
 
 	if current == nil {
 		opts.stage("create_container")
 		containerAttempted = true
 		if runErr := eng.RunContainer(RunOptions(desired)); runErr != nil {
-			return result, runErr
+			return result, classifyContainerRunError(runErr)
 		}
 		opts.stage("save_config")
 		if saveErr := save(); saveErr != nil {
@@ -154,6 +154,7 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 	if matching && !exists {
 		opts.stage("create_container")
 		if runErr := eng.RunContainer(RunOptions(desired)); runErr != nil {
+			runErr = classifyContainerRunError(runErr)
 			runErr = engine.WrapIfCancelled(runErr)
 			restoreCancellation := engine.SuspendCancellation()
 			defer restoreCancellation()

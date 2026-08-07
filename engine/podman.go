@@ -368,7 +368,7 @@ func (e *PodmanEngine) ContainerStats(name string) (cpu string, cpuPct float64, 
 	if len(parts) >= 3 {
 		ramPct = parsePctFloat(strings.TrimSpace(parts[2]))
 	}
-	// Podman/Docker reports MemPerc as 0 when no memory limit is set.
+	// Podman reports MemPerc as 0 when no memory limit is set.
 	// Fall back to computing the ratio from the MemUsage "used / host_total" pair.
 	if ramPct == 0 && ram != "" && ramTotal != "" {
 		used := parseMemBytes(ram)

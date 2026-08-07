@@ -59,6 +59,9 @@ func TestEnsureInstanceCancellationCleansUpAndPreservesCancellation(t *testing.T
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("err = %v, want it to satisfy errors.Is(err, context.Canceled)", err)
 	}
+	if !errors.Is(err, ErrImageDownload) {
+		t.Fatalf("err = %v, want ErrImageDownload", err)
+	}
 	if len(eng.removedVolume) != 2 {
 		t.Fatalf("removedVolume = %v, want both newly created volumes removed", eng.removedVolume)
 	}

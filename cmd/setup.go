@@ -53,8 +53,7 @@ func init() {
 }
 
 func runSetup(_ *cobra.Command, _ []string) error {
-	requestedRuntime, err := setupRuntimeOverride(setupRuntimeFlag, setupEngineFlag)
-	if err != nil {
+	if err := validateSetupRuntimeFlags(setupRuntimeFlag, setupEngineFlag); err != nil {
 		if jsonFlag {
 			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
 		}
@@ -80,75 +79,62 @@ func runSetup(_ *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	preferredEngine, err := setupRuntimePreference(RuntimeName, requestedRuntime, len(instances))
-	if err != nil {
-		if jsonFlag {
-			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
-		}
-		return err
-	}
 	// --json implies the same non-interactive path as --plain — a caller
 	// never has to remember to pass both. --plain remains independently
 	// useful (plain text, no JSON) and may still be combined with --json.
 	if setupPlainFlag || jsonFlag {
 		if jsonFlag {
-			return runSetupJSON(preferredEngine, instances)
+			return runSetupJSON(instances)
 		}
-		return runSetupPlain(preferredEngine, instances)
+		return runSetupPlain(instances)
 	}
 
-	model := tui.NewAppModelForSetup(nil, instances, setupImageFlag, preferredEngine, resumeSetupFlag)
+	model := tui.NewAppModelForSetup(nil, instances, setupImageFlag, resumeSetupFlag)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
 }
 
-func setupRuntimeOverride(runtimeFlag, legacyEngineFlag string) (string, error) {
+func validateSetupRuntimeFlags(runtimeFlag, legacyEngineFlag string) error {
 	if runtimeFlag != "" && legacyEngineFlag != "" && runtimeFlag != legacyEngineFlag {
-		return "", fmt.Errorf("--runtime and the older --engine option disagree; use only --runtime")
+		return fmt.Errorf("--runtime and the older --engine option disagree; use only --runtime")
 	}
 	requested := runtimeFlag
 	if requested == "" {
 		requested = legacyEngineFlag
 	}
-	if requested != "" && requested != "podman" {
-		return "", fmt.Errorf("--runtime must be podman; Docker is no longer supported")
+	if requested == "docker" {
+		return fmt.Errorf("--runtime docker is ignored; Omnideck uses podman")
 	}
-	return requested, nil
+	if requested != "" && requested != "podman" {
+		return fmt.Errorf("--runtime must be podman")
+	}
+	return nil
 }
 
 // runRuntimeSetup repairs container support for existing installations without
 // creating another Omnideck instance.
 func runRuntimeSetup(instances []config.InstanceInfo) error {
-	preferredEngine := configuredEngineName(LoadedConfig, instances)
-	model := tui.NewAppModelForRuntimeSetup(instances, preferredEngine)
+	model := tui.NewAppModelForRuntimeSetup(instances)
 	p := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err := p.Run()
 	return err
 }
 
-// selectSetupEngine picks the ready engine to install against, matching the
-// preference/default resolution runSetupPlain has always used. It's shared
-// with runSetupJSON so both non-interactive paths pick identically.
-func selectSetupEngine(preferredEngine string) (eng engine.Engine, probes []engine.ProbeResult, selectedRuntime string, err error) {
+// selectSetupEngine returns the ready Podman engine used by both
+// non-interactive setup paths.
+func selectSetupEngine() (eng engine.Engine, probes []engine.ProbeResult, err error) {
 	probes = engine.ProbeAll()
-	selectedRuntime = preferredEngine
-	if selectedRuntime == "" {
-		selectedRuntime = engine.DefaultRuntimeForSetup(probes, engine.DetectHostPlatform())
-	}
 	for _, candidate := range engine.ReadyEngines(probes) {
-		if selectedRuntime == "" || candidate.Name() == selectedRuntime {
+		if candidate.Name() == "podman" {
 			eng = candidate
 			break
 		}
 	}
 	if eng == nil {
-		if selectedRuntime != "" {
-			return nil, probes, selectedRuntime, fmt.Errorf("%s is not ready; complete the setup option above", selectedRuntime)
-		}
-		return nil, probes, selectedRuntime, fmt.Errorf("Podman is not ready; complete the setup option above")
+		return nil, probes, fmt.Errorf("Podman is not ready; complete the setup option above")
 	}
-	return eng, probes, selectedRuntime, nil
+	return eng, probes, nil
 }
 
 // resolveSetupConfig builds the new instance's config from flags/defaults
@@ -210,10 +196,10 @@ func createStageLabel(stage string) string {
 // workflow.CreateInstance with runSetupStepsJSON so the two non-interactive
 // paths can never disagree about what creating an instance does or what
 // happens when it fails partway through.
-func runSetupPlain(preferredEngine string, instances []config.InstanceInfo) error {
-	eng, probes, selectedRuntime, err := selectSetupEngine(preferredEngine)
+func runSetupPlain(instances []config.InstanceInfo) error {
+	eng, probes, err := selectSetupEngine()
 	if err != nil {
-		printRuntimeSetupGuidanceFromProbes(selectedRuntime, probes)
+		printRuntimeSetupGuidanceFromProbes(probes)
 		return err
 	}
 	fmt.Printf("Runtime: %s\n", eng.Name())
@@ -268,8 +254,8 @@ type suggestDefaultsPayload struct {
 // discover them otherwise, since list/doctor/remove are all keyed off the
 // saved config file that a cancelled run never gets to write. See
 // JSON_MODE_SPEC.md's "Cancellation and teardown".
-func runSetupJSON(preferredEngine string, instances []config.InstanceInfo) error {
-	eng, _, _, err := selectSetupEngine(preferredEngine)
+func runSetupJSON(instances []config.InstanceInfo) error {
+	eng, _, err := selectSetupEngine()
 	if err != nil {
 		return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))
 	}
@@ -300,7 +286,7 @@ func runSetupStepsJSON(eng engine.Engine, cfg *config.Config, savePath string) e
 			lastStage = stage
 		},
 		OnPullProgress: func(line string) {
-			// PullImage already streams every raw docker/podman pull line;
+			// PullImage already streams every raw Podman pull line;
 			// forward it as progress detail instead of discarding it the way
 			// runSetupPlain's text path does — a multi-minute pull otherwise
 			// looks identical to a hang.
@@ -315,7 +301,7 @@ func runSetupStepsJSON(eng engine.Engine, cfg *config.Config, savePath string) e
 		if errors.Is(err, context.Canceled) {
 			return nd.fail(lastStage, newJSONError(ErrCodeCancelled, err.Error()))
 		}
-		return nd.fail(lastStage, err)
+		return nd.fail(lastStage, environmentStageJSONError(lastStage, err))
 	}
 	nd.done(lastStage)
 
@@ -329,24 +315,6 @@ func runSetupStepsJSON(eng engine.Engine, cfg *config.Config, savePath string) e
 	return nil
 }
 
-// setupRuntimePreference keeps one runtime shared by existing instances while
-// allowing a genuinely fresh setup to choose again. A settings file can remain
-// after the final instance is removed, so it must not hide the other option.
-func setupRuntimePreference(saved, requested string, instanceCount int) (string, error) {
-	if instanceCount > 0 {
-		if saved != "" && requested != "" && requested != saved {
-			return "", fmt.Errorf("Omnideck already uses %s for every installation on this computer; remove --runtime %s", saved, requested)
-		}
-		if saved != "" {
-			return saved, nil
-		}
-	}
-	if requested != "" {
-		return requested, nil
-	}
-	return "", nil
-}
-
 // saveInstalledConfig records the machine-wide runtime and the new instance.
 func saveInstalledConfig(path string, cfg *config.Config, engineName string) error {
 	if err := config.SaveRuntime(engineName); err != nil {
@@ -357,23 +325,20 @@ func saveInstalledConfig(path string, cfg *config.Config, engineName string) err
 	return config.Save(path, cfg)
 }
 
-func printRuntimeSetupGuidanceFromProbes(preferred string, probes []engine.ProbeResult) {
+func printRuntimeSetupGuidanceFromProbes(probes []engine.ProbeResult) {
 	plans := engine.BuildSetupPlans(probes, engine.DetectHostPlatform())
 	fmt.Println("Omnideck runs inside a container.")
 	fmt.Println("The container keeps the agent and its software isolated from the rest of your system.")
 	fmt.Println("Podman runs that container and is the only runtime Omnideck uses.")
 	fmt.Println()
 	for _, probe := range probes {
-		if preferred == "" || probe.Name == preferred {
+		if probe.Name == "podman" {
 			fmt.Printf("  %-7s %s\n", probe.Name+":", engine.RuntimeStateLabel(probe.State))
 		}
 	}
 	for _, plan := range plans {
-		if preferred != "" && plan.Runtime != preferred {
-			continue
-		}
 		recommended := ""
-		if plan.Recommended || plan.Runtime == preferred {
+		if plan.Recommended {
 			recommended = " (recommended)"
 		}
 		fmt.Printf("\n%s%s\n", plan.Action, recommended)

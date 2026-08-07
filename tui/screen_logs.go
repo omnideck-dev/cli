@@ -82,7 +82,7 @@ func parseLogLine(line string) LogLine {
 	ts := ""
 	rest := line
 
-	// Docker/Podman --timestamps prefix: RFC3339Nano timestamp followed by a space.
+	// Podman --timestamps prefix: RFC3339Nano timestamp followed by a space.
 	// Podman emits 35-char timestamps like "2026-07-10T18:11:11.207455000-04:00 <rest>".
 	// We look for the first space within the first 40 chars and attempt a parse.
 	if len(line) > 20 && line[10] == 'T' {

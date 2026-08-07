@@ -120,6 +120,25 @@ func TestRunSetupStepsJSONFailureEmitsNestedError(t *testing.T) {
 	}
 }
 
+func TestRunSetupStepsJSONClassifiesDownloadFailure(t *testing.T) {
+	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
+	eng := &mockEngine{pullErr: errors.New("registry unavailable")}
+
+	var runErr error
+	out := captureStdout(t, func() {
+		runErr = runSetupStepsJSON(eng, cfg, "/tmp/unused.yaml")
+	})
+	if runErr != errAborted {
+		t.Fatalf("expected errAborted, got %v", runErr)
+	}
+	events := decodeNDJSON(t, out)
+	last := events[len(events)-1]
+	errorPayload, ok := last["error"].(map[string]any)
+	if !ok || errorPayload["code"] != ErrCodeDownloadFailed {
+		t.Fatalf("terminal event = %+v, want %s", last, ErrCodeDownloadFailed)
+	}
+}
+
 // TestRunSetupStepsJSONCancellationCleansUpAndReportsCancelled is the
 // regression guard for JSON_MODE_SPEC.md's "Cancellation and teardown": a
 // run cancelled after creating real resources (both volumes here) but

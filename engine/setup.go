@@ -95,7 +95,6 @@ type SetupCommand struct {
 
 // SetupPlan describes one guided path to make a runtime usable.
 type SetupPlan struct {
-	Runtime           string
 	State             RuntimeState
 	Title             string
 	Action            string
@@ -150,42 +149,8 @@ func DetectHostPlatform() HostPlatform {
 	return host
 }
 
-// RecommendedRuntime returns the easiest fresh-install default for a platform.
-// Existing usable or repairable runtimes take precedence in BuildSetupPlans.
-func RecommendedRuntime(host HostPlatform) string {
-	return "podman"
-}
-
-// InstalledRuntimeNames returns runtimes whose executable or desktop app was
-// found, even when that runtime still needs to be started or repaired.
-func InstalledRuntimeNames(probes []ProbeResult) []string {
-	names := make([]string, 0, len(probes))
-	for _, probe := range probes {
-		if probe.Name == "podman" && probe.State != RuntimeMissing {
-			names = append(names, probe.Name)
-		}
-	}
-	return names
-}
-
-// DefaultRuntimeForSetup returns the one runtime setup can choose without
-// asking a question. One installed runtime wins. With none installed, the
-// easiest platform default wins. Two installed runtimes return an empty value
-// so the interactive setup can let the user choose.
-func DefaultRuntimeForSetup(probes []ProbeResult, host HostPlatform) string {
-	installed := InstalledRuntimeNames(probes)
-	switch len(installed) {
-	case 0:
-		return RecommendedRuntime(host)
-	case 1:
-		return installed[0]
-	default:
-		return ""
-	}
-}
-
-// BuildSetupPlans creates an ordered set of recovery/install choices. The
-// recommendation prefers an already-installed runtime, then the platform default.
+// BuildSetupPlans describes the Podman recovery or installation path for the
+// current host. Unsupported legacy runtime probes are deliberately ignored.
 func BuildSetupPlans(probes []ProbeResult, host HostPlatform) []SetupPlan {
 	plans := make([]SetupPlan, 0, len(probes))
 	for _, probe := range probes {
@@ -202,12 +167,12 @@ func BuildSetupPlans(probes []ProbeResult, host HostPlatform) []SetupPlan {
 	if isSimpleRecovery(probeState(probes, "podman")) {
 		plans[0].Recommendation = "Podman is already installed, so finishing its setup is the quickest option."
 	} else {
-		plans[0].Recommendation = freshRecommendation(host, "podman")
+		plans[0].Recommendation = freshRecommendation(host)
 	}
 	return plans
 }
 
-func freshRecommendation(host HostPlatform, _ string) string {
+func freshRecommendation(host HostPlatform) string {
 	if host.OS == "darwin" {
 		return "Podman is a free option with an installer provided by the Podman project."
 	}
@@ -340,9 +305,8 @@ func probeState(probes []ProbeResult, name string) RuntimeState {
 
 func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	plan := SetupPlan{
-		Runtime:     probe.Name,
 		State:       probe.State,
-		Title:       titleName(probe.Name),
+		Title:       "Podman",
 		Description: RuntimeStateLabel(probe.State),
 	}
 
@@ -370,7 +334,7 @@ func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	case RuntimePermissionDenied:
 		plan.Manual = true
 		plan.Description = "Get help using Podman"
-		plan.URL = troubleshootingURL("podman")
+		plan.URL = podmanTroubleshootingURL
 		return plan
 	case RuntimeUnsupportedVersion:
 		plan.Description = "Update Podman"
@@ -388,7 +352,7 @@ func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 		}
 		plan.Description = "Open official help for this app"
 		plan.Manual = true
-		plan.URL = troubleshootingURL(probe.Name)
+		plan.URL = podmanTroubleshootingURL
 		return plan
 	default:
 		return missingPlan(plan, host)
@@ -426,7 +390,7 @@ func stoppedPlan(plan SetupPlan, host HostPlatform) SetupPlan {
 	}
 	plan.Description = "Get help starting Podman"
 	plan.Manual = true
-	plan.URL = troubleshootingURL("podman")
+	plan.URL = podmanTroubleshootingURL
 	return plan
 }
 
@@ -543,13 +507,4 @@ func command(name string, args ...string) SetupCommand {
 	return SetupCommand{Name: name, Args: args, Display: strings.Join(append([]string{name}, args...), " ")}
 }
 
-func titleName(name string) string {
-	if name != "" && name != "podman" {
-		return name
-	}
-	return "Podman"
-}
-
-func troubleshootingURL(_ string) string {
-	return "https://podman.io/docs/troubleshooting"
-}
+const podmanTroubleshootingURL = "https://podman.io/docs/troubleshooting"

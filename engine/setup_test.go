@@ -6,30 +6,13 @@ import (
 	"testing"
 )
 
-func TestEveryPlatformRecommendsPodman(t *testing.T) {
-	for _, host := range []HostPlatform{
-		{OS: "windows", Arch: "amd64"},
-		{OS: "darwin", Arch: "arm64"},
-		{OS: "darwin", Arch: "amd64"},
-		{OS: "linux", Arch: "amd64", DistroID: "ubuntu", Version: "24.04"},
-		{OS: "linux", Arch: "amd64", DistroID: "ubuntu", WSL: true},
-	} {
-		if got := RecommendedRuntime(host); got != "podman" {
-			t.Fatalf("RecommendedRuntime(%#v) = %q, want podman", host, got)
-		}
-	}
-}
-
 func TestSetupPlansIgnoreDockerProbes(t *testing.T) {
 	plans := BuildSetupPlans([]ProbeResult{
 		{Name: "docker", State: RuntimeReady},
 		{Name: "podman", State: RuntimeMissing},
 	}, HostPlatform{OS: "windows", Arch: "amd64"})
-	if len(plans) != 1 || plans[0].Runtime != "podman" || !plans[0].Recommended {
+	if len(plans) != 1 || plans[0].Title != "Podman" || !plans[0].Recommended {
 		t.Fatalf("plans = %#v, want one recommended Podman plan", plans)
-	}
-	if got := DefaultRuntimeForSetup([]ProbeResult{{Name: "docker", State: RuntimeReady}}, HostPlatform{OS: "windows"}); got != "podman" {
-		t.Fatalf("DefaultRuntimeForSetup = %q, want podman", got)
 	}
 }
 

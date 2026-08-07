@@ -21,28 +21,27 @@ func TestSetupUsesRuntimeFlagAndHidesLegacyEngineAlias(t *testing.T) {
 		name          string
 		runtimeFlag   string
 		legacyFlag    string
-		want          string
 		wantErrSubstr string
 	}{
-		{name: "automatic", want: ""},
-		{name: "runtime", runtimeFlag: "podman", want: "podman"},
-		{name: "legacy alias", legacyFlag: "podman", want: "podman"},
-		{name: "matching flags", runtimeFlag: "podman", legacyFlag: "podman", want: "podman"},
+		{name: "automatic"},
+		{name: "runtime", runtimeFlag: "podman"},
+		{name: "legacy alias", legacyFlag: "podman"},
+		{name: "matching flags", runtimeFlag: "podman", legacyFlag: "podman"},
 		{name: "conflicting flags", runtimeFlag: "docker", legacyFlag: "podman", wantErrSubstr: "use only --runtime"},
-		{name: "Docker rejected", runtimeFlag: "docker", wantErrSubstr: "must be podman"},
+		{name: "Docker ignored", runtimeFlag: "docker", wantErrSubstr: "is ignored"},
 		{name: "invalid runtime", runtimeFlag: "containerd", wantErrSubstr: "must be podman"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := setupRuntimeOverride(tt.runtimeFlag, tt.legacyFlag)
+			err := validateSetupRuntimeFlags(tt.runtimeFlag, tt.legacyFlag)
 			if tt.wantErrSubstr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErrSubstr) {
 					t.Fatalf("error = %v, want text %q", err, tt.wantErrSubstr)
 				}
 				return
 			}
-			if err != nil || got != tt.want {
-				t.Fatalf("setupRuntimeOverride = %q, %v; want %q", got, err, tt.want)
+			if err != nil {
+				t.Fatalf("validateSetupRuntimeFlags() error = %v", err)
 			}
 		})
 	}
@@ -73,26 +72,5 @@ func TestSaveInstalledConfigRecordsMachineWideRuntime(t *testing.T) {
 	}
 	if settings.Runtime != "podman" {
 		t.Fatalf("machine-wide Runtime = %q, want podman", settings.Runtime)
-	}
-}
-
-func TestFreshSetupCanChooseAgainAfterLastInstanceIsRemoved(t *testing.T) {
-	got, err := setupRuntimePreference("podman", "", 0)
-	if err != nil || got != "" {
-		t.Fatalf("fresh setup preference = %q, %v; want an open choice", got, err)
-	}
-	got, err = setupRuntimePreference("podman", "podman", 0)
-	if err != nil || got != "podman" {
-		t.Fatalf("fresh requested preference = %q, %v; want podman", got, err)
-	}
-}
-
-func TestExistingInstancesKeepTheirSharedRuntime(t *testing.T) {
-	got, err := setupRuntimePreference("podman", "", 1)
-	if err != nil || got != "podman" {
-		t.Fatalf("existing preference = %q, %v; want podman", got, err)
-	}
-	if _, err := setupRuntimePreference("podman", "docker", 1); err == nil {
-		t.Fatal("an existing installation must not accept Docker")
 	}
 }

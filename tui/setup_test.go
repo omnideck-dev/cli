@@ -330,7 +330,6 @@ func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
 	m := NewSetupModel(SetupRequest{})
 	podman := &mockEngine{name: "podman"}
 	m.quickCheckReady = true
-	m.preferredEngine = "podman"
 	m.eng = podman
 	m.availableEngines = []engine.Engine{podman}
 
@@ -338,29 +337,6 @@ func TestMachineWideRuntimeCannotBeSwitchedPerInstance(t *testing.T) {
 	nm := newModel.(SetupModel)
 	if cmd != nil || nm.eng.Name() != "podman" {
 		t.Fatalf("per-instance switch changed runtime to %s", nm.eng.Name())
-	}
-}
-
-func TestReadyRuntimeIsAlwaysPodman(t *testing.T) {
-	docker := &mockEngine{name: "docker"}
-	podman := &mockEngine{name: "podman"}
-	ready := []engine.Engine{podman, docker}
-	tests := []struct {
-		name string
-		host engine.HostPlatform
-		want string
-	}{
-		{"Windows", engine.HostPlatform{OS: "windows", Arch: "amd64"}, "podman"},
-		{"Intel Mac", engine.HostPlatform{OS: "darwin", Arch: "amd64"}, "podman"},
-		{"Apple chip Mac", engine.HostPlatform{OS: "darwin", Arch: "arm64"}, "podman"},
-		{"Linux", engine.HostPlatform{OS: "linux", Arch: "amd64"}, "podman"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := readyEngineForSetup(ready, tt.host); got == nil || got.Name() != tt.want {
-				t.Fatalf("ready engine = %v, want %s", got, tt.want)
-			}
-		})
 	}
 }
 
@@ -392,10 +368,7 @@ func TestRecommendedNameSkipsUnrelatedContainer(t *testing.T) {
 }
 
 func TestRuntimeRepairDoesNotFallBackToReadyDocker(t *testing.T) {
-	m := NewSetupModel(SetupRequest{
-		Mode:            SetupRuntimeRepair,
-		PreferredEngine: "podman",
-	})
+	m := NewSetupModel(SetupRequest{Mode: SetupRuntimeRepair})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64"}
 	docker := &mockEngine{name: "docker"}
 

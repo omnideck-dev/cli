@@ -104,32 +104,13 @@ func (m *SetupModel) maybeAdvanceQuickCheck() tea.Cmd {
 
 // --- QuickCheck commands ---
 
-func runEngineCheckFor(preferred string) tea.Cmd {
-	return func() tea.Msg {
-		probes := engine.ProbeAll()
-		usable := engine.ReadyEngines(probes)
-		if preferred != "" {
-			for _, eng := range usable {
-				if eng.Name() == preferred {
-					return engineCheckResult{eng: eng, all: usable, probes: probes}
-				}
-			}
-			return engineCheckResult{all: usable, probes: probes, err: fmt.Errorf("%s is not ready", preferred)}
-		}
-		if len(usable) == 0 {
-			return engineCheckResult{probes: probes, err: fmt.Errorf("Podman is not ready")}
-		}
-		return engineCheckResult{eng: readyEngineForSetup(usable, engine.DetectHostPlatform()), all: usable, probes: probes}
+func runEngineCheck() tea.Msg {
+	probes := engine.ProbeAll()
+	usable := engine.ReadyEngines(probes)
+	if len(usable) == 0 {
+		return engineCheckResult{probes: probes, err: fmt.Errorf("Podman is not ready")}
 	}
-}
-
-func readyEngineForSetup(ready []engine.Engine, _ engine.HostPlatform) engine.Engine {
-	for _, candidate := range ready {
-		if candidate.Name() == "podman" {
-			return candidate
-		}
-	}
-	return nil
+	return engineCheckResult{eng: usable[0], all: usable, probes: probes}
 }
 
 func runPermissionCheck(eng engine.Engine) tea.Cmd {

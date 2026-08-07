@@ -29,7 +29,7 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	cfg := LoadedConfig
-	eng, err := engineFromConfig(cfg.Engine)
+	eng, err := detectReadyEngine()
 	if err != nil {
 		if jsonFlag {
 			return writeJSONError(newJSONError(ErrCodeEngineNotFound, err.Error()))
@@ -48,7 +48,7 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	// A killed omnideck process kills the docker/podman log subprocess too
+	// A killed omnideck process kills the Podman log subprocess too
 	// (see engine.SetCancelContext, wired in cmd/root.go's Execute()), so
 	// Ctrl+C during --follow surfaces here as TailLogs returning an error for
 	// the subprocess we just killed ourselves. Report that as a clean exit
