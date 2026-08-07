@@ -66,7 +66,7 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 			}
 			return optErr
 		}
-		eng, err := engineFromConfig(instance.Config.Engine)
+		eng, err := detectReadyEngine()
 		if err != nil {
 			wrapped := fmt.Errorf("the container runtime must be running before this instance can be removed: %w", err)
 			if jsonFlag {
@@ -80,7 +80,7 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 		return runRemovePlain(eng, instance, opts)
 	}
 
-	eng, err := engineFromConfig(instance.Config.Engine)
+	eng, err := detectReadyEngine()
 	if err != nil {
 		return fmt.Errorf("the container runtime must be running before this instance can be removed: %w", err)
 	}

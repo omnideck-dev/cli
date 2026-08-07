@@ -53,7 +53,7 @@ func TestNestedWorkflowReturnsToItsCallingScreen(t *testing.T) {
 }
 
 func TestRootWorkflowCancelQuitsInsteadOfShowingAnEmptyDashboard(t *testing.T) {
-	m := NewAppModelForSetup(nil, nil, "", "")
+	m := NewAppModelForSetup(nil, nil, "")
 	_, cmd := m.Update(WorkflowExitMsg{Outcome: WorkflowCanceled})
 	if cmd == nil {
 		t.Fatal("root-level cancel should quit")

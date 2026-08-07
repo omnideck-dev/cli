@@ -96,8 +96,19 @@ func TestCreateInstanceFailureBeforeAnyResourceNeedsNoCleanup(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error when the container name is already taken")
 	}
+	if !errors.Is(err, ErrContainerConflict) {
+		t.Fatalf("err = %v, want ErrContainerConflict", err)
+	}
 	if len(eng.removedVolumes) != 0 || eng.removedContaner {
 		t.Fatalf("expected no cleanup, got removedVolumes=%v removedContainer=%v", eng.removedVolumes, eng.removedContaner)
+	}
+}
+
+func TestCreateInstanceClassifiesImageDownloadFailure(t *testing.T) {
+	eng := &fakeCreationEngine{pullErr: errors.New("registry unavailable")}
+	err := CreateInstance(eng, testCreateConfig(), func() error { return nil }, CreateInstanceOptions{})
+	if !errors.Is(err, ErrImageDownload) {
+		t.Fatalf("err = %v, want ErrImageDownload", err)
 	}
 }
 

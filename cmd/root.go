@@ -60,7 +60,7 @@ func SetVersion(v, c, d string) {
 // Execute runs the root command. It wires a context tied to SIGINT/SIGTERM
 // that every engine-invoked subprocess is built with (see
 // engine.SetCancelContext), so a killed omnideck process also kills any
-// docker/podman subprocess it was waiting on instead of orphaning it.
+// Podman subprocess it was waiting on instead of orphaning it.
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -108,8 +108,7 @@ func init() {
 			instances, listErr := config.ListInstances()
 			instances = withLoadedInstance(instances, LoadedConfig, ConfigPath)
 			probes := engine.ProbeAll()
-			preferredEngine := configuredEngineName(LoadedConfig, instances)
-			readyEngine := selectReadyEngine(engine.ReadyEngines(probes), preferredEngine)
+			readyEngine := selectReadyEngine(engine.ReadyEngines(probes))
 			brokenIndex := firstBrokenInstance(readyEngine, instances)
 			switch chooseInteractiveStart(LoadedConfig, instances, listErr, readyEngine != nil, brokenIndex >= 0) {
 			case interactiveStartSetup:
@@ -185,30 +184,7 @@ func firstBrokenInstance(eng containerLookup, instances []config.InstanceInfo) i
 	return -1
 }
 
-func configuredEngineName(loaded *config.Config, instances []config.InstanceInfo) string {
-	if RuntimeName != "" {
-		return RuntimeName
-	}
-	if loaded != nil && loaded.Engine != "" {
-		return loaded.Engine
-	}
-	for _, instance := range instances {
-		if instance.Config != nil && instance.Config.Engine != "" {
-			return instance.Config.Engine
-		}
-	}
-	return ""
-}
-
-func selectReadyEngine(ready []engine.Engine, preferred string) engine.Engine {
-	if preferred != "" {
-		for _, candidate := range ready {
-			if candidate.Name() == preferred {
-				return candidate
-			}
-		}
-		return nil
-	}
+func selectReadyEngine(ready []engine.Engine) engine.Engine {
 	if len(ready) > 0 {
 		return ready[0]
 	}
@@ -222,23 +198,19 @@ func runtimeDisplayName(name string) string {
 	return name
 }
 
-// engineFromConfig returns a ready engine based on the shared runtime choice.
-func engineFromConfig(name string) (engine.Engine, error) {
-	if RuntimeName != "" {
-		name = RuntimeName
-	}
-	return readyEngineFromProbes(name, engine.ProbeAll())
+// detectReadyEngine returns Podman when the shared runtime is ready. Legacy
+// runtime names in saved configuration are intentionally ignored.
+func detectReadyEngine() (engine.Engine, error) {
+	return readyEngineFromProbes(engine.ProbeAll())
 }
 
-func readyEngineFromProbes(name string, probes []engine.ProbeResult) (engine.Engine, error) {
-	if candidate := selectReadyEngine(engine.ReadyEngines(probes), name); candidate != nil {
+func readyEngineFromProbes(probes []engine.ProbeResult) (engine.Engine, error) {
+	if candidate := selectReadyEngine(engine.ReadyEngines(probes)); candidate != nil {
 		return candidate, nil
 	}
-	if name != "" {
-		for _, probe := range probes {
-			if probe.Name == name {
-				return nil, fmt.Errorf("%s: %s\nRun `omnideck` for guided setup", runtimeDisplayName(name), engine.RuntimeStateLabel(probe.State))
-			}
+	for _, probe := range probes {
+		if probe.Name == "podman" {
+			return nil, fmt.Errorf("Podman: %s\nRun `omnideck` for guided setup", engine.RuntimeStateLabel(probe.State))
 		}
 	}
 	return nil, fmt.Errorf("Podman is not ready\nRun `omnideck` for guided setup")
@@ -382,9 +354,8 @@ func persistentPreRun(_ *cobra.Command, _ []string) {
 		ConfigPath = config.InstancePath("omnideck")
 	}
 
-	// Migrate the old per-instance runtime field when every existing config
-	// agrees. Mixed legacy configs keep their old behavior until the user can
-	// resolve them explicitly; Omnideck never silently changes their runtime.
+	// Migrate the old per-instance Podman field when it is present. Unsupported
+	// legacy runtime names are ignored rather than influencing runtime choice.
 	if RuntimeName == "" {
 		if legacyRuntime, ok := oneLegacyRuntime(LoadedConfig, instances); ok {
 			if err := config.SaveRuntime(legacyRuntime); err != nil {
@@ -397,20 +368,13 @@ func persistentPreRun(_ *cobra.Command, _ []string) {
 }
 
 func oneLegacyRuntime(loaded *config.Config, instances []config.InstanceInfo) (string, bool) {
-	seen := map[string]bool{}
 	if loaded != nil && config.ValidRuntime(loaded.Engine) {
-		seen[loaded.Engine] = true
+		return loaded.Engine, true
 	}
 	for _, instance := range instances {
 		if instance.Config != nil && config.ValidRuntime(instance.Config.Engine) {
-			seen[instance.Config.Engine] = true
+			return instance.Config.Engine, true
 		}
-	}
-	if len(seen) != 1 {
-		return "", false
-	}
-	for name := range seen {
-		return name, true
 	}
 	return "", false
 }

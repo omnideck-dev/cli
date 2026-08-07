@@ -90,6 +90,9 @@ func TestRecreateRestoresPreviousConfigWhenReplacementFails(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "previous settings were restored") {
 		t.Fatalf("Recreate() error = %v", err)
 	}
+	if !errors.Is(err, ErrPortInUse) {
+		t.Fatalf("Recreate() error = %v, want ErrPortInUse", err)
+	}
 	if len(eng.runOptions) != 2 || eng.runOptions[0].WebUIPort != "2448" || eng.runOptions[1].WebUIPort != oldCfg.WebUIPortOrDefault() {
 		t.Fatalf("run sequence = %#v", eng.runOptions)
 	}

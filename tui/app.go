@@ -241,7 +241,7 @@ func NewAppModelForDoctor(eng engine.Engine, instances []config.InstanceInfo, se
 }
 
 // NewAppModelForSetup creates an application that opens directly in Setup.
-func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, imageOverride, preferredEngine string, autoStart ...bool) AppModel {
+func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, imageOverride string, autoStart ...bool) AppModel {
 	m := NewAppModel(eng, instances)
 	cfg := workflow.NewInstanceDefaults(instances)
 	mode := SetupAdditionalInstance
@@ -254,7 +254,6 @@ func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, ima
 		ImageOverride:     imageOverride,
 		ExistingInstances: instances,
 		Mode:              mode,
-		PreferredEngine:   preferredEngine,
 		Embedded:          true,
 		AutoStart:         resume,
 	})
@@ -265,7 +264,7 @@ func NewAppModelForSetup(eng engine.Engine, instances []config.InstanceInfo, ima
 
 // NewAppModelForRuntimeSetup opens container runtime setup for existing
 // installations and returns to the dashboard as soon as a runtime is ready.
-func NewAppModelForRuntimeSetup(instances []config.InstanceInfo, preferredEngine string) AppModel {
+func NewAppModelForRuntimeSetup(instances []config.InstanceInfo) AppModel {
 	m := NewAppModel(nil, instances)
 	cfg := config.DefaultConfig()
 	if len(instances) > 0 && instances[0].Config != nil {
@@ -275,7 +274,6 @@ func NewAppModelForRuntimeSetup(instances []config.InstanceInfo, preferredEngine
 		Initial:           cfg,
 		ExistingInstances: instances,
 		Mode:              SetupRuntimeRepair,
-		PreferredEngine:   preferredEngine,
 		Embedded:          true,
 	})
 	m.setupModel = im

@@ -13,7 +13,7 @@ import (
 // fetchStats calls the engine synchronously and returns an instanceStatsMsg.
 //
 // CPU/RAM are only fetched while the container is in an active state (see
-// workflow.IsActiveContainerStatus): Docker and Podman both report 0%/0B for
+// workflow.IsActiveContainerStatus): Podman reports 0%/0B for
 // a stopped container without erroring, which would otherwise render as a
 // misleadingly precise "0.00%" instead of the dash a stopped instance should
 // show. A paused or restarting container is not stopped, though, and still

@@ -34,11 +34,7 @@ func init() {
 
 // runTUI launches the interactive dashboard.
 func runTUI(_ *cobra.Command, _ []string) error {
-	legacyRuntime := ""
-	if LoadedConfig != nil {
-		legacyRuntime = LoadedConfig.Engine
-	}
-	eng, err := engineFromConfig(legacyRuntime)
+	eng, err := detectReadyEngine()
 	if err != nil {
 		return fmt.Errorf("no container runtime is ready: %w", err)
 	}

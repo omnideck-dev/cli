@@ -1,6 +1,6 @@
 // Package workflow contains application-level operations shared by the CLI
-// commands and interactive screens. Container engines deliberately expose raw
-// Docker/Podman behavior; this package turns that behavior into idempotent,
+// commands and interactive screens. The engine deliberately exposes raw
+// Podman behavior; this package turns it into idempotent,
 // user-facing Omnideck operations.
 package workflow
 
@@ -108,7 +108,7 @@ func EnsureStarted(eng ContainerStartEngine, name string) (changed bool, err err
 
 // IsActiveContainerStatus reports whether status is one a running Omnideck
 // instance can report while still doing meaningful work: "running" plainly,
-// but also "paused" (frozen, not exited — Docker/Podman still return real,
+// but also "paused" (frozen, not exited — Podman still returns real,
 // non-error CPU/memory stats for it) and "restarting" (mid-restart-policy
 // cycle). Every caller that needs to know "is this container live" — stats
 // fetching, EnsureStopped — shares this one definition instead of each
@@ -193,6 +193,7 @@ func Recreate(eng ContainerEngine, current, next *config.Config) (err error) {
 		_ = eng.RemoveContainer(next.ContainerName)
 		runErr = eng.RunContainer(RunOptions(next))
 	}
+	runErr = classifyContainerRunError(runErr)
 	if err := runErr; err == nil {
 		return nil
 	} else if !hadCurrent {
@@ -208,15 +209,34 @@ func Recreate(eng ContainerEngine, current, next *config.Config) (err error) {
 	}
 }
 
-// isNameConflictError reports whether err is a container-engine error saying
-// a container/storage record with the requested name already exists. Both
-// Docker ("Conflict. The container name ... is already in use by container
-// ...") and Podman ("the container name ... is already in use by ... an
-// external entity") phrase this the same way, so a single substring check
-// covers both engines.
+// isNameConflictError reports whether Podman says a container or storage
+// record with the requested name already exists. Podman uses the same
+// "already in use by" phrase for tracked containers and external records.
 func isNameConflictError(err error) bool {
 	if err == nil {
 		return false
 	}
 	return strings.Contains(strings.ToLower(err.Error()), "already in use by")
+}
+
+func classifyContainerRunError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if isNameConflictError(err) {
+		return classifyError(ErrContainerConflict, err)
+	}
+	detail := strings.ToLower(err.Error())
+	for _, phrase := range []string{
+		"address already in use",
+		"already allocated",
+		"cannot listen on the tcp port",
+		"ports are not available",
+		"port is busy",
+	} {
+		if strings.Contains(detail, phrase) {
+			return classifyError(ErrPortInUse, err)
+		}
+	}
+	return err
 }

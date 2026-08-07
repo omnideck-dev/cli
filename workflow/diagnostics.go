@@ -155,11 +155,8 @@ func doctorRuntimeCheck(eng engine.Engine, probes []engine.ProbeResult) (CheckRe
 		detail = runtimeNameForPeople(selected.Name) + ": " + engine.RuntimeStateLabel(selected.State)
 		actionValue = selected.Name
 		plans := engine.BuildSetupPlans(probes, engine.DetectHostPlatform())
-		for _, plan := range plans {
-			if plan.Runtime == selected.Name {
-				actionLabel = plan.Action
-				break
-			}
+		if len(plans) > 0 {
+			actionLabel = plans[0].Action
 		}
 	}
 	return CheckResult{
