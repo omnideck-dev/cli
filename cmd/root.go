@@ -24,11 +24,12 @@ var (
 	dateStr    = "unknown"
 
 	// Global flags.
-	cfgPath   string
-	nameFlag  string
-	noColor   bool
-	debugFlag bool
-	jsonFlag  bool
+	cfgPath         string
+	nameFlag        string
+	noColor         bool
+	debugFlag       bool
+	jsonFlag        bool
+	resumeSetupFlag bool
 
 	// LoadedConfig is the config loaded in PersistentPreRun (may be nil).
 	LoadedConfig *config.Config
@@ -76,6 +77,8 @@ func init() {
 	rootCmd.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print raw container runtime commands and output")
 	rootCmd.PersistentFlags().BoolVar(&jsonFlag, "json", false, "Emit machine-readable JSON/NDJSON instead of styled output; never prompts or launches a TUI (see JSON_MODE_SPEC.md)")
 	rootCmd.Flags().Bool("version", false, "Print version and exit")
+	rootCmd.Flags().BoolVar(&resumeSetupFlag, "resume-setup", false, "continue setup after a Windows restart")
+	_ = rootCmd.Flags().MarkHidden("resume-setup")
 
 	rootCmd.RunE = func(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetBool("version")
@@ -98,7 +101,10 @@ func init() {
 			// "Bare omnideck --json (no subcommand)".
 			return writeJSONError(newJSONError(ErrCodeMissingSubcommand, "omnideck requires a subcommand in --json mode; run --help for the list"))
 		}
-		if isInteractive() {
+		// RunOnce may start the CLI without an inherited terminal handle. The
+		// private resume flag still routes through the normal bare-command
+		// detection so first setup and runtime repair continue in the right mode.
+		if isInteractive() || resumeSetupFlag {
 			instances, listErr := config.ListInstances()
 			instances = withLoadedInstance(instances, LoadedConfig, ConfigPath)
 			probes := engine.ProbeAll()
@@ -210,14 +216,10 @@ func selectReadyEngine(ready []engine.Engine, preferred string) engine.Engine {
 }
 
 func runtimeDisplayName(name string) string {
-	switch name {
-	case "docker":
-		return "Docker"
-	case "podman":
+	if name == "podman" {
 		return "Podman"
-	default:
-		return name
 	}
+	return name
 }
 
 // engineFromConfig returns a ready engine based on the shared runtime choice.
@@ -239,7 +241,7 @@ func readyEngineFromProbes(name string, probes []engine.ProbeResult) (engine.Eng
 			}
 		}
 	}
-	return nil, fmt.Errorf("Podman or Docker is not ready\nRun `omnideck` for guided setup")
+	return nil, fmt.Errorf("Podman is not ready\nRun `omnideck` for guided setup")
 }
 
 // requireConfigMulti is like requireConfig but also handles the multiple-instance

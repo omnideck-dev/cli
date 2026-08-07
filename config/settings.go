@@ -38,6 +38,12 @@ func LoadSettings() (*Settings, error) {
 	if err := yaml.Unmarshal(data, &settings); err != nil {
 		return nil, fmt.Errorf("parsing settings: %w", err)
 	}
+	// Docker was supported by older CLI releases. Treat that saved choice as a
+	// migration request instead of making every existing installation fail to
+	// load before the Podman repair flow can run.
+	if settings.Runtime == "docker" {
+		settings.Runtime = "podman"
+	}
 	if settings.Runtime != "" && !ValidRuntime(settings.Runtime) {
 		return nil, fmt.Errorf("settings contain unknown runtime %q", settings.Runtime)
 	}
@@ -66,5 +72,5 @@ func SaveRuntime(name string) error {
 
 // ValidRuntime reports whether name is a runtime Omnideck supports.
 func ValidRuntime(name string) bool {
-	return name == "docker" || name == "podman"
+	return name == "podman"
 }

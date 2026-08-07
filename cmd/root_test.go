@@ -117,8 +117,8 @@ func TestConfiguredEngineName(t *testing.T) {
 		{Name: "omnideck", Config: &config.Config{Engine: "podman"}},
 	}
 
-	if got := configuredEngineName(&config.Config{Engine: "docker"}, instances); got != "docker" {
-		t.Fatalf("explicitly loaded engine = %q, want docker", got)
+	if got := configuredEngineName(&config.Config{Engine: "podman"}, instances); got != "podman" {
+		t.Fatalf("explicitly loaded engine = %q, want podman", got)
 	}
 	if got := configuredEngineName(nil, instances); got != "podman" {
 		t.Fatalf("instance engine = %q, want podman", got)
@@ -126,40 +126,41 @@ func TestConfiguredEngineName(t *testing.T) {
 	if got := configuredEngineName(nil, nil); got != "" {
 		t.Fatalf("missing engine = %q, want empty", got)
 	}
-	RuntimeName = "docker"
-	if got := configuredEngineName(nil, instances); got != "docker" {
-		t.Fatalf("machine-wide runtime = %q, want docker", got)
+	RuntimeName = "podman"
+	if got := configuredEngineName(nil, instances); got != "podman" {
+		t.Fatalf("machine-wide runtime = %q, want podman", got)
 	}
 }
 
 func TestReadyEngineFromProbesHonorsTheSharedRuntime(t *testing.T) {
 	probes := []engine.ProbeResult{
-		{Name: "podman", State: engine.RuntimeMissing},
-		{Name: "docker", State: engine.RuntimeReady},
+		{Name: "podman", State: engine.RuntimeReady},
+		{Name: "docker", State: engine.RuntimeReady}, // ignored compatibility fixture
 	}
-	eng, err := readyEngineFromProbes("docker", probes)
-	if err != nil || eng == nil || eng.Name() != "docker" {
-		t.Fatalf("ready Docker = %v, %v", eng, err)
+	eng, err := readyEngineFromProbes("podman", probes)
+	if err != nil || eng == nil || eng.Name() != "podman" {
+		t.Fatalf("ready Podman = %v, %v", eng, err)
 	}
+	probes[0].State = engine.RuntimeMissing
 	if _, err := readyEngineFromProbes("podman", probes); err == nil || !strings.Contains(err.Error(), "Podman: Not installed") {
 		t.Fatalf("missing saved Podman error = %v", err)
 	}
-	if eng, err := readyEngineFromProbes("", probes); err != nil || eng.Name() != "docker" {
-		t.Fatalf("automatic ready engine = %v, %v", eng, err)
+	if eng, err := readyEngineFromProbes("", probes); err == nil || eng != nil {
+		t.Fatalf("automatic engine = %v, %v; Docker must be ignored", eng, err)
 	}
 }
 
 func TestOneLegacyRuntime(t *testing.T) {
 	instances := []config.InstanceInfo{
-		{Name: "one", Config: &config.Config{Engine: "docker"}},
-		{Name: "two", Config: &config.Config{Engine: "docker"}},
+		{Name: "one", Config: &config.Config{Engine: "podman"}},
+		{Name: "two", Config: &config.Config{Engine: "podman"}},
 	}
-	if got, ok := oneLegacyRuntime(nil, instances); !ok || got != "docker" {
-		t.Fatalf("oneLegacyRuntime() = %q, %v, want docker, true", got, ok)
+	if got, ok := oneLegacyRuntime(nil, instances); !ok || got != "podman" {
+		t.Fatalf("oneLegacyRuntime() = %q, %v, want podman, true", got, ok)
 	}
-	instances[1].Config.Engine = "podman"
-	if got, ok := oneLegacyRuntime(nil, instances); ok || got != "" {
-		t.Fatalf("mixed oneLegacyRuntime() = %q, %v, want empty, false", got, ok)
+	instances[1].Config.Engine = "docker"
+	if got, ok := oneLegacyRuntime(nil, instances); !ok || got != "podman" {
+		t.Fatalf("legacy Docker field should be ignored: got %q, %v", got, ok)
 	}
 }
 

@@ -1,50 +1,82 @@
 # Setup flow matrix
 
-The interactive CLI has five user journeys. They share runtime diagnosis, but
-they do not share the same destination.
+The Desktop setup is the canonical experience. The interactive CLI adapts the
+same copy, phase order, progress, permission guidance, restart behavior, and
+failure next steps to a terminal. A user starts it by running bare `omnideck`;
+`runtime ensure` is an internal Desktop/automation boundary, not a user step.
 
-| Journey | Starts when | Runtime is ready | Runtime needs attention |
-| --- | --- | --- | --- |
-| First setup | No Omnideck instances exist | Continue to recommended instance settings | Let the user choose Docker or Podman, guide setup, then continue |
-| Returning, working | One or more instances exist and their saved runtime is ready | Open the dashboard | Not applicable |
-| Returning, runtime broken | Instances exist but their saved runtime is not ready | Return to the dashboard | Repair only the saved shared runtime; never create an instance or switch runtimes |
-| Returning, instance broken | A saved instance exists but its container is missing | Open Doctor on the affected instance, then offer a review-first Repair that reconnects its existing volumes | Repair the shared runtime first, then recheck the instance |
-| Add instance | The user chooses **Setup** from the dashboard | Continue to a unique name, port, and saved space | Repair the saved shared runtime first, then continue |
+| Journey | Bare-command detection | Destination |
+| --- | --- | --- |
+| First setup | No saved OmniDeck instances | Welcome, automatic prerequisites and runtime, recommended instance defaults, application download, final checks |
+| Returning, working | At least one instance and Podman are ready | Control-plane dashboard |
+| Returning, runtime broken | Saved instances exist but Podman is not ready | Automatic runtime repair, then the dashboard; never create another instance |
+| Returning, instance broken | Podman is ready but a saved container is missing | Doctor on that instance, with its existing volumes preserved |
+| Add instance | User chooses Setup from the dashboard | Reuse/repair shared Podman, then show instance settings and review |
 
-Doctor is a separate diagnostic journey. It must use the same runtime probe
-states and setup plans as Setup so it cannot give conflicting instructions.
-Update and instance Repair share the Maintenance workflow so recreate, rollback,
-retry, and data-preservation behavior cannot drift.
+## First-run phases
 
-## Runtime setup stages
+Only one activity is shown at a time:
 
-Runtime setup has one mutually exclusive stage at a time:
+1. **Computer setup** — `Getting your computer ready…`
+2. **Secure space** — `Preparing a secure space to run in…` on Windows and macOS
+3. **Application files** — `Downloading omnideck’s files…`
+4. **Final checks** — `Almost ready…`
 
-1. **Choose** — show both usable choices on first setup, or the one saved choice
-   for repair and additional instances.
-2. **Review** — explain exactly what Omnideck will run or open. Nothing changes
-   before the second confirmation.
-3. **Working** — run the reviewed command or recheck runtime readiness.
-4. **Waiting** — an official installer, Store listing, or help page is open;
-   explain what to finish and make **check again** available.
+The phase weights match Desktop: 25%, 15%, 50%, and 10%. Linux omits the
+secure-space phase and renormalizes the remaining weights. Permission screens
+are the only place setup names WSL or Podman, because informed consent requires
+the user to know what the operating-system prompt will change.
 
-Every failed recheck returns to **Choose** with a state-specific next step. Even
-if a probe result is incomplete and no safe plan can be built, **R** and
-**Enter** remain available to check again.
+There is no Podman/Docker choice, numbered component walkthrough, browser
+download, or “return and check again” screen. Setup downloads and verifies the
+pinned installer itself, invokes the native installer, and continues when it
+finishes.
 
-## Primary platform choices
+## Platform behavior
 
-| Platform | Recommended | Alternative | Missing-runtime setup |
-| --- | --- | --- | --- |
-| Windows x64 | Docker Desktop | Podman | Microsoft Store for Docker; official `.msi` for Podman |
-| Windows ARM | Docker Desktop | Podman | Docker's official ARM instructions; official ARM `.msi` for Podman |
-| Apple-chip Mac | Podman | Docker Desktop | Official Podman `.pkg`; Docker's official Mac instructions |
-| Intel Mac | Docker Desktop | Podman with limitations | Docker's official Mac instructions; current Podman guidance |
-| Linux | Podman | Docker | Native package manager for known Podman distributions; official Docker instructions |
-| Linux inside Windows (WSL) | Docker Desktop | Podman | Windows Microsoft Store plus WSL integration; Linux Podman path remains available |
+| Platform | Computer setup | Secure space |
+| --- | --- | --- |
+| Windows x64/ARM64 | Detect or enable WSL 2; download, checksum-check, Authenticode-check, and install pinned Podman | Create or repair `omnideck-runtime` with WSL, rootless mode, and user-mode networking |
+| Apple-chip macOS | Download, checksum-check, package-signature-check, and install pinned Podman | Create or repair `omnideck-runtime`; Podman chooses CPU and sparse-disk defaults while Omnideck sets a compatible memory ceiling |
+| Intel macOS | Download, checksum-check, package-signature-check, and install the newest official Intel Podman package | Create or repair `omnideck-runtime` with the same memory-only OmniDeck policy |
+| Linux | Install Podman through the recognized native package family, using direct root execution, PolicyKit, or sudo as appropriate | Not applicable; containers run directly |
 
-For each runtime, the same flow also covers installed-but-stopped,
-Podman-machine-missing, Podman-machine-stopped, account-access, unsupported
-Docker version, and installed-but-broken states. Setup-plan tests require every
-supported state to have plain-language steps and either a reviewed command or
-an official page.
+Windows setup reports a typed restart requirement when WSL cannot finish until
+reboot. **Restart now** creates a one-time per-user resume entry, restarts
+without forcing applications closed, and relaunches bare `omnideck` after
+sign-in. **Restart later** exits without scheduling a restart.
+
+## Shared resource defaults
+
+The CLI calculates these values once and returns them in runtime-contract
+schema 4. The TUI uses the policy directly; Desktop uses the values returned by
+its bundled CLI. The CLI alone creates and updates `desktop.yaml` as part of
+the same transaction that reconciles the Desktop container.
+
+| Host RAM | Windows/Linux container | macOS container | macOS VM ceiling | Shared memory |
+| --- | --- | --- | --- | --- |
+| Under 6 GB | 1 GB | 1 GB | 4 GB | 50% of the container limit |
+| 6–11 GB | 2 GB | 2 GB | 4 GB | 50% of the container limit |
+| 12–23 GB | 3 GB | 3 GB | 5 GB | 50% of the container limit |
+| 24–47 GB | 4 GB | 4 GB | 6 GB | 50% of the container limit |
+| 48 GB or more | 6 GB | 4 GB | 6 GB | 50% of the container limit |
+
+Containers have no CPU quota and named volumes have no artificial disk quota.
+On Windows, Podman machine CPU, memory, and disk limits originate from WSL and
+the user's `.wslconfig`; OmniDeck does not replace them. Every default Windows
+container tier fits within WSL's default half-of-host memory ceiling with guest
+headroom. On Linux there is no machine layer. On macOS, Podman chooses its
+platform-aware CPU count and sparse-disk ceiling. OmniDeck sets only VM memory:
+the container limit plus 2 GB for Podman and the guest OS, with a 4 GB minimum.
+Desktop validates this relationship before asking the CLI to reconcile the
+container.
+
+## Failure contract
+
+Every timeout or failure includes a plain-language cause and next step. Shared
+runtime failures are categorized as component, permission, download,
+environment, restart, or unsupported-system issues. Both Desktop and TUI
+consume that classification instead of parsing command output independently.
+
+Doctor remains a separate diagnostic journey, but runtime repair returns to
+this same automatic setup backend so it cannot drift from first-run behavior.

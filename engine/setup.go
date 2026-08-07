@@ -2,21 +2,86 @@ package engine
 
 import (
 	"bufio"
-	"fmt"
 	"os"
 	"runtime"
 	"strconv"
 	"strings"
+
+	"github.com/omnideck-dev/cli/checks"
 )
+
+// OmnideckMachineName is the Podman machine shared by the desktop and CLI on
+// macOS and Windows. Both surfaces select it explicitly, leaving a developer's
+// existing default Podman machine untouched.
+const OmnideckMachineName = "omnideck-runtime"
 
 // HostPlatform contains only the host facts used to choose a safe setup path.
 type HostPlatform struct {
-	OS       string
-	Arch     string
-	DistroID string
-	Version  string
-	WSL      bool
-	Systemd  bool
+	OS            string
+	Arch          string
+	DistroID      string
+	DistroLike    []string
+	Version       string
+	WSL           bool
+	Systemd       bool
+	CPUCount      int
+	TotalMemoryMB int64
+}
+
+// RuntimeResourceDefaults is the single resource policy shared by the TUI and
+// Desktop. Windows leaves VM sizing to WSL, Linux has no VM, and macOS sets
+// only the memory ceiling needed by the container while leaving CPU and sparse
+// disk defaults to Podman.
+type RuntimeResourceDefaults struct {
+	ContainerMemory  string
+	ContainerSHMSize string
+	MachineMode      string
+	MachineCPUs      int
+	MachineMemoryMB  int64
+	MachineDiskGB    int
+}
+
+// DefaultRuntimeResources derives safe defaults from host capacity. The
+// container is capped below the macOS VM limit so Podman and the guest OS keep
+// headroom even on large Macs.
+func DefaultRuntimeResources(host HostPlatform) RuntimeResourceDefaults {
+	memory, shm := "2g", "1024m"
+	if host.TotalMemoryMB > 0 {
+		memory, shm = checks.DefaultContainerMemory(host.TotalMemoryMB)
+	}
+	defaults := RuntimeResourceDefaults{
+		ContainerMemory:  memory,
+		ContainerSHMSize: shm,
+		MachineMode:      "host-native",
+	}
+	switch host.OS {
+	case "windows":
+		defaults.MachineMode = "wsl-managed"
+	case "darwin":
+		defaults.MachineMode = "podman-managed"
+		if defaults.ContainerMemory == "6g" {
+			defaults.ContainerMemory = "4g"
+			defaults.ContainerSHMSize = "2048m"
+		}
+		defaults.MachineMemoryMB = macMachineMemoryMB(defaults.ContainerMemory)
+	}
+	return defaults
+}
+
+// macMachineMemoryMB keeps two GiB for Podman and the guest OS above the
+// container's cgroup limit. Four GiB remains the minimum useful VM ceiling.
+// Unlike WSL, a macOS Podman machine needs an explicit memory ceiling; CPU time
+// and sparse disk growth can safely stay with Podman's platform defaults.
+func macMachineMemoryMB(containerMemory string) int64 {
+	machineMB := int64(4096)
+	containerGB, err := strconv.ParseInt(strings.TrimSuffix(containerMemory, "g"), 10, 64)
+	if err != nil || containerGB <= 0 {
+		return machineMB
+	}
+	if requiredMB := containerGB*1024 + 2048; requiredMB > machineMB {
+		machineMB = requiredMB
+	}
+	return machineMB
 }
 
 // SetupCommand is executed directly, without a shell, so arguments remain
@@ -50,7 +115,10 @@ type SetupPlan struct {
 
 // DetectHostPlatform reads os-release on Linux and otherwise relies on GOOS.
 func DetectHostPlatform() HostPlatform {
-	host := HostPlatform{OS: runtime.GOOS, Arch: runtime.GOARCH}
+	host := HostPlatform{OS: runtime.GOOS, Arch: runtime.GOARCH, CPUCount: runtime.NumCPU()}
+	if totalMB, err := checks.TotalMemoryMB(); err == nil {
+		host.TotalMemoryMB = totalMB
+	}
 	if host.OS != "linux" {
 		return host
 	}
@@ -77,6 +145,7 @@ func DetectHostPlatform() HostPlatform {
 		}
 	}
 	host.DistroID = values["ID"]
+	host.DistroLike = strings.Fields(values["ID_LIKE"])
 	host.Version = values["VERSION_ID"]
 	return host
 }
@@ -84,12 +153,6 @@ func DetectHostPlatform() HostPlatform {
 // RecommendedRuntime returns the easiest fresh-install default for a platform.
 // Existing usable or repairable runtimes take precedence in BuildSetupPlans.
 func RecommendedRuntime(host HostPlatform) string {
-	if host.OS == "windows" || host.WSL {
-		return "docker"
-	}
-	if host.OS == "darwin" && host.Arch == "amd64" {
-		return "docker"
-	}
 	return "podman"
 }
 
@@ -98,7 +161,7 @@ func RecommendedRuntime(host HostPlatform) string {
 func InstalledRuntimeNames(probes []ProbeResult) []string {
 	names := make([]string, 0, len(probes))
 	for _, probe := range probes {
-		if probe.State != RuntimeMissing {
+		if probe.Name == "podman" && probe.State != RuntimeMissing {
 			names = append(names, probe.Name)
 		}
 	}
@@ -126,44 +189,29 @@ func DefaultRuntimeForSetup(probes []ProbeResult, host HostPlatform) string {
 func BuildSetupPlans(probes []ProbeResult, host HostPlatform) []SetupPlan {
 	plans := make([]SetupPlan, 0, len(probes))
 	for _, probe := range probes {
-		if probe.Ready() {
+		if probe.Name != "podman" || probe.Ready() {
 			continue
 		}
 		plans = append(plans, explainSetupPlan(setupPlanFor(probe, host), probe, host))
 	}
 
-	recommended := RecommendedRuntime(host)
-	for i := range plans {
-		if isSimpleRecovery(probeState(probes, plans[i].Runtime)) {
-			plans[i].Recommended = true
-			plans[i].Recommendation = plans[i].Title + " is already installed, so fixing it is the quickest option."
-			return plans
-		}
+	if len(plans) == 0 {
+		return plans
 	}
-	for i := range plans {
-		if plans[i].Runtime == recommended {
-			plans[i].Recommended = true
-			plans[i].Recommendation = freshRecommendation(host, plans[i].Runtime)
-			break
-		}
+	plans[0].Recommended = true
+	if isSimpleRecovery(probeState(probes, "podman")) {
+		plans[0].Recommendation = "Podman is already installed, so finishing its setup is the quickest option."
+	} else {
+		plans[0].Recommendation = freshRecommendation(host, "podman")
 	}
 	return plans
 }
 
-func freshRecommendation(host HostPlatform, runtimeName string) string {
-	if runtimeName == "docker" && (host.OS == "windows" || host.WSL) {
-		return "Docker Desktop provides the most guided setup on Windows."
-	}
-	if runtimeName == "podman" && host.OS == "darwin" {
+func freshRecommendation(host HostPlatform, _ string) string {
+	if host.OS == "darwin" {
 		return "Podman is a free option with an installer provided by the Podman project."
 	}
-	if runtimeName == "docker" && host.OS == "darwin" && host.Arch == "amd64" {
-		return "Docker provides a current installer for Intel Macs."
-	}
-	if runtimeName == "podman" {
-		return "Podman is a free option designed to run without giving a background program full control of your computer."
-	}
-	return "This is the simplest option for this computer."
+	return "Podman is the container runtime Omnideck uses on every supported platform."
 }
 
 func explainSetupPlan(plan SetupPlan, probe ProbeResult, host HostPlatform) SetupPlan {
@@ -187,6 +235,14 @@ func explainSetupPlan(plan SetupPlan, probe ProbeResult, host HostPlatform) Setu
 		plan.Action = "Start Podman"
 		plan.Description = "Podman is installed and only needs to be started."
 		plan.Steps = []string{"Start Podman.", "Check that Omnideck can use it."}
+	case RuntimeMachineNeedsUpdate:
+		plan.Action = "Update Podman's secure space"
+		plan.Description = "Podman's existing Omnideck environment needs a one-time networking update."
+		plan.Steps = []string{
+			"Stop the Omnideck Podman environment if it is running.",
+			"Turn on user-mode networking so containers can reliably reach Windows services.",
+			"Start Podman and check that Omnideck can use it.",
+		}
 	case RuntimeStopped:
 		plan.Action = "Start " + plan.Title
 		plan.Description = plan.Title + " is installed and only needs to be started."
@@ -200,30 +256,32 @@ func explainSetupPlan(plan SetupPlan, probe ProbeResult, host HostPlatform) Setu
 			"Return to Omnideck and check again.",
 		}
 	case RuntimeUnsupportedVersion:
-		plan.Action = "Update Docker"
-		plan.Description = "Docker is installed, but this version is too old for Omnideck."
-		plan.Steps = []string{"Open Docker's official update instructions.", "Update Docker.", "Return to Omnideck and check again."}
+		plan.Action = "Update Podman"
+		plan.Description = "Podman is installed, but this version is too old for Omnideck."
+		plan.Steps = []string{"Open Podman's official installation page.", "Update Podman.", "Return to Omnideck and check again."}
 	case RuntimeBroken:
-		plan.Action = "Open help for " + plan.Title
-		plan.Description = plan.Title + " is installed, but it is not working yet."
-		plan.Steps = []string{"Open the official help page.", "Follow the steps for starting or repairing " + plan.Title + ".", "Return to Omnideck and check again."}
+		if len(plan.Commands) > 0 {
+			plan.Action = "Restart Podman"
+			plan.Description = "The Omnideck Podman environment is running, but its connection is not responding."
+			plan.Steps = []string{"Stop the Omnideck Podman environment.", "Start it again.", "Check that Omnideck can use it."}
+		} else {
+			plan.Action = "Open help for " + plan.Title
+			plan.Description = plan.Title + " is installed, but it is not working yet."
+			plan.Steps = []string{"Open the official help page.", "Follow the steps for starting or repairing " + plan.Title + ".", "Return to Omnideck and check again."}
+		}
 	case RuntimeMissing:
 		explainMissingPlan(&plan, host)
 	}
 
 	if plan.RequiresElevation {
-		if len(plan.Commands) > 0 && strings.Contains(plan.Commands[0].Display, "systemctl") {
-			plan.PermissionNote = "Your computer may ask for your account password before it starts Docker. The password gives your computer permission to make this change. Omnideck does not see or store it."
-		} else {
-			plan.PermissionNote = "Your computer may ask for your account password before installing Podman. The password gives your computer's built-in installer permission to add the app. Omnideck does not see or store it."
-		}
+		plan.PermissionNote = "Your computer may ask for your account password before installing Podman. The password gives your computer's built-in installer permission to add the app. Omnideck does not see or store it."
 	}
 	return plan
 }
 
 func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 	plan.Action = "Install " + plan.Title
-	if plan.Runtime == "podman" && host.OS == "linux" && len(plan.Commands) > 0 {
+	if host.OS == "linux" && len(plan.Commands) > 0 {
 		plan.Description = "Install Podman, the free option recommended for this computer."
 		plan.Steps = []string{
 			"Ask your computer for the latest list of available apps.",
@@ -232,28 +290,22 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 		}
 		return
 	}
-	if plan.Runtime == "podman" && host.OS == "darwin" {
-		if host.Arch == "amd64" {
-			plan.Description = "Podman's current installer is not available for Intel Macs. Docker is the simplest choice."
-			plan.Steps = []string{
-				"Open Podman's official installation page.",
-				"Review its current guidance for older Intel Macs.",
-				"Return to Omnideck and check again if you install Podman.",
-			}
-			plan.SafetyNote = "Podman no longer provides its newest Mac installer for Intel Macs. Choose Docker unless you already know that an older Podman release works on this computer."
-			return
-		}
+	if host.OS == "darwin" {
 		plan.Description = "Download Podman's official Mac installer."
+		filename := "podman-installer-macos-arm64.pkg"
+		if host.Arch == "amd64" {
+			filename = "podman-installer-macos-amd64.pkg"
+		}
 		plan.Steps = []string{
 			"Wait for the official Podman installer download to finish.",
-			"Open podman-installer-macos-arm64.pkg from Downloads and follow the instructions on screen.",
+			"Open " + filename + " from Downloads and follow the instructions on screen.",
 			"Return to Omnideck and check again.",
 		}
 		plan.DirectDownload = true
 		plan.PermissionNote = "The Podman installer may ask for your Mac password so macOS can add the app. Omnideck does not see or store it."
 		return
 	}
-	if plan.Runtime == "podman" && host.OS == "windows" {
+	if host.OS == "windows" {
 		plan.Description = "Download Podman's official Windows installer. WSL 2 is recommended for most people."
 		plan.Steps = []string{
 			"Wait for the official Podman installer download to finish.",
@@ -265,36 +317,6 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 		plan.SafetyNote = "Use WSL 2 unless the person who manages this computer specifically asks for Hyper-V. Hyper-V is an advanced option that requires Windows Pro or Enterprise and an administrator."
 		return
 	}
-	if plan.Runtime == "docker" && (host.OS == "windows" || host.WSL) {
-		if host.OS == "windows" && host.Arch == "arm64" {
-			plan.Description = "Install Docker Desktop from Docker's official Windows page."
-			plan.Steps = []string{
-				"Open Docker's official Windows installation page.",
-				"Download the ARM installer and follow the instructions on screen.",
-				"Open Docker Desktop, return to Omnideck, and check again.",
-			}
-		} else {
-			plan.Description = "Install Docker Desktop from its official Microsoft Store page."
-			plan.Steps = []string{
-				"Open Docker Desktop in Microsoft Store.",
-				"Select Install and wait for it to finish.",
-				"Open Docker Desktop, return to Omnideck, and check again.",
-			}
-		}
-		plan.PermissionNote = "Installing Docker Desktop itself normally does not require an administrator. Windows may still ask for permission if it needs to turn on WSL, the Windows feature Docker uses to run containers."
-		return
-	}
-	if plan.Runtime == "docker" && host.OS == "darwin" {
-		plan.Description = "Open Docker Desktop's official download page and follow its Mac installer."
-		plan.Steps = []string{
-			"Open Docker's official download page.",
-			"Download the installer for your Mac and follow the instructions on screen.",
-			"Start Docker Desktop, return to Omnideck, and check again.",
-		}
-		plan.PermissionNote = "The Docker installer may ask for your Mac password so macOS can add the app. Omnideck does not see or store it."
-		plan.SafetyNote = "Docker Desktop can require a paid subscription at larger companies. If this is a work computer, ask your company whether it already provides Docker Desktop."
-		return
-	}
 	plan.Description = "Open the official download page and follow the instructions for this computer."
 	plan.Steps = []string{
 		"Open the official download page.",
@@ -304,7 +326,7 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 }
 
 func isSimpleRecovery(state RuntimeState) bool {
-	return state == RuntimeStopped || state == RuntimeMachineMissing || state == RuntimeMachineStopped
+	return state == RuntimeStopped || state == RuntimeMachineMissing || state == RuntimeMachineStopped || state == RuntimeMachineNeedsUpdate
 }
 
 func probeState(probes []ProbeResult, name string) RuntimeState {
@@ -327,44 +349,43 @@ func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	switch probe.State {
 	case RuntimeMachineMissing:
 		plan.Description = "Finish Podman's one-time setup"
-		plan.Commands = []SetupCommand{command("podman", "machine", "init", "--now", "--update-connection=true")}
+		plan.Commands = []SetupCommand{podmanMachineInitCommand(host)}
 		return plan
 	case RuntimeMachineStopped:
 		plan.Description = "Start Podman"
-		plan.Commands = []SetupCommand{command("podman", "machine", "start")}
+		plan.Commands = []SetupCommand{command("podman", "machine", "start", OmnideckMachineName)}
+		return plan
+	case RuntimeMachineNeedsUpdate:
+		plan.Description = "Update Podman's networking"
+		if probe.MachineRunning {
+			plan.Commands = append(plan.Commands, command("podman", "machine", "stop", OmnideckMachineName))
+		}
+		plan.Commands = append(plan.Commands,
+			command("podman", "machine", "set", "--user-mode-networking=true", "--rootful=false", OmnideckMachineName),
+			command("podman", "machine", "start", OmnideckMachineName),
+		)
 		return plan
 	case RuntimeStopped:
 		return stoppedPlan(plan, host)
 	case RuntimePermissionDenied:
 		plan.Manual = true
-		if probe.Name == "podman" {
-			plan.Description = "Get help using Podman"
-			plan.URL = troubleshootingURL("podman")
-			return plan
-		}
-		plan.Description = "Get help using Docker"
-		switch host.OS {
-		case "windows":
-			plan.URL = "https://docs.docker.com/desktop/setup/install/windows-permission-requirements/"
-			plan.SafetyNote = "The person who manages this computer may need to give your account access to Docker. Omnideck will not change account security settings for you."
-		case "darwin":
-			plan.URL = troubleshootingURL("docker")
-		default:
-			if host.WSL {
-				plan.URL = "https://docs.docker.com/desktop/features/wsl/"
-				plan.SafetyNote = "First check that Docker Desktop allows the Linux environment you are using now to use Docker. Omnideck will not change account security settings for you."
-			} else {
-				plan.URL = "https://docs.docker.com/engine/install/linux-postinstall/"
-				plan.SafetyNote = "Giving an account access to Docker can also give programs full control of this computer. Omnideck will not change that security setting for you."
-			}
-		}
+		plan.Description = "Get help using Podman"
+		plan.URL = troubleshootingURL("podman")
 		return plan
 	case RuntimeUnsupportedVersion:
-		plan.Description = "Update Docker"
+		plan.Description = "Update Podman"
 		plan.Manual = true
-		plan.URL = dockerInstallURL(host)
+		plan.URL = "https://podman.io/docs/installation"
 		return plan
 	case RuntimeBroken:
+		if podmanPolicy(host.OS).UsesMachine {
+			plan.Description = "Restart Podman"
+			plan.Commands = []SetupCommand{
+				command("podman", "machine", "stop", OmnideckMachineName),
+				command("podman", "machine", "start", OmnideckMachineName),
+			}
+			return plan
+		}
 		plan.Description = "Open official help for this app"
 		plan.Manual = true
 		plan.URL = troubleshootingURL(probe.Name)
@@ -374,133 +395,134 @@ func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	}
 }
 
-func stoppedPlan(plan SetupPlan, host HostPlatform) SetupPlan {
-	switch plan.Runtime {
-	case "podman":
-		if host.OS == "darwin" || host.OS == "windows" {
-			plan.Description = "Start Podman"
-			plan.Commands = []SetupCommand{command("podman", "machine", "start")}
-			return plan
-		}
-		plan.Description = "Get help starting Podman"
-		plan.Manual = true
-		plan.URL = troubleshootingURL("podman")
-	case "docker":
-		if host.WSL {
-			plan.Description = "Start Docker Desktop on Windows"
-			plan.RequiresRestart = true
-			plan.Commands = []SetupCommand{startDockerDesktopCommand()}
-			return plan
-		}
-		switch host.OS {
-		case "linux":
-			if host.Systemd {
-				plan.Description = "Start Docker"
-				plan.RequiresElevation = true
-				plan.Commands = []SetupCommand{command("sudo", "systemctl", "start", "docker")}
-			} else {
-				plan.Description = "Get help starting Docker"
-				plan.Manual = true
-				plan.URL = troubleshootingURL("docker")
-				plan.SafetyNote = "Omnideck could not safely tell how this computer starts background apps, so it will show Docker's official help instead of guessing."
-			}
-		case "darwin":
-			plan.Description = "Start Docker Desktop"
-			plan.Commands = []SetupCommand{command("open", "-a", "Docker")}
-			plan.RequiresRestart = true
-		case "windows":
-			plan.Description = "Start Docker Desktop"
-			plan.RequiresRestart = true
-			plan.Commands = []SetupCommand{startDockerDesktopCommand()}
-		}
+func podmanMachineInitCommand(host HostPlatform) SetupCommand {
+	args := []string{"machine", "init"}
+	if host.OS == "windows" {
+		args = append(args,
+			"--provider", "wsl",
+			"--user-mode-networking=true",
+		)
+	} else if host.OS == "darwin" {
+		resources := DefaultRuntimeResources(host)
+		args = append(args,
+			"--memory", strconv.FormatInt(resources.MachineMemoryMB, 10),
+		)
 	}
+	args = append(args,
+		"--rootful=false",
+		"--now",
+		"--tls-verify=true",
+		"--update-connection=false",
+		OmnideckMachineName,
+	)
+	return command("podman", args...)
+}
+
+func stoppedPlan(plan SetupPlan, host HostPlatform) SetupPlan {
+	if podmanPolicy(host.OS).UsesMachine {
+		plan.Description = "Start Podman"
+		plan.Commands = []SetupCommand{command("podman", "machine", "start", OmnideckMachineName)}
+		return plan
+	}
+	plan.Description = "Get help starting Podman"
+	plan.Manual = true
+	plan.URL = troubleshootingURL("podman")
 	return plan
 }
 
 func missingPlan(plan SetupPlan, host HostPlatform) SetupPlan {
-	if plan.Runtime == "podman" {
-		switch host.OS {
-		case "linux":
-			plan.Description = "Install Podman"
-			plan.Commands, plan.RequiresElevation = podmanLinuxCommands(host)
-			if len(plan.Commands) == 0 {
-				plan.Manual = true
-				plan.URL = "https://podman.io/docs/installation"
-			}
-		case "darwin":
-			plan.Description = "Install Podman with its official Mac installer"
-			if host.Arch == "amd64" {
-				plan.URL = "https://podman.io/docs/installation"
-			} else {
-				plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-macos-arm64.pkg"
-			}
-			plan.Manual = true
-		case "windows":
-			plan.Description = "Install Podman with its official Windows installer"
-			arch := "amd64"
-			if host.Arch == "arm64" {
-				arch = "arm64"
-			}
-			plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-windows-" + arch + ".msi"
-			plan.DirectDownload = true
-			plan.Manual = true
-		}
-		return plan
-	}
-
-	plan.URL = dockerInstallURL(host)
-	plan.Manual = true
 	switch host.OS {
-	case "windows":
-		plan.Description = "Install Docker Desktop using its recommended Windows setup"
-		plan.SafetyNote = "Windows may ask whether the installer is allowed to make changes to this computer. Docker Desktop can require a paid subscription at larger companies, so ask your company before installing it on a work computer."
-	case "darwin":
-		plan.Description = "Install Docker Desktop"
 	case "linux":
-		if host.WSL {
-			plan.Description = "Install Docker Desktop on Windows and let this Linux environment use it"
-			plan.SafetyNote = "Windows may ask whether the installer is allowed to make changes to this computer. Docker Desktop can require a paid subscription at larger companies, so ask your company before installing it on a work computer."
-		} else {
-			plan.Description = "Install Docker using its official instructions"
-			plan.SafetyNote = "Docker setup differs across Linux versions. Omnideck will open Docker's official instructions instead of guessing which system changes are safe for this computer."
+		plan.Description = "Install Podman"
+		plan.Commands, plan.RequiresElevation = podmanLinuxCommands(host)
+		if len(plan.Commands) == 0 {
+			plan.Manual = true
+			plan.URL = "https://podman.io/docs/installation"
 		}
+	case "windows":
+		plan.Description = "Install Podman with its official Windows installer"
+		arch := "amd64"
+		if host.Arch == "arm64" {
+			arch = "arm64"
+		}
+		plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-windows-" + arch + ".msi"
+		plan.DirectDownload = true
+		plan.Manual = true
+	case "darwin":
+		plan.Description = "Install Podman with its official Mac installer"
+		if host.Arch == "amd64" {
+			plan.URL = "https://github.com/podman-container-tools/podman/releases/download/v5.8.5/podman-installer-macos-amd64.pkg"
+		} else {
+			plan.URL = "https://github.com/podman-container-tools/podman/releases/download/" + PodmanInstallerVersion + "/podman-installer-macos-arm64.pkg"
+		}
+		plan.DirectDownload = true
+		plan.Manual = true
 	}
 	return plan
 }
 
 func podmanLinuxCommands(host HostPlatform) ([]SetupCommand, bool) {
-	switch host.DistroID {
+	commands := podmanLinuxPackageCommands(host)
+	for index, packageCommand := range commands {
+		commands[index] = command("sudo", append([]string{packageCommand.Name}, packageCommand.Args...)...)
+	}
+	return commands, len(commands) > 0
+}
+
+func podmanLinuxPackageCommands(host HostPlatform) []SetupCommand {
+	distroFamily := host.DistroID
+	if !knownLinuxDistroFamily(distroFamily) {
+		for _, candidate := range host.DistroLike {
+			if knownLinuxDistroFamily(candidate) {
+				distroFamily = candidate
+				break
+			}
+		}
+	}
+	switch distroFamily {
 	case "ubuntu":
-		if host.Version != "" && !versionAtLeast(host.Version, 20, 10) {
-			return nil, false
+		if host.DistroID == "ubuntu" && host.Version != "" && !versionAtLeast(host.Version, 20, 10) {
+			return nil
 		}
 		return []SetupCommand{
-			command("sudo", "apt-get", "update"),
-			command("sudo", "apt-get", "install", "-y", "podman"),
-		}, true
+			command("apt-get", "update"),
+			command("apt-get", "install", "-y", "podman"),
+		}
 	case "debian":
-		if host.Version != "" && !versionAtLeast(host.Version, 11, 0) {
-			return nil, false
+		if host.DistroID == "debian" && host.Version != "" && !versionAtLeast(host.Version, 11, 0) {
+			return nil
 		}
 		return []SetupCommand{
-			command("sudo", "apt-get", "update"),
-			command("sudo", "apt-get", "install", "-y", "podman"),
-		}, true
+			command("apt-get", "update"),
+			command("apt-get", "install", "-y", "podman"),
+		}
 	case "linuxmint", "pop":
 		return []SetupCommand{
-			command("sudo", "apt-get", "update"),
-			command("sudo", "apt-get", "install", "-y", "podman"),
-		}, true
-	case "fedora", "rhel", "centos", "rocky", "almalinux":
-		return []SetupCommand{command("sudo", "dnf", "install", "-y", "podman")}, true
-	case "arch", "manjaro":
-		return []SetupCommand{command("sudo", "pacman", "-S", "--needed", "podman")}, true
+			command("apt-get", "update"),
+			command("apt-get", "install", "-y", "podman"),
+		}
+	case "fedora", "rhel", "centos", "rocky", "almalinux", "amzn", "ol":
+		return []SetupCommand{command("dnf", "install", "-y", "podman")}
+	case "arch", "manjaro", "endeavouros":
+		return []SetupCommand{command("pacman", "-S", "--needed", "podman")}
 	case "opensuse", "opensuse-leap", "opensuse-tumbleweed", "sles":
-		return []SetupCommand{command("sudo", "zypper", "install", "-y", "podman")}, true
+		return []SetupCommand{command("zypper", "install", "-y", "podman")}
 	case "alpine":
-		return []SetupCommand{command("sudo", "apk", "add", "podman")}, true
+		return []SetupCommand{command("apk", "add", "podman")}
 	default:
-		return nil, false
+		return nil
+	}
+}
+
+func knownLinuxDistroFamily(value string) bool {
+	switch value {
+	case "ubuntu", "debian", "linuxmint", "pop",
+		"fedora", "rhel", "centos", "rocky", "almalinux", "amzn", "ol",
+		"arch", "manjaro", "endeavouros",
+		"opensuse", "opensuse-leap", "opensuse-tumbleweed", "sles", "alpine":
+		return true
+	default:
+		return false
 	}
 }
 
@@ -522,42 +544,12 @@ func command(name string, args ...string) SetupCommand {
 }
 
 func titleName(name string) string {
-	if name == "podman" {
-		return "Podman"
+	if name != "" && name != "podman" {
+		return name
 	}
-	return "Docker"
+	return "Podman"
 }
 
-func dockerInstallURL(host HostPlatform) string {
-	if host.WSL {
-		return "ms-windows-store://pdp/?ProductId=XP8CBJ40XLBWKX"
-	}
-	switch host.OS {
-	case "windows":
-		if host.Arch != "arm64" {
-			return "ms-windows-store://pdp/?ProductId=XP8CBJ40XLBWKX"
-		}
-		return "https://docs.docker.com/desktop/setup/install/windows-install/"
-	case "darwin":
-		return "https://docs.docker.com/desktop/setup/install/mac-install/"
-	default:
-		distro := host.DistroID
-		switch distro {
-		case "linuxmint", "pop":
-			distro = "ubuntu"
-		case "rocky", "almalinux":
-			distro = "rhel"
-		}
-		if distro != "" {
-			return fmt.Sprintf("https://docs.docker.com/engine/install/%s/", distro)
-		}
-		return "https://docs.docker.com/engine/install/"
-	}
-}
-
-func troubleshootingURL(name string) string {
-	if name == "podman" {
-		return "https://podman.io/docs/troubleshooting"
-	}
-	return "https://docs.docker.com/engine/daemon/troubleshoot/"
+func troubleshootingURL(_ string) string {
+	return "https://podman.io/docs/troubleshooting"
 }

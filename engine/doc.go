@@ -1,2 +1,2 @@
-// Package engine adapts Docker and Podman to the operations Omnideck needs.
+// Package engine adapts Podman to the operations Omnideck needs.
 package engine

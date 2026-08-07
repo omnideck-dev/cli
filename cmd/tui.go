@@ -55,7 +55,7 @@ func runTUI(_ *cobra.Command, _ []string) error {
 // conventional instances directory.
 func runApp(eng engine.Engine, instances []config.InstanceInfo, loaded *config.Config, loadedPath string) error {
 	if eng == nil {
-		return fmt.Errorf("Podman or Docker is not ready\nRun `omnideck` for guided setup")
+		return fmt.Errorf("Podman is not ready\nRun `omnideck` for guided setup")
 	}
 	instances = withLoadedInstance(instances, loaded, loadedPath)
 	model := tui.NewAppModel(eng, instances)

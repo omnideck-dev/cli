@@ -138,6 +138,8 @@ func (m AppModel) breadcrumb() string {
 		return "Doctor"
 	case RouteSetup:
 		switch m.setupModel.Stage {
+		case SetupStageWelcome:
+			return "Setup"
 		case SetupStageQuickCheck:
 			return "Setup · Quick check"
 		case SetupStageRuntime:
@@ -241,63 +243,13 @@ func (m AppModel) footerHints() string {
 		return keyHints(hints)
 	case RouteSetup:
 		switch m.setupModel.Stage {
-		case SetupStageQuickCheck:
-			if m.setupModel.quickCheckReady && m.setupModel.preferredEngine == "" && (len(m.setupModel.availableEngines) > 1 || m.setupModel.setupAlternativeRuntime() != "") {
-				return keyHints([][2]string{{"tab", "switch"}, {"enter", "continue"}, {"esc", "cancel"}})
-			}
+		case SetupStageWelcome:
+			return keyHints([][2]string{{"enter", "set up omnideck"}, {"q", "cancel"}})
 		case SetupStageRuntime:
-			if m.setupModel.runtimeSetupStage == runtimeSetupWorking {
-				return keyHints([][2]string{{"working", "please wait"}})
+			if m.setupModel.runtimeSetupStage == runtimeSetupRestart {
+				return keyHints([][2]string{{"enter", "restart now"}, {"l", "restart later"}})
 			}
-			if len(m.setupModel.runtimePlans) == 0 {
-				hints := [][2]string{{"r / enter", "check again"}}
-				if m.setupModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
-					hints = append(hints, [2]string{"esc", "back"}, [2]string{"q", "cancel"})
-				} else {
-					hints = append(hints, [2]string{"esc / q", "cancel"})
-				}
-				return keyHints(hints)
-			}
-			if m.setupModel.runtimeSetupStage == runtimeSetupWaiting {
-				hints := [][2]string{{"enter", "check again"}, {"esc", "back"}, {"q", "cancel"}}
-				if len(m.setupModel.runtimePlans) > 0 && m.setupModel.runtimePlans[m.setupModel.runtimeChoice].URL != "" {
-					label := "open page again"
-					if m.setupModel.runtimePlans[m.setupModel.runtimeChoice].DirectDownload {
-						label = "download again"
-					}
-					hints = append(hints, [2]string{"o", label})
-				}
-				return keyHints(hints)
-			}
-			if m.setupModel.runtimeSetupStage == runtimeSetupReview {
-				action := "start these steps"
-				if len(m.setupModel.runtimePlans) > 0 && len(m.setupModel.runtimePlans[m.setupModel.runtimeChoice].Commands) == 0 {
-					action = "open official page"
-					if m.setupModel.runtimePlans[m.setupModel.runtimeChoice].DirectDownload {
-						action = "download installer"
-					}
-				}
-				hints := [][2]string{{"enter", action}, {"esc", "back"}}
-				if m.setupModel.runtimeDetailsAvailable() {
-					hints = append(hints, [2]string{"d", m.setupModel.runtimeDetailsLabel()})
-				}
-				hints = append(hints, [2]string{"q", "cancel"})
-				return keyHints(hints)
-			}
-			hints := [][2]string{{"enter", "review"}}
-			if len(m.setupModel.runtimePlans) > 1 {
-				hints = append([][2]string{{"↑↓", "choose"}}, hints...)
-			}
-			if m.setupModel.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
-				hints = append(hints, [2]string{"esc", "back"}, [2]string{"q", "cancel"})
-			} else {
-				hints = append(hints, [2]string{"esc / q", "cancel"})
-			}
-			if m.setupModel.runtimeDetailsAvailable() {
-				hints = append(hints, [2]string{"d", m.setupModel.runtimeDetailsLabel()})
-			}
-			hints = append(hints, [2]string{"r", "check again"})
-			return keyHints(hints)
+			return keyHints([][2]string{{"working", "please wait"}})
 		case SetupStageSettings:
 			if !m.setupModel.settingsAdvanced {
 				return keyHints([][2]string{{"enter", "use recommended"}, {"c", "customize"}, {"esc", "cancel"}})

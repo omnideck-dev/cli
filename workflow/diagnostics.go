@@ -120,43 +120,15 @@ func CheckVolume(label, name string, eng engine.Engine) CheckResult {
 }
 
 func doctorRuntimeCheck(eng engine.Engine, probes []engine.ProbeResult) (CheckResult, engine.Engine) {
-	target := ""
-	if eng != nil {
-		target = eng.Name()
+	if eng != nil && eng.Name() != "podman" {
+		eng = nil
 	}
 
 	var selected *engine.ProbeResult
-	if target != "" {
-		for i := range probes {
-			if probes[i].Name == target {
-				selected = &probes[i]
-				break
-			}
-		}
-	} else {
-		for i := range probes {
-			if probes[i].Ready() {
-				selected = &probes[i]
-				break
-			}
-		}
-		if selected == nil {
-			plans := engine.BuildSetupPlans(probes, engine.DetectHostPlatform())
-			for _, plan := range plans {
-				if !plan.Recommended {
-					continue
-				}
-				for i := range probes {
-					if probes[i].Name == plan.Runtime {
-						selected = &probes[i]
-						break
-					}
-				}
-				break
-			}
-			if selected == nil && len(probes) > 0 {
-				selected = &probes[0]
-			}
+	for i := range probes {
+		if probes[i].Name == "podman" {
+			selected = &probes[i]
+			break
 		}
 	}
 
@@ -176,9 +148,9 @@ func doctorRuntimeCheck(eng engine.Engine, probes []engine.ProbeResult) (CheckRe
 		return CheckResult{Label: "Container runtime", Status: CheckPass, Detail: detail}, eng
 	}
 
-	detail := "Podman or Docker is not ready"
-	actionLabel := "Set up a container runtime"
-	actionValue := target
+	detail := "Podman is not ready"
+	actionLabel := "Set up Podman"
+	actionValue := "podman"
 	if selected != nil {
 		detail = runtimeNameForPeople(selected.Name) + ": " + engine.RuntimeStateLabel(selected.State)
 		actionValue = selected.Name
@@ -322,8 +294,6 @@ func doctorOllamaCheck(eng engine.Engine, containerName string, containerRunning
 
 func runtimeNameForPeople(name string) string {
 	switch name {
-	case "docker":
-		return "Docker"
 	case "podman":
 		return "Podman"
 	default:

@@ -43,8 +43,8 @@ func TestSetupScreenUsesFirstRunLanguage(t *testing.T) {
 	if strings.Contains(view, "preflight") || strings.Contains(view, "configure → install") {
 		t.Fatalf("setup screen exposes internal stage names:\n%s", view)
 	}
-	if got := m.breadcrumb(); got != "Setup · Quick check" {
-		t.Fatalf("first-run breadcrumb = %q, want Setup · Quick check", got)
+	if got := m.breadcrumb(); got != "Setup" {
+		t.Fatalf("first-run breadcrumb = %q, want Setup", got)
 	}
 }
 
@@ -98,21 +98,8 @@ func TestSetupViewFitsAStandardTerminalAndKeepsItsFooter(t *testing.T) {
 	if height := strings.Count(view, "\n") + 1; height != 24 {
 		t.Fatalf("setup view height = %d, want 24:\n%s", height, plain)
 	}
-	if !strings.Contains(plain, "cancel") || !strings.Contains(plain, "review") {
+	if !strings.Contains(plain, "working") || !strings.Contains(plain, "please wait") {
 		t.Fatalf("setup footer is missing primary actions:\n%s", plain)
-	}
-
-	m.setupModel.runtimeChoice = 0
-	m.setupModel.runtimeSetupStage = runtimeSetupReview
-	view = m.View()
-	plain = ansi.Strip(view)
-	if height := strings.Count(view, "\n") + 1; height != 24 {
-		t.Fatalf("runtime review height = %d, want 24:\n%s", height, plain)
-	}
-	for _, action := range []string{"Nothing starts until you press Enter", "back", "cancel"} {
-		if !strings.Contains(plain, action) {
-			t.Fatalf("runtime review is missing %q:\n%s", action, plain)
-		}
 	}
 }
 

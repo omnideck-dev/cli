@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -8,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/checks"
+	"github.com/omnideck-dev/cli/engine"
 )
 
 func (m *SetupModel) ensureRecommendedSettingsAvailable() {
@@ -116,9 +118,27 @@ func (m *SetupModel) validateCurrentInput() bool {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
 			return false
 		}
-	case inputMemory, inputShmSize:
+	case inputMemory:
 		if !validMemSize(val) {
 			m.inputErrs[m.inputFocus] = "must be a number + unit (e.g. 512m, 2g)"
+			return false
+		}
+		memoryMB, _ := checks.MemorySizeMB(val)
+		recommended := engine.DefaultRuntimeResources(m.hostPlatform).ContainerMemory
+		recommendedMB, _ := checks.MemorySizeMB(recommended)
+		if recommendedMB > 0 && memoryMB > recommendedMB {
+			m.inputErrs[m.inputFocus] = fmt.Sprintf("maximum for this computer is %s so it stays compatible with the runtime", recommended)
+			return false
+		}
+	case inputShmSize:
+		if !validMemSize(val) {
+			m.inputErrs[m.inputFocus] = "must be a number + unit (e.g. 512m, 2g)"
+			return false
+		}
+		sharedMB, _ := checks.MemorySizeMB(val)
+		memoryMB, memoryOK := checks.MemorySizeMB(strings.TrimSpace(m.inputs[inputMemory].Value()))
+		if memoryOK && sharedMB > memoryMB {
+			m.inputErrs[m.inputFocus] = "must not be larger than the Omnideck memory limit"
 			return false
 		}
 	case inputWebUIPort:

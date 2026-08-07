@@ -58,7 +58,7 @@ func (m *mockEngine) Name() string {
 	if m.name != "" {
 		return m.name
 	}
-	return "docker"
+	return "podman"
 }
 
 func (m *mockEngine) IsAvailable() bool         { return true }

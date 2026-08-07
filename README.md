@@ -4,7 +4,7 @@
 [![License](https://img.shields.io/badge/license-MIT-7C3AED)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-linux%20%7C%20macos%20%7C%20windows-6B7280)](#install)
 
-CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/omnideck) — a containerized AI assistant. Wraps Docker or Podman with a Bubble Tea TUI and guided setup.
+CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnideck-dev/omnideck) — a containerized AI assistant. It uses Podman through a Bubble Tea TUI and the same guided setup backend as the desktop app.
 
 ---
 
@@ -15,12 +15,12 @@ CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnid
 
 ## Features
 
-- **Guided setup** — diagnoses, installs, starts, or repairs Podman or Docker before configuring Omnideck
-- **Smart memory defaults** — suggests container RAM limits based on your system (20% of host RAM, 1–8 GB)
+- **Guided setup** — bare `omnideck` detects, installs, starts, or repairs Podman before configuring Omnideck
+- **Smart memory defaults** — Desktop and CLI use the same host-sized 1–6 GB container policy, with macOS capped below its VM limit
 - **Safe maintenance** — update and repair share one review-first recreate flow with rollback and preserved data volumes
 - **Multi-instance** — run more than one Omnideck container on different ports from a single binary
 - **Actionable health check** — `doctor` identifies the root problem and can open runtime setup, start a stopped instance, or repair a missing container
-- **Docker + Podman** — auto-detected; runtime setup and host-networking differences handled per OS
+- **One shared runtime** — Desktop and CLI use the same `omnideck-runtime` Podman machine on Windows and macOS; Linux uses native Podman
 - **Safe instance removal** — keeps saved data by default, with an optional backup before permanent deletion
 - **`--no-color`** — safe to pipe; exits non-zero on actual failures, not on warnings
 
@@ -30,8 +30,7 @@ CLI for setting up, managing, and monitoring [Omnideck](https://github.com/omnid
 
 | Container runtime | Version policy | Notes |
 |--------|----------------|-------|
-| Docker | 20.10+ on Linux | Older Linux versions cannot provide Omnideck's connection to apps installed directly on the same computer |
-| Podman | Must pass the built-in readiness check | Version 4 is not required. A version number alone cannot prove whether this computer's network lets Omnideck reach a local Ollama installation. |
+| Podman | Must pass the built-in readiness check | Omnideck verifies the engine and its named machine instead of trusting a version number alone. |
 
 Ollama is optional during setup. Omnideck reports when it is not reachable but
 continues without it.
@@ -41,37 +40,33 @@ continues without it.
 Omnideck runs inside a container. The container keeps the agent and its software
 isolated from the rest of your system. It also lets Omnideck start, stop, and
 update all of its parts together without installing those parts directly on
-your computer. Podman or Docker runs the container. You only need one of them.
+your computer. Podman runs that container.
 
-Runtime selection is intentionally simple: if one runtime is installed,
-Omnideck uses or repairs it. If both are installed, setup lets you choose. If
-neither is installed, setup shows only the easiest default for the platform:
+There is no runtime choice to make. On a fresh computer, running `omnideck`
+with no arguments opens the Welcome screen and then performs the same setup
+workflow used by Desktop:
 
-| Platform | Fresh-install recommendation | Why |
-|---|---|---|
-| Linux | Podman | Free, lightweight, and designed to run without giving a background app full control of the computer |
-| macOS with an Apple chip (M1 or newer) | Podman's official installer | Free, with an installer provided by the Podman project |
-| macOS with an Intel chip | Docker Desktop | Docker still provides a current Intel Mac installer; Podman's newest Mac installer is Apple-chip only |
-| Windows 10/11 | Docker Desktop | The most guided Windows setup; `--runtime podman` selects the official Podman installer instead |
-| Linux running inside Windows (WSL) | Docker Desktop | Reuses Docker managed by Windows instead of installing a second copy inside Linux |
+| Platform | Automatic setup |
+|---|---|
+| Linux | Uses the recognized distribution package family and a native permission prompt to install Podman, then verifies it |
+| macOS with an Apple chip (M1 or newer) | Downloads, verifies, and installs the pinned official Podman package, then prepares `omnideck-runtime` |
+| macOS with an Intel chip | Downloads, verifies, and installs Podman's latest official Intel package, then prepares `omnideck-runtime` |
+| Windows 10/11 | Enables WSL 2 when needed, resumes after a required restart, installs the pinned official Podman MSI, and prepares `omnideck-runtime` |
 
-The guided setup can ask your computer's built-in tools to install or
-start Podman or Docker, then check the result automatically. Before it does
-anything, it shows a numbered explanation and waits for a second confirmation.
-Technical commands stay hidden unless the user asks to see them. It never runs
-a downloaded setup script or silently changes account security settings. App
-installers open from their official pages, and Omnideck waits for you to
-return and press Enter before it checks again.
+The Welcome screen is the confirmation. After the user presses Enter, setup
+continues automatically and shows the same four phases as Desktop: computer
+setup, secure space (Windows/macOS), application files, and final checks.
+Downloaded installers are pinned, checksum-verified, and cached for retry.
+Technical commands and raw download URLs are not part of the normal flow.
 
 Run `omnideck` as your normal user. Do not put `sudo` before it or choose
 **Run as administrator**. Omnideck never sees or stores a password.
 
 | Computer | What permission may be requested? |
 |---|---|
-| Linux | The computer's app installer may ask for the user's account password while it installs Podman or starts Docker. The account must be allowed to install software. |
-| macOS | Omnideck runs normally. The official Podman or Docker installer may ask for the user's Mac password while it adds Podman or Docker. |
-| Windows with Docker Desktop | Keep the installer's recommended **Per-user** choice. That normally needs no special permission. Windows may need approval from the person who manages the computer the first time it turns on the built-in Linux feature Docker uses. |
-| Windows with Podman | The recommended **Just for me** install needs no administrator. Podman uses WSL 2 by default; enabling that Windows feature requires an administrator and may require a restart. Hyper-V is an advanced alternative for Windows Pro or Enterprise. |
+| Linux | The package manager may ask for permission while it installs Podman. The account must be allowed to install software. |
+| macOS | macOS may ask for the user's password while it installs Podman. |
+| Windows | Windows may request administrator approval while it enables WSL 2. A restart can be required; choosing **Restart now** makes the CLI reopen after sign-in and continue automatically. The Podman install itself uses the per-user MSI mode. |
 
 When Ollama is running, setup checks it twice: first on the computer, then from
 inside the running Omnideck container. This prevents a Windows-local check from
@@ -91,7 +86,7 @@ steps; local AI remains optional and online AI continues to work.
 
 ### Build from source
 
-Requires Go 1.25.12+. A missing Docker/Podman installation can be handled by the
+Requires Go 1.25.12+. A missing Podman installation can be handled by the
 guided setup after the CLI is built. In the example below, the computer
 asks for a password only while copying the finished CLI into a shared apps
 folder. Run `omnideck` itself as the normal user.
@@ -149,15 +144,13 @@ omnideck doctor
 #    http://localhost:2337
 ```
 
-Guided setup diagnoses or sets up Podman or Docker, checks Ollama reachability,
+Guided setup diagnoses or sets up Podman, checks Ollama reachability,
 suggests memory limits sized for your machine, and starts the container. With
 `--plain`, a ready runtime performs the same container setup without the TUI. If
 the runtime is missing, it prints the recommended commands or official URL and
 exits without installing host software.
 
-See the [screen-by-screen macOS walkthrough](docs/mac-setup-walkthrough.md) for
-the exact fresh-install flow and user-facing text. The
-[setup flow matrix](docs/setup-flow-matrix.md) records the first-run,
+The [setup flow matrix](docs/setup-flow-matrix.md) records the first-run,
 returning, repair, and additional-instance transitions shared across platforms.
 
 ---
@@ -184,6 +177,7 @@ omnideck <command> [flags]
 | `config show` | Pretty-print the saved config |
 | `config set <key> <value>` | Save one setting and explain how to apply it |
 | `config path` | Print the config file path |
+| `environment ensure` | Reconcile an exact desired instance for Desktop or automation (`--json`) |
 | `remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it (`uninstall` remains an alias; `--plain` for non-interactive) |
 
 ### Global flags
@@ -199,16 +193,12 @@ omnideck <command> [flags]
 ### Setup flags
 
 ```
---runtime string  Initial container runtime: docker or podman (all instances use the same runtime)
+--runtime string  Container runtime compatibility flag (Omnideck uses Podman)
 --image string    Override the container image (for testing alternate builds)
 ```
 
-`--runtime` overrides automatic runtime selection during the first setup. Without
-it, one installed runtime is used automatically, two installed runtimes produce
-a picker, and no installed runtime produces one OS-specific recommended path.
-After an instance exists, Omnideck uses its saved shared runtime for every
-instance and will not silently switch existing installations or disconnect
-their saved container data.
+Omnideck uses Podman on every platform. The compatibility `--runtime` flag
+accepts only `podman`; runtime selection is not presented to users.
 
 ### Examples
 
@@ -220,14 +210,11 @@ omnideck logs --follow --tail 100
 omnideck --name omnideck2 status
 omnideck --name omnideck2 stop
 
-# Choose Docker during the first setup
-omnideck add --runtime docker
-
 # Test an alternate image without changing the default
 omnideck add --image ghcr.io/example/omnideck:dev
 
 # Non-interactive setup for CI/CD
-omnideck add --plain --runtime docker --port 2337
+omnideck add --plain --port 2337
 
 # Remove a specific instance
 omnideck remove omnideck2
@@ -242,7 +229,7 @@ Scripts and other non-interactive uses must pass `--name` when more than one
 instance exists; the CLI never tries to open an interactive picker without a terminal.
 
 Running bare `omnideck` routes to the right journey: first setup when nothing is
-configured, guided runtime setup when Docker/Podman is unavailable, Doctor when
+configured, guided runtime setup when Podman is unavailable, Doctor when
 a saved container is missing, and the dashboard when the installation is healthy
 or deliberately stopped.
 
@@ -278,7 +265,7 @@ The runtime shared by every instance is stored separately:
 
 ```yaml
 # <config directory>/settings.yaml
-runtime: docker
+runtime: podman
 ```
 
 **`home_volume`** is mounted into the container at `/home/omnideck`. Empty or missing means `{container_name}-home`.
@@ -293,7 +280,7 @@ runtime: docker
 2. Run `make verify` — formatting, module metadata, static analysis, tests, workflow validation, and the Go vulnerability scan must pass
 3. Open a PR against `main`
 
-**Container runtime calls shell out intentionally** — no Docker SDK. Keep the binary dependency-free when adding runtime features. The internal `engine` package owns these operations.
+**Container runtime calls shell out intentionally** — no Podman SDK. Keep the binary dependency-free when adding runtime features. The internal `engine` package owns these operations.
 
 **Platform rules:** never add a Linux-only flag without a `runtime.GOOS` guard. Key differences between Linux and macOS:
 

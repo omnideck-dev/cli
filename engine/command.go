@@ -3,13 +3,49 @@ package engine
 import (
 	"bufio"
 	"fmt"
+	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
+	"github.com/omnideck-dev/cli/cmd/debug"
 )
 
 const maxCommandOutput = 64 * 1024
+
+// buildCmd builds a Podman command tied to the CLI's cancellation context.
+// Keeping command construction here gives every caller the same PATH refresh,
+// cancellation, and debug behavior.
+func buildCmd(binary string, args ...string) *exec.Cmd {
+	prepareRuntimeCommand(binary)
+	if binary == "podman" {
+		args = podmanCommandArgs(runtime.GOOS, args...)
+	}
+	if debug.Enabled() {
+		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", binary, strings.Join(args, " "))
+	}
+	return exec.CommandContext(processCtx, binary, args...)
+}
+
+// RunSetupCommand executes one command from a SetupPlan and streams its
+// line-oriented progress to onLine. Desktop and TUI setup both consume plans
+// built by this package, so the command, arguments, PATH refresh, and
+// cancellation behavior stay identical.
+func RunSetupCommand(command SetupCommand, onLine func(string)) error {
+	messages := make(chan string)
+	done := make(chan error, 1)
+	go func() {
+		done <- streamCommandOutput(command.Display, buildCmd(command.Name, command.Args...), messages)
+		close(messages)
+	}()
+	for line := range messages {
+		if onLine != nil {
+			onLine(line)
+		}
+	}
+	return <-done
+}
 
 // commandOutput runs a command whose stdout is structured data and preserves
 // stderr when the command fails. exec.Cmd.Output does capture stderr in some

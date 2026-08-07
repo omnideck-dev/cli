@@ -12,7 +12,7 @@ import (
 
 func TestRenderDoctorReportAllPass(t *testing.T) {
 	results := []CheckResult{
-		{Label: "Engine", Status: CheckPass, Detail: "Docker 24.0"},
+		{Label: "Engine", Status: CheckPass, Detail: "Podman 6.0"},
 		{Label: "Memory", Status: CheckPass, Detail: "8000 MB"},
 	}
 	report, allPass := RenderDoctorReport(results)
@@ -26,7 +26,7 @@ func TestRenderDoctorReportAllPass(t *testing.T) {
 
 func TestRenderDoctorReportWithFail(t *testing.T) {
 	results := []CheckResult{
-		{Label: "Engine", Status: CheckFail, Detail: "not found", Hint: "Install Docker"},
+		{Label: "Engine", Status: CheckFail, Detail: "not found", Hint: "Install Podman"},
 		{Label: "Memory", Status: CheckPass, Detail: "8000 MB"},
 	}
 	_, allPass := RenderDoctorReport(results)
@@ -75,17 +75,16 @@ func TestVolumeCheckExists(t *testing.T) {
 func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
 	results, _ := workflow.DiagnoseWithProbes(
 		&config.Config{ContainerName: "omnideck", WebUIPort: "2337"},
-		&mockEngine{name: "docker"},
+		&mockEngine{name: "podman"},
 		[]engine.ProbeResult{
 			{Name: "podman", State: engine.RuntimeMissing},
-			{Name: "docker", State: engine.RuntimePermissionDenied},
 		},
 	)
 	if len(results) == 0 {
 		t.Fatal("Doctor returned no results")
 	}
 	runtimeResult := results[0]
-	if runtimeResult.Status != CheckFail || runtimeResult.Action != DoctorActionRuntimeSetup || runtimeResult.ActionValue != "docker" {
+	if runtimeResult.Status != CheckFail || runtimeResult.Action != DoctorActionRuntimeSetup || runtimeResult.ActionValue != "podman" {
 		t.Fatalf("runtime result = %#v", runtimeResult)
 	}
 	combined := runtimeResult.Detail + " " + runtimeResult.Hint
@@ -101,8 +100,8 @@ func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
 
 func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "docker", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
-		{Name: "docker", State: engine.RuntimeReady, Version: "27.0.0"},
+	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "podman", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeReady, Version: "6.0.2"},
 	})
 	if results[0].Status != CheckPass {
 		t.Fatalf("runtime should pass: %#v", results[0])
@@ -118,8 +117,8 @@ func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 
 func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "docker"}, []engine.ProbeResult{
-		{Name: "docker", State: engine.RuntimeReady, Version: "27.0.0"},
+	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "podman"}, []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeReady, Version: "6.0.2"},
 	})
 	instance := results[1]
 	if instance.Status != CheckFail || instance.Action != DoctorActionRepairInstance || instance.ActionLabel != "Repair this installation" {
@@ -151,16 +150,16 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 			WebUIPort:     "2337",
 		},
 	}}
-	m := NewAppModel(&mockEngine{name: "docker"}, instances)
+	m := NewAppModel(&mockEngine{name: "podman"}, instances)
 	m.router.Replace(RouteDoctor)
 	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{{
 		Label:       "Container runtime",
 		Status:      CheckFail,
-		Detail:      "Docker is not running",
+		Detail:      "Podman is not running",
 		Action:      DoctorActionRuntimeSetup,
-		ActionLabel: "Start Docker",
-		ActionValue: "docker",
+		ActionLabel: "Start Podman",
+		ActionValue: "podman",
 	}}
 	m.doctorFocus = 0
 
@@ -169,7 +168,7 @@ func TestDoctorDashboardCanOpenGuidedRuntimeRepair(t *testing.T) {
 	if cmd == nil || nm.router.Current() != RouteSetup {
 		t.Fatal("Doctor action should open guided runtime setup")
 	}
-	if nm.setupModel.setupMode != SetupRuntimeRepair || nm.setupModel.preferredEngine != "docker" {
+	if nm.setupModel.setupMode != SetupRuntimeRepair || nm.setupModel.preferredEngine != "podman" {
 		t.Fatalf("Doctor opened the wrong setup journey: mode=%d preferred=%q", nm.setupModel.setupMode, nm.setupModel.preferredEngine)
 	}
 }
@@ -183,17 +182,17 @@ func TestDoctorDashboardPresentsActionsWithoutTruncatingTheFix(t *testing.T) {
 		{
 			Label:       "Container runtime",
 			Status:      CheckFail,
-			Detail:      "Docker is installed, but it is not running yet",
-			Hint:        "Omnideck can walk you through starting Docker and check it again afterward.",
+			Detail:      "Podman is installed, but it is not running yet",
+			Hint:        "Omnideck can walk you through starting Podman and check it again afterward.",
 			Action:      DoctorActionRuntimeSetup,
-			ActionLabel: "Start Docker",
+			ActionLabel: "Start Podman",
 		},
 		{Label: "Local AI (optional)", Status: CheckInfo, Detail: "Not connected · online AI still works"},
 	}
 	m.doctorFocus = 0
 
 	view := m.viewDoctor()
-	for _, want := range []string{"1 problem needs attention", "What you can do", "Press Enter to start docker", "online AI still works"} {
+	for _, want := range []string{"1 problem needs attention", "What you can do", "Press Enter to start podman", "online AI still works"} {
 		if !strings.Contains(strings.ToLower(view), strings.ToLower(want)) {
 			t.Fatalf("Doctor view is missing %q:\n%s", want, view)
 		}
@@ -210,7 +209,7 @@ func TestDoctorDashboardOpensRepairReviewForMissingContainer(t *testing.T) {
 			Image:         "example:test",
 		},
 	}}
-	m := NewAppModel(&mockEngine{name: "docker"}, instances)
+	m := NewAppModel(&mockEngine{name: "podman"}, instances)
 	m.router.Replace(RouteDoctor)
 	m.doctorStage = doctorStageResults
 	m.doctorResults = []CheckResult{{

@@ -32,57 +32,6 @@ func TestProbeRuntimeMissing(t *testing.T) {
 	}
 }
 
-func TestRefreshRuntimePathFindsPerUserDocker(t *testing.T) {
-	localAppData := t.TempDir()
-	dockerBin := filepath.Join(localAppData, "Programs", "DockerDesktop", "resources", "bin")
-	if err := os.MkdirAll(dockerBin, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dockerBin, "docker.exe"), []byte("test"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LOCALAPPDATA", localAppData)
-	t.Setenv("ProgramFiles", "")
-	t.Setenv("PATH", "")
-
-	refreshRuntimePath("docker", "windows")
-	refreshRuntimePath("docker", "windows")
-
-	entries := filepath.SplitList(os.Getenv("PATH"))
-	count := 0
-	for _, entry := range entries {
-		if strings.EqualFold(filepath.Clean(entry), filepath.Clean(dockerBin)) {
-			count++
-		}
-	}
-	if count != 1 {
-		t.Fatalf("per-user Docker path appears %d times in PATH %q, want once", count, os.Getenv("PATH"))
-	}
-}
-
-func TestWindowsDetectsDockerDesktopBeforeItsCLIIsReady(t *testing.T) {
-	localAppData := t.TempDir()
-	desktopDir := filepath.Join(localAppData, "Programs", "DockerDesktop")
-	if err := os.MkdirAll(desktopDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	desktopPath := filepath.Join(desktopDir, "Docker Desktop.exe")
-	if err := os.WriteFile(desktopPath, []byte("test"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("LOCALAPPDATA", localAppData)
-	t.Setenv("ProgramFiles", "")
-	t.Setenv("PATH", "")
-	originalLookPath := probeLookPath
-	probeLookPath = func(string) (string, error) { return "", errors.New("not found") }
-	t.Cleanup(func() { probeLookPath = originalLookPath })
-
-	result := probeRuntime("docker", "windows")
-	if result.State != RuntimeStopped || result.Path != desktopPath {
-		t.Fatalf("Docker Desktop result = %#v, want installed but stopped", result)
-	}
-}
-
 func TestRefreshRuntimePathFindsPerUserPodman(t *testing.T) {
 	localAppData := t.TempDir()
 	podmanBin := filepath.Join(localAppData, "Programs", "Podman")
@@ -146,20 +95,20 @@ func TestMacOSRuntimePathCandidatesIncludeOfficialPodmanInstaller(t *testing.T) 
 	t.Fatalf("macOS Podman candidates = %q, want /opt/podman/bin", candidates)
 }
 
-func TestProbeDockerPermissionDenied(t *testing.T) {
+func TestProbePodmanPermissionDenied(t *testing.T) {
 	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
 		if strings.Join(args, " ") == "--version" {
-			return []byte("Docker version 25.0.3, build abc"), nil
+			return []byte("podman version 6.0.2"), nil
 		}
-		return []byte("permission denied while trying to connect to the Docker daemon socket"), errors.New("exit 1")
+		return []byte("permission denied while connecting to Podman"), errors.New("exit 1")
 	})
 
-	result := probeRuntime("docker", "linux")
+	result := probeRuntime("podman", "linux")
 	if result.State != RuntimePermissionDenied {
 		t.Fatalf("state = %s, want %s", result.State, RuntimePermissionDenied)
 	}
-	if result.Version != "25.0.3" {
-		t.Fatalf("version = %q, want 25.0.3", result.Version)
+	if result.Version != "6.0.2" {
+		t.Fatalf("version = %q, want 6.0.2", result.Version)
 	}
 }
 
@@ -168,7 +117,7 @@ func TestProbePodmanMachineMissing(t *testing.T) {
 		switch strings.Join(args, " ") {
 		case "--version":
 			return []byte("podman version 5.2.1"), nil
-		case "info":
+		case "--connection omnideck-runtime info":
 			return []byte("cannot connect to Podman"), errors.New("exit 1")
 		case "machine list --format json":
 			return []byte("[]"), nil
@@ -180,6 +129,113 @@ func TestProbePodmanMachineMissing(t *testing.T) {
 	result := probeRuntime("podman", "darwin")
 	if result.State != RuntimeMachineMissing {
 		t.Fatalf("state = %s, want %s", result.State, RuntimeMachineMissing)
+	}
+}
+
+func TestProbePodmanReadyReportsTheSharedOmnideckMachine(t *testing.T) {
+	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return []byte("podman version 6.0.2"), nil
+		case "--connection omnideck-runtime info":
+			return []byte("ready"), nil
+		case "machine list --format json":
+			return []byte(`[
+				{"Name":"other","Running":true,"Default":false},
+				{"Name":"developer-machine","Running":true,"Default":true}
+			]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", args)
+		}
+	})
+
+	result := probeRuntime("podman", "windows")
+	if result.State != RuntimeReady || result.MachineName != OmnideckMachineName {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestProbeWindowsMachineReportsRequiredNetworkingMigration(t *testing.T) {
+	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return []byte("podman version 6.0.2"), nil
+		case "--connection omnideck-runtime info":
+			return []byte("ready"), nil
+		case "machine list --format json":
+			return []byte(`[{"Name":"omnideck-runtime","Running":true,"UserModeNetworking":false}]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", args)
+		}
+	})
+
+	result := probeRuntime("podman", "windows")
+	if result.State != RuntimeMachineNeedsUpdate || !result.MachineRunning {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestProbeMacDoesNotApplyWindowsNetworkingMigration(t *testing.T) {
+	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return []byte("podman version 6.0.2"), nil
+		case "--connection omnideck-runtime info":
+			return []byte("cannot connect to Podman"), errors.New("exit 1")
+		case "machine list --format json":
+			return []byte(`[{"Name":"omnideck-runtime","Running":false,"UserModeNetworking":false}]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", args)
+		}
+	})
+
+	result := probeRuntime("podman", "darwin")
+	if result.State != RuntimeMachineStopped {
+		t.Fatalf("state = %s, want %s", result.State, RuntimeMachineStopped)
+	}
+}
+
+func TestProbeRunningSharedMachineWithBrokenConnectionCanBeRestarted(t *testing.T) {
+	for _, goos := range []string{"windows", "darwin"} {
+		t.Run(goos, func(t *testing.T) {
+			withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+				switch strings.Join(args, " ") {
+				case "--version":
+					return []byte("podman version 6.0.2"), nil
+				case "--connection omnideck-runtime info":
+					return []byte("ssh connection failed"), errors.New("exit 1")
+				case "machine list --format json":
+					return []byte(`[{"Name":"omnideck-runtime","Running":true,"UserModeNetworking":true}]`), nil
+				default:
+					return nil, fmt.Errorf("unexpected command: %v", args)
+				}
+			})
+
+			result := probeRuntime("podman", goos)
+			if result.State != RuntimeBroken || !result.MachineRunning {
+				t.Fatalf("result = %#v", result)
+			}
+		})
+	}
+}
+
+func TestProbeDoesNotAdoptAnUnrelatedPodmanMachine(t *testing.T) {
+	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return []byte("podman version 6.0.2"), nil
+		case "--connection omnideck-runtime info":
+			return []byte("connection not found"), errors.New("exit 1")
+		case "machine list --format json":
+			return []byte(`[{"Name":"developer-machine","Running":true,"Default":true}]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", args)
+		}
+	})
+
+	result := probeRuntime("podman", "windows")
+	if result.State != RuntimeMachineMissing || result.MachineName != OmnideckMachineName {
+		t.Fatalf("result = %#v", result)
 	}
 }
 
@@ -197,20 +253,6 @@ func TestProbePodmanThreeRemainsUsable(t *testing.T) {
 	}
 	if result.Warning != "" {
 		t.Fatalf("Podman must not be rejected or warned about based only on a major version: %q", result.Warning)
-	}
-}
-
-func TestProbeOldDockerUnsupportedOnLinux(t *testing.T) {
-	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
-		if strings.Join(args, " ") == "--version" {
-			return []byte("Docker version 19.03.15, build abc"), nil
-		}
-		return nil, nil
-	})
-
-	result := probeRuntime("docker", "linux")
-	if result.State != RuntimeUnsupportedVersion {
-		t.Fatalf("state = %s, want %s", result.State, RuntimeUnsupportedVersion)
 	}
 }
 

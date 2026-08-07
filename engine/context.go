@@ -5,7 +5,7 @@ import (
 	"errors"
 )
 
-// processCtx is the context used to build every underlying docker/podman
+// processCtx is the context used to build every underlying Podman
 // subprocess. It defaults to a context that is never cancelled so normal
 // library use (tests, callers that never call SetCancelContext) is
 // unaffected.
@@ -14,7 +14,7 @@ var processCtx = context.Background()
 // SetCancelContext installs the context every subsequent engine-invoked
 // subprocess is built with. The CLI entrypoint calls this once with a
 // context tied to SIGINT/SIGTERM so a killed omnideck process also kills
-// whatever docker/podman subprocess it was waiting on, instead of orphaning
+// whatever Podman subprocess it was waiting on, instead of orphaning
 // it. This is intentionally a package-level seam rather than a new
 // exported Engine method or parameter: there is exactly one process-wide
 // cancellation scope for a CLI, not a per-call one.
@@ -23,6 +23,17 @@ func SetCancelContext(ctx context.Context) {
 		ctx = context.Background()
 	}
 	processCtx = ctx
+}
+
+// SuspendCancellation temporarily lets best-effort cleanup commands run even
+// after the process context has been cancelled. The returned function must be
+// deferred so the caller's cancellation scope is restored afterward.
+func SuspendCancellation() func() {
+	previous := processCtx
+	processCtx = context.Background()
+	return func() {
+		processCtx = previous
+	}
 }
 
 // CancelRequested reports whether the shared process context has already
@@ -46,7 +57,7 @@ func CancelRequested() bool {
 // SetCancelContext reset (e.g. for best-effort cleanup), or the
 // cancellation will no longer be observable.
 func WrapIfCancelled(err error) error {
-	if err == nil || !CancelRequested() {
+	if err == nil || errors.Is(err, context.Canceled) || !CancelRequested() {
 		return err
 	}
 	return errors.Join(context.Canceled, err)

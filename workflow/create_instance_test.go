@@ -178,4 +178,7 @@ func TestCreateInstanceFailureDuringCancellationReportsContextCanceled(t *testin
 	if len(eng.removedVolumes) != 2 {
 		t.Fatalf("removedVolumes = %v, want both volumes cleaned up despite cancellation", eng.removedVolumes)
 	}
+	if !engine.CancelRequested() {
+		t.Fatal("cleanup did not restore the caller's cancelled context")
+	}
 }

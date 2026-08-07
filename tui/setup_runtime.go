@@ -1,8 +1,7 @@
 package tui
 
 import (
-	"fmt"
-	"os/exec"
+	"errors"
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
@@ -10,49 +9,45 @@ import (
 	"github.com/omnideck-dev/cli/engine"
 )
 
+// Kept as a seam so the TUI can be exercised without installing host
+// software. Both the TUI and Desktop call this same engine workflow.
+var ensureRuntimeForTUI = engine.EnsureRuntime
+
 func (m *SetupModel) configureRuntimeSetup() {
 	m.Stage = SetupStageRuntime
-	m.runtimeSetupStage = runtimeSetupChoose
-	m.runtimeShowDetails = false
-	m.runtimeLastError = ""
+	m.runtimeSetupStage = runtimeSetupWorking
+	m.runtimeStage = engine.SetupStageSoftware
+	m.runtimeState = "start"
+	m.runtimeActivity = engine.SetupActivitySoftware
+	m.runtimeDetail = ""
+	m.runtimeProgress = nil
+	m.failureFromRuntime = false
+	m.preferredEngine = "podman"
+	m.spinnerModel = NewSpinnerModel(nil, nil)
+	m.spinnerModel.spinner = m.quickCheckSpinner
+}
+
+func (m *SetupModel) startRuntimeSetup() tea.Cmd {
+	m.runtimeEvents = make(chan tea.Msg, 64)
+	events := m.runtimeEvents
 	host := m.hostPlatform
-	if host.OS == "" {
-		host = engine.DetectHostPlatform()
+	return func() tea.Msg {
+		go func() {
+			probe, err := ensureRuntimeForTUI(engine.RuntimeSetupOptions{
+				Host:                   host,
+				AllowTerminalElevation: true,
+				OnEvent: func(event engine.RuntimeSetupEvent) {
+					events <- runtimeSetupEventMsg{event: event}
+				},
+			})
+			events <- runtimeSetupDoneMsg{probe: probe, err: err}
+		}()
+		return <-events
 	}
-	m.runtimePlans = engine.BuildSetupPlans(m.runtimeProbes, host)
-	m.releaseMissingSavedRuntime()
-	selectedRuntime := m.preferredEngine
-	automaticSelection := selectedRuntime == ""
-	installed := engine.InstalledRuntimeNames(m.runtimeProbes)
-	if automaticSelection {
-		selectedRuntime = engine.DefaultRuntimeForSetup(m.runtimeProbes, host)
-		m.preferredEngine = selectedRuntime
-	}
-	if selectedRuntime != "" {
-		filtered := m.runtimePlans[:0]
-		for _, plan := range m.runtimePlans {
-			if plan.Runtime == selectedRuntime {
-				plan.Recommended = true
-				switch {
-				case automaticSelection && len(installed) == 0:
-					plan.Recommendation = plan.Title + " is the easiest option for this computer."
-				case automaticSelection:
-					plan.Recommendation = plan.Title + " is already installed, so Omnideck will use it."
-				default:
-					plan.Recommendation = "Omnideck will use " + plan.Title + " for all your installations on this computer."
-				}
-				filtered = append(filtered, plan)
-			}
-		}
-		m.runtimePlans = filtered
-	}
-	m.runtimeChoice = 0
-	for i, plan := range m.runtimePlans {
-		if plan.Recommended {
-			m.runtimeChoice = i
-			break
-		}
-	}
+}
+
+func waitForRuntimeSetupEvent(events <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg { return <-events }
 }
 
 func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -63,288 +58,117 @@ func (m SetupModel) updateRuntimeSetup(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.quickCheckSpinner, cmd = m.quickCheckSpinner.Update(msg)
 		return m, cmd
-	case tea.KeyMsg:
-		if msg.String() == "ctrl+c" || msg.String() == "q" {
-			if m.runtimeSetupStage == runtimeSetupWorking {
+	case runtimeSetupEventMsg:
+		event := msg.event
+		m.runtimeStage = event.Stage
+		m.runtimeState = event.State
+		m.runtimeActivity = event.Activity
+		m.runtimeDetail = event.Detail
+		m.runtimeProgress = event.Progress
+		return m, waitForRuntimeSetupEvent(m.runtimeEvents)
+	case runtimeSetupDoneMsg:
+		if msg.err != nil {
+			var setupErr *engine.RuntimeSetupError
+			if errors.As(msg.err, &setupErr) && setupErr.Failure == engine.RuntimeSetupRestart {
+				m.runtimeSetupStage = runtimeSetupRestart
+				m.runtimeDetail = setupErr.Hint
 				return m, nil
 			}
-			return m.exit(WorkflowCanceled)
-		}
-		if m.runtimeSetupStage == runtimeSetupWorking {
+			m.Stage = SetupStageFailed
+			m.failureFromRuntime = true
+			m.errorMsg = "prepare this computer"
+			m.errorDetail = msg.err.Error()
+			if errors.As(msg.err, &setupErr) {
+				m.errorMsg = setupErr.Message
+				m.errorDetail = setupErr.Hint
+				if setupErr.Err != nil {
+					m.errorDetail += "\n\nTechnical detail: " + setupErr.Err.Error()
+				}
+			}
+			m.errorShowDetails = false
 			return m, nil
 		}
-		if len(m.runtimePlans) == 0 {
+		engines := engine.ReadyEngines([]engine.ProbeResult{msg.probe})
+		if len(engines) == 0 {
+			m.Stage = SetupStageFailed
+			m.failureFromRuntime = true
+			m.errorMsg = "open the secure workspace"
+			m.errorDetail = "Podman setup finished, but it is not responding. Restart the computer and run omnideck again."
+			return m, nil
+		}
+		m.eng = engines[0]
+		m.engErr = nil
+		m.availableEngines = engines
+		m.permErr = nil
+		return m.afterRuntimeReady()
+	case restartRequestedMsg:
+		if msg.err != nil {
+			m.Stage = SetupStageFailed
+			m.failureFromRuntime = true
+			m.errorMsg = "restart Windows"
+			m.errorDetail = "omnideck could not schedule setup to resume after restart. " + msg.err.Error()
+			return m, nil
+		}
+		return m.exit(WorkflowCompleted)
+	case tea.KeyMsg:
+		if m.runtimeSetupStage == runtimeSetupRestart {
 			switch msg.String() {
-			case "r", "enter", " ":
-				m.runtimeSetupStage = runtimeSetupWorking
-				m.runtimeMessage = "Checking again…"
-				return m, runEngineCheckFor(m.preferredEngine)
-			case "b", "esc":
-				if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
-					m.runtimeSetupEntry = runtimeSetupFromCheck
-					m.preferredEngine = ""
-					m.quickCheckAlternative = ""
-					m.Stage = SetupStageQuickCheck
-					m.quickCheckReady = true
-					m.runtimeMessage = ""
-					return m, nil
-				}
+			case "enter", " ":
+				return m, requestSetupRestart
+			case "l", "esc", "q", "ctrl+c":
 				return m.exit(WorkflowCanceled)
 			}
 			return m, nil
 		}
-		if msg.String() == "esc" {
-			if m.runtimeSetupStage == runtimeSetupReview || m.runtimeSetupStage == runtimeSetupWaiting {
-				m.runtimeSetupStage = runtimeSetupChoose
-				m.runtimeMessage = ""
-				return m, nil
-			}
-			if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
-				m.runtimeSetupEntry = runtimeSetupFromCheck
-				m.preferredEngine = ""
-				m.quickCheckAlternative = ""
-				m.Stage = SetupStageQuickCheck
-				m.quickCheckReady = true
-				m.runtimeMessage = ""
-				m.runtimeLastError = ""
-				return m, nil
-			}
-			return m.exit(WorkflowCanceled)
-		}
-		if m.runtimeSetupStage == runtimeSetupWaiting {
-			switch msg.String() {
-			case "r", "enter", " ":
-				m.runtimeCheckFromWaiting = true
-				m.runtimeSetupStage = runtimeSetupWorking
-				m.runtimeMessage = "Checking whether Podman or Docker is ready…"
-				return m, runEngineCheckFor(m.preferredEngine)
-			case "b":
-				m.runtimeSetupStage = runtimeSetupChoose
-				m.runtimeMessage = ""
-			case "o":
-				plan := m.runtimePlans[m.runtimeChoice]
-				if plan.URL != "" {
-					return m, openBrowserCmd(plan.URL)
-				}
-			}
-			return m, nil
-		}
-		if m.runtimeSetupStage == runtimeSetupReview {
-			switch msg.String() {
-			case "b":
-				m.runtimeSetupStage = runtimeSetupChoose
-				m.runtimeShowDetails = false
-			case "d":
-				if m.runtimeDetailsAvailable() {
-					m.runtimeShowDetails = !m.runtimeShowDetails
-				}
-			case "enter", " ":
-				plan := m.runtimePlans[m.runtimeChoice]
-				if len(plan.Commands) > 0 {
-					m.runtimeSetupStage = runtimeSetupWorking
-					m.runtimeCommandIndex = 0
-					m.runtimeMessage = "Starting the first step…"
-					return m, execRuntimeCommand(plan.Commands[0])
-				}
-				if plan.URL != "" {
-					m.runtimeSetupStage = runtimeSetupWaiting
-					m.runtimeMessage = runtimeWaitingMessage(plan)
-					return m, openBrowserCmd(plan.URL)
-				}
-			}
-			return m, nil
-		}
-		switch msg.String() {
-		case "up", "left", "shift+tab":
-			m.runtimeChoice = (m.runtimeChoice - 1 + len(m.runtimePlans)) % len(m.runtimePlans)
-			m.runtimeShowDetails = false
-			m.runtimeLastError = ""
-		case "down", "right", "tab":
-			m.runtimeChoice = (m.runtimeChoice + 1) % len(m.runtimePlans)
-			m.runtimeShowDetails = false
-			m.runtimeLastError = ""
-		case "d":
-			if m.runtimeDetailsAvailable() {
-				m.runtimeShowDetails = !m.runtimeShowDetails
-			}
-		case "b", "esc":
-			if m.runtimeSetupEntry == runtimeSetupFromFirstRunChoice {
-				m.runtimeSetupEntry = runtimeSetupFromCheck
-				m.preferredEngine = ""
-				m.quickCheckAlternative = ""
-				m.Stage = SetupStageQuickCheck
-				m.quickCheckReady = true
-				m.runtimeMessage = ""
-				m.runtimeLastError = ""
-			}
-		case "r":
-			m.runtimeSetupStage = runtimeSetupWorking
-			m.runtimeMessage = "Checking whether Podman or Docker is ready…"
-			return m, runEngineCheckFor(m.preferredEngine)
-		case "enter", " ":
-			m.runtimeSetupStage = runtimeSetupReview
-			m.runtimeShowDetails = false
-			m.runtimeMessage = ""
-		}
-	case runtimeCommandDone:
-		if msg.err != nil {
-			m.runtimeSetupStage = runtimeSetupChoose
-			m.runtimeLastError = msg.err.Error()
-			m.runtimeMessage = "That step did not finish. You can review it and try again. Press d if you want to see the technical error."
-			if len(m.runtimePlans) > 1 {
-				m.runtimeMessage = "That step did not finish. You can try again or choose the other option. Press d if you want to see the technical error."
-			}
-			return m, nil
-		}
-		plan := m.runtimePlans[m.runtimeChoice]
-		m.runtimeCommandIndex++
-		if m.runtimeCommandIndex < len(plan.Commands) {
-			command := plan.Commands[m.runtimeCommandIndex]
-			m.runtimeMessage = fmt.Sprintf("Starting step %d of %d…", m.runtimeCommandIndex+1, len(plan.Commands))
-			return m, execRuntimeCommand(command)
-		}
-		if plan.RequiresRestart {
-			m.runtimeSetupStage = runtimeSetupWaiting
-			m.runtimeMessage = plan.Title + " is starting. Wait until it says it is ready, then return here and press Enter."
-			return m, nil
-		}
-		m.runtimeMessage = "That step finished. Checking that everything is ready…"
-		return m, runEngineCheckFor(m.preferredEngine)
-	case engineCheckResult:
-		checkedFromWaiting := m.runtimeCheckFromWaiting
-		m.runtimeCheckFromWaiting = false
-		previousPlan, hadPreviousPlan := m.selectedRuntimePlan()
-		m.runtimeSetupStage = runtimeSetupChoose
-		m.runtimeProbes = msg.probes
-		if msg.eng != nil {
-			m.eng = msg.eng
-			m.engErr = nil
-			m.availableEngines = msg.all
-			m.permErr = nil
-			return m.afterRuntimeReady()
-		}
-		m.engErr = msg.err
-		m.configureRuntimeSetup()
-		if checkedFromWaiting && hadPreviousPlan {
-			if currentPlan, ok := m.selectedRuntimePlan(); ok && sameRuntimeSetupStep(previousPlan, currentPlan) {
-				m.runtimeSetupStage = runtimeSetupWaiting
-				m.runtimeMessage = runtimeStillWaitingMessage(currentPlan)
-				return m, nil
-			}
-		}
-		m.runtimeMessage = runtimeNotReadyMessage(m.runtimePlans, m.preferredEngine)
+		// Setup owns the host installer while it is running. Ignoring quit keys
+		// here prevents a half-finished WSL or Podman install from being mistaken
+		// for a clean cancellation.
+		return m, nil
 	}
 	return m, nil
 }
 
-func (m SetupModel) selectedRuntimePlan() (engine.SetupPlan, bool) {
-	if m.runtimeChoice < 0 || m.runtimeChoice >= len(m.runtimePlans) {
-		return engine.SetupPlan{}, false
-	}
-	return m.runtimePlans[m.runtimeChoice], true
-}
-
-func sameRuntimeSetupStep(before, after engine.SetupPlan) bool {
-	return before.Runtime == after.Runtime && before.State == after.State && before.URL == after.URL
-}
-
-func (m SetupModel) runtimeDetailsAvailable() bool {
-	if m.runtimeChoice < 0 || m.runtimeChoice >= len(m.runtimePlans) {
-		return false
-	}
-	return len(m.runtimePlans[m.runtimeChoice].Commands) > 0 || m.runtimeLastError != ""
-}
-
-func (m SetupModel) runtimeDetailsLabel() string {
-	if m.runtimeLastError != "" {
-		return "error details"
-	}
-	return "commands"
-}
-
-func runtimeWaitingMessage(plan engine.SetupPlan) string {
-	name := plan.Title
-	if plan.DirectDownload {
-		return "The official " + name + " installer should now be downloading. Open it from Downloads, finish the installer, then return here."
-	}
-	switch plan.State {
-	case engine.RuntimePermissionDenied, engine.RuntimeBroken:
-		return "The official " + name + " help page should now be open. Follow the guidance there, then return here."
-	case engine.RuntimeUnsupportedVersion:
-		return "The official Docker update instructions should now be open. Update Docker and make sure it is running, then return here."
-	case engine.RuntimeStopped, engine.RuntimeMachineStopped:
-		return "The official " + name + " help page should now be open. Follow its instructions to start " + name + ", then return here."
-	default:
-		return "The official " + name + " installation page should now be open. Finish the installation and make sure " + name + " is running, then return here."
-	}
-}
-
-func runtimeStillWaitingMessage(plan engine.SetupPlan) string {
-	if plan.DirectDownload {
-		return "Omnideck still cannot find " + plan.Title + ". If the installer is still open, finish it. Then return here and press Enter to check again."
-	}
-	return plan.Title + " is not ready yet. Finish the step on the other screen, wait until " + plan.Title + " is running, then return here and press Enter to check again."
-}
-
-func runtimeNotReadyMessage(plans []engine.SetupPlan, preferred string) string {
-	if len(plans) == 0 {
-		name := "Podman or Docker"
-		if preferred != "" {
-			name = runtimeNameForPeople(preferred)
-		}
-		return "Omnideck still cannot use " + name + ". Make sure it is installed and running, then press r to check again."
-	}
-	if len(plans) > 1 {
-		return "Neither Podman nor Docker is ready yet. Choose one of the setup options above and press Enter to review it, or press r to check again."
-	}
-	plan := plans[0]
-	switch plan.State {
-	case engine.RuntimeMissing:
-		return "Omnideck still cannot find " + plan.Title + ". If you already installed it, open " + plan.Title + " and wait until it is running, then press r to check again. Otherwise, press Enter to review the installation steps."
-	case engine.RuntimeStopped, engine.RuntimeMachineStopped:
-		return plan.Title + " is installed, but it is not running yet. Press Enter to review the start steps, or start it yourself and press r to check again."
-	case engine.RuntimeMachineMissing:
-		return "Podman is installed, but its one-time setup is not finished. Press Enter to review and start the one-time setup."
-	case engine.RuntimePermissionDenied:
-		return plan.Title + " is installed, but your account cannot use it yet. Press Enter to review the help steps."
-	case engine.RuntimeUnsupportedVersion:
-		return "Docker is installed, but it must be updated before Omnideck can use it. Press Enter to review the update steps."
-	default:
-		return plan.Title + " is installed, but it still needs attention. Press Enter to review the help steps, or press r after you fix it."
-	}
+func requestSetupRestart() tea.Msg {
+	return restartRequestedMsg{err: engine.RestartAndResumeSetup()}
 }
 
 func (m SetupModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
 	if m.setupMode == SetupRuntimeRepair {
 		if m.eng == nil {
 			m.Stage = SetupStageFailed
-			m.errorMsg = "Omnideck could not find a ready container runtime"
+			m.errorMsg = "omnideck could not find a ready container runtime"
 			return m, nil
 		}
 		if err := config.SaveRuntime(m.eng.Name()); err != nil {
 			m.Stage = SetupStageFailed
-			m.errorMsg = "Omnideck could not remember the container runtime"
+			m.errorMsg = "omnideck could not remember the container runtime"
 			m.errorDetail = err.Error()
 			m.errorShowDetails = true
 			return m, nil
 		}
 		return m.exit(WorkflowCompleted)
 	}
+
 	m.ensureRecommendedSettingsAvailable()
+	if m.setupMode == SetupFirstRun {
+		if !m.validateAllInputs() {
+			m.Stage = SetupStageSettings
+			m.settingsAdvanced = true
+			return m, nil
+		}
+		return m.beginApplying()
+	}
 	m.Stage = SetupStageSettings
 	return m, nil
 }
 
-// ensureRecommendedSettingsAvailable quietly advances default names and ports
-// when another container or app already uses the first suggestion. The user
-// still sees and confirms the final values before setup starts.
-func execRuntimeCommand(command engine.SetupCommand) tea.Cmd {
-	cmd := exec.Command(command.Name, command.Args...)
-	return tea.ExecProcess(cmd, func(err error) tea.Msg {
-		return runtimeCommandDone{err: err}
-	})
+func (m SetupModel) beginApplying() (tea.Model, tea.Cmd) {
+	m.Stage = SetupStageApplying
+	m.lastCompletedStep = -1
+	m.errorMsg = ""
+	m.errorDetail = ""
+	m.errorShowDetails = false
+	m.failureFromRuntime = false
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, defaultFlavorMessages)
+	return m, tea.Batch(m.spinnerModel.Init(), m.startSetupStep(0))
 }
-
-// maybeAdvanceQuickCheck returns a Cmd that fires allQuickCheckDone once all
-// 4 checks (engine, permission counted together, ollama, memory) are done.
-// Engine check fires permission check as a follow-up, so we wait for 4 total.
