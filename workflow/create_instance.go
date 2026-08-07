@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/omnideck-dev/cli/checks"
@@ -28,7 +27,7 @@ type CreateInstanceOptions struct {
 	// "create_home_volume", "create_state_volume", "pull_image",
 	// "run_container", "save_config".
 	OnStage func(stage string)
-	// OnPullProgress is called with each raw line docker/podman pull emits.
+	// OnPullProgress is called with each raw line Podman pull emits.
 	OnPullProgress func(line string)
 }
 
@@ -58,7 +57,8 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 			return
 		}
 		err = engine.WrapIfCancelled(err)
-		engine.SetCancelContext(context.Background())
+		restoreCancellation := engine.SuspendCancellation()
+		defer restoreCancellation()
 		if containerCreated {
 			_ = eng.RemoveContainer(cfg.ContainerName)
 		}

@@ -17,8 +17,6 @@ type engineCheckResult struct {
 	err    error
 }
 
-type runtimeCommandDone struct{ err error }
-
 type permissionCheckResult struct{ err error }
 
 type ollamaCheckResult struct {
@@ -44,23 +42,11 @@ const (
 	SetupRuntimeRepair
 )
 
-type runtimeSetupEntry int
-
-const (
-	runtimeSetupFromCheck runtimeSetupEntry = iota
-	runtimeSetupFromFirstRunChoice
-)
-
 type runtimeSetupStage int
 
 const (
 	runtimeSetupWorking runtimeSetupStage = iota
 	runtimeSetupRestart
-	// Legacy values remain private until the old renderer tests are removed.
-	// The active state machine never enters these manual setup states.
-	runtimeSetupChoose
-	runtimeSetupReview
-	runtimeSetupWaiting
 )
 
 type runtimeSetupEventMsg struct{ event engine.RuntimeSetupEvent }
@@ -101,26 +87,18 @@ type SetupModel struct {
 	quickCheckDone         int // count of completed checks
 
 	// Runtime setup state.
-	runtimeProbes           []engine.ProbeResult
-	runtimePlans            []engine.SetupPlan
-	runtimeChoice           int
-	runtimeCommandIndex     int
-	runtimeSetupStage       runtimeSetupStage
-	runtimeShowDetails      bool
-	runtimeMessage          string
-	runtimeLastError        string
-	runtimeCheckFromWaiting bool
-	preferredEngine         string
-	runtimeSetupEntry       runtimeSetupEntry
-	hostPlatform            engine.HostPlatform
-	runtimeEvents           chan tea.Msg
-	runtimeStage            string
-	runtimeState            string
-	runtimeActivity         string
-	runtimeDetail           string
-	runtimeProgress         *float64
-	failureFromRuntime      bool
-	autoStart               bool
+	runtimeProbes      []engine.ProbeResult
+	runtimeSetupStage  runtimeSetupStage
+	preferredEngine    string
+	hostPlatform       engine.HostPlatform
+	runtimeEvents      chan tea.Msg
+	runtimeStage       string
+	runtimeState       string
+	runtimeActivity    string
+	runtimeDetail      string
+	runtimeProgress    *float64
+	failureFromRuntime bool
+	autoStart          bool
 
 	// Settings inputs.
 	inputs           []textinput.Model

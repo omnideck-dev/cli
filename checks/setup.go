@@ -9,14 +9,14 @@ import (
 var containerNamePattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 var memorySizePattern = regexp.MustCompile(`^\d+[mMgGkK]$`)
 
-// ValidContainerName applies the common Docker and Podman container-name
-// rules used by Omnideck setup.
+// ValidContainerName applies the Podman container-name rules used by
+// Omnideck setup.
 func ValidContainerName(name string) bool {
 	return containerNamePattern.MatchString(name)
 }
 
-// ValidMemorySize accepts the memory syntax supported by Docker and Podman in
-// Omnideck configuration, such as 512m or 2g.
+// ValidMemorySize accepts the Podman memory syntax used by Omnideck
+// configuration, such as 512m or 2g.
 func ValidMemorySize(value string) bool {
 	_, ok := MemorySizeMB(value)
 	return ok

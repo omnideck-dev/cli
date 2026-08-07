@@ -1,7 +1,6 @@
 package workflow
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/omnideck-dev/cli/checks"
@@ -95,7 +94,9 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 		if err == nil || current != nil {
 			return
 		}
-		engine.SetCancelContext(context.Background())
+		err = engine.WrapIfCancelled(err)
+		restoreCancellation := engine.SuspendCancellation()
+		defer restoreCancellation()
 		if containerAttempted {
 			_ = eng.RemoveContainer(desired.ContainerName)
 		}
@@ -154,7 +155,8 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 		opts.stage("create_container")
 		if runErr := eng.RunContainer(RunOptions(desired)); runErr != nil {
 			runErr = engine.WrapIfCancelled(runErr)
-			engine.SetCancelContext(context.Background())
+			restoreCancellation := engine.SuspendCancellation()
+			defer restoreCancellation()
 			_ = eng.RemoveContainer(desired.ContainerName)
 			return result, runErr
 		}

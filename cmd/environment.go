@@ -93,6 +93,11 @@ func desiredEnvironmentConfig(current *config.Config) (*config.Config, error) {
 	if !checks.ValidMemorySize(desired.ShmSize) {
 		return nil, fmt.Errorf("--shm-size must be a positive number and unit, such as 512m")
 	}
+	memoryMB, _ := checks.MemorySizeMB(desired.Memory)
+	shmMB, _ := checks.MemorySizeMB(desired.ShmSize)
+	if shmMB > memoryMB {
+		return nil, fmt.Errorf("--shm-size cannot be larger than --memory")
+	}
 	if strings.TrimSpace(desired.Image) == "" {
 		return nil, fmt.Errorf("--image cannot be empty")
 	}

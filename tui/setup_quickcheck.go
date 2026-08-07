@@ -75,7 +75,6 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case allQuickCheckDone:
 		if m.engErr != nil {
-			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
 			return m, m.startRuntimeSetup()
 		}
@@ -87,7 +86,6 @@ func (m SetupModel) updateQuickCheck(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 			}
-			m.runtimeSetupEntry = runtimeSetupFromCheck
 			m.configureRuntimeSetup()
 			return m, m.startRuntimeSetup()
 		}

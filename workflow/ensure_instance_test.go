@@ -1,11 +1,14 @@
 package workflow
 
 import (
+	"context"
+	"errors"
 	"net"
 	"strconv"
 	"testing"
 
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 )
 
 type fakeEnsureEngine struct {
@@ -14,6 +17,7 @@ type fakeEnsureEngine struct {
 	created       []string
 	removedVolume []string
 	pulls         []string
+	pullErr       error
 }
 
 func (f *fakeEnsureEngine) VolumeExists(name string) (bool, error) {
@@ -37,7 +41,30 @@ func (f *fakeEnsureEngine) RemoveVolume(name string) error {
 
 func (f *fakeEnsureEngine) PullImage(image string, _ chan<- string) error {
 	f.pulls = append(f.pulls, image)
-	return nil
+	return f.pullErr
+}
+
+func TestEnsureInstanceCancellationCleansUpAndPreservesCancellation(t *testing.T) {
+	desired := desiredTestConfig(t)
+	eng := &fakeEnsureEngine{
+		volumes: map[string]bool{},
+		pullErr: errors.New("signal: killed"),
+	}
+	cancelledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	engine.SetCancelContext(cancelledCtx)
+	defer engine.SetCancelContext(context.Background())
+
+	_, err := EnsureInstance(eng, nil, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want it to satisfy errors.Is(err, context.Canceled)", err)
+	}
+	if len(eng.removedVolume) != 2 {
+		t.Fatalf("removedVolume = %v, want both newly created volumes removed", eng.removedVolume)
+	}
+	if !engine.CancelRequested() {
+		t.Fatal("cleanup did not restore the caller's cancelled context")
+	}
 }
 
 func availableTestPort(t *testing.T) string {

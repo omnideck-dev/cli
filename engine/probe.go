@@ -316,10 +316,6 @@ func numericPrefix(value string) string {
 	return value[:end]
 }
 
-func versionLess(major, minor, wantMajor, wantMinor int) bool {
-	return major < wantMajor || (major == wantMajor && minor < wantMinor)
-}
-
 func containsAny(value string, candidates ...string) bool {
 	for _, candidate := range candidates {
 		if strings.Contains(value, candidate) {
