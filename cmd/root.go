@@ -2,9 +2,11 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 
@@ -65,9 +67,43 @@ func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	engine.SetCancelContext(ctx)
+	jsonRequested := argsRequestJSON(os.Args[1:])
+	if jsonRequested {
+		// Flag parsing, command lookup, and positional-argument validation can
+		// fail before PersistentPreRun. Silence Cobra up front so those failures
+		// can use the same JSON-only process boundary as command errors.
+		rootCmd.SilenceErrors = true
+		rootCmd.SilenceUsage = true
+	}
 	if err := rootCmd.Execute(); err != nil {
+		if jsonRequested && !errors.Is(err, errAborted) {
+			_ = writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		}
 		os.Exit(1)
 	}
+}
+
+// argsRequestJSON detects the persistent JSON flag before Cobra parses the
+// command line. It deliberately stops at "--" so a positional argument named
+// --json cannot change error rendering.
+func argsRequestJSON(args []string) bool {
+	enabled := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if arg == "--json" {
+			enabled = true
+			continue
+		}
+		if value, ok := strings.CutPrefix(arg, "--json="); ok {
+			parsed, err := strconv.ParseBool(value)
+			if err == nil {
+				enabled = parsed
+			}
+		}
+	}
+	return enabled
 }
 
 func init() {
@@ -289,7 +325,14 @@ func requireConfigMulti() error {
 // printing a redundant error message.
 var errAborted = fmt.Errorf("")
 
-func persistentPreRun(_ *cobra.Command, _ []string) {
+func persistentPreRun(cmd *cobra.Command, _ []string) {
+	// JSON is a complete process contract on stdout. Cobra's default error
+	// handling would otherwise append an empty "Error:" and, for some commands,
+	// the full usage text to stderr after a structured JSON error was emitted.
+	// Reset both fields on every invocation because command objects are reused by
+	// tests in this package.
+	cmd.Root().SilenceErrors = jsonFlag
+	cmd.Root().SilenceUsage = jsonFlag
 	styles.NoColor(noColor)
 	debug.SetEnabled(debugFlag)
 	LoadedConfig = nil

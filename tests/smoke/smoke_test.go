@@ -233,9 +233,12 @@ func TestVersionJSON(t *testing.T) {
 // exists to prevent: a GUI spawning `omnideck --json` with no subcommand
 // must never fall through to a TUI attempt or plain-text help.
 func TestBareJSONNeverLaunchesTUI(t *testing.T) {
-	stdout, _, code := run("--json")
+	stdout, stderr, code := run("--json")
 	if code == 0 {
 		t.Fatalf("expected non-zero exit, got 0: %s", stdout)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("bare --json wrote Cobra error or usage text to stderr: %q", stderr)
 	}
 	var payload struct {
 		Error struct {
@@ -248,6 +251,39 @@ func TestBareJSONNeverLaunchesTUI(t *testing.T) {
 	}
 	if payload.Error.Code != "MISSING_SUBCOMMAND" {
 		t.Fatalf("error code = %q, want MISSING_SUBCOMMAND", payload.Error.Code)
+	}
+}
+
+// TestJSONSyntaxErrorsStayMachineReadable covers failures Cobra detects before
+// PersistentPreRun, when normal command-level JSON error helpers cannot run.
+func TestJSONSyntaxErrorsStayMachineReadable(t *testing.T) {
+	for _, args := range [][]string{
+		{"--json", "definitely-not-a-command"},
+		{"--json", "--definitely-not-a-flag"},
+		{"--json", "remove"},
+	} {
+		name := strings.Join(args[1:], " ")
+		t.Run(name, func(t *testing.T) {
+			stdout, stderr, code := run(args...)
+			if code == 0 {
+				t.Fatalf("expected non-zero exit, got 0: %s", stdout)
+			}
+			if strings.TrimSpace(stderr) != "" {
+				t.Fatalf("JSON syntax error wrote Cobra text to stderr: %q", stderr)
+			}
+			var payload struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+				t.Fatalf("syntax error did not produce valid JSON: %v\n%s", err, stdout)
+			}
+			if payload.Error.Code != "INTERNAL_ERROR" || payload.Error.Message == "" {
+				t.Fatalf("unexpected syntax error payload: %+v", payload.Error)
+			}
+		})
 	}
 }
 
@@ -387,9 +423,12 @@ func TestRemoveJSONRequiresExplicitFlags(t *testing.T) {
 	writeInstanceFixture(t, configDir, "solo")
 	env := []string{"OMNIDECK_CONFIG_DIR=" + configDir}
 
-	stdout, _, code := runEnv(env, "remove", "solo", "--json")
+	stdout, stderr, code := runEnv(env, "remove", "solo", "--json")
 	if code == 0 {
 		t.Fatalf("expected non-zero exit, got 0: %s", stdout)
+	}
+	if strings.TrimSpace(stderr) != "" {
+		t.Fatalf("remove --json wrote Cobra error or usage text to stderr: %q", stderr)
 	}
 	var payload struct {
 		Error struct {

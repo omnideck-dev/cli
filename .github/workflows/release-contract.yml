@@ -1,0 +1,168 @@
+name: Test a published CLI release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Existing release tag, for example v0.10.0-alpha.1"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  attestations: read
+
+concurrency:
+  group: release-contract-${{ inputs.version }}
+  cancel-in-progress: false
+
+jobs:
+  artifact:
+    name: artifact (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            archive: omnideck-linux-amd64.tar.gz
+          - goos: linux
+            goarch: arm64
+            archive: omnideck-linux-arm64.tar.gz
+          - goos: darwin
+            goarch: amd64
+            archive: omnideck-darwin-amd64.tar.gz
+          - goos: darwin
+            goarch: arm64
+            archive: omnideck-darwin-arm64.tar.gz
+          - goos: windows
+            goarch: amd64
+            archive: omnideck-windows-amd64.zip
+          - goos: windows
+            goarch: arm64
+            archive: omnideck-windows-arm64.zip
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Download the published archive and checksum manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p download
+          gh release download "${RELEASE_VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir download \
+            --pattern "${RELEASE_ARCHIVE}" \
+            --pattern SHA256SUMS
+          (cd download && grep -F "  ${RELEASE_ARCHIVE}" SHA256SUMS | sha256sum --check --strict -)
+          gh attestation verify "download/${RELEASE_ARCHIVE}" --repo "${GITHUB_REPOSITORY}"
+
+      - name: Inspect the published target
+        shell: bash
+        env:
+          EXPECTED_GOOS: ${{ matrix.goos }}
+          EXPECTED_GOARCH: ${{ matrix.goarch }}
+          RELEASE_ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p artifacts/release-contract
+          go run ./tests/releasecontract \
+            --archive "download/${RELEASE_ARCHIVE}" \
+            --mode artifact \
+            --expected-os "${EXPECTED_GOOS}" \
+            --expected-arch "${EXPECTED_GOARCH}" \
+            --report "artifacts/release-contract/report.json" \
+            --junit "artifacts/release-contract/junit.xml"
+
+      - name: Upload artifact report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-artifact-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.run_id }}
+          path: artifacts/release-contract/
+          if-no-files-found: warn
+
+  portable:
+    name: portable (${{ matrix.goos }}/${{ matrix.goarch }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs-on: ubuntu-24.04
+            goos: linux
+            goarch: amd64
+            archive: omnideck-linux-amd64.tar.gz
+          - runs-on: ubuntu-24.04-arm
+            goos: linux
+            goarch: arm64
+            archive: omnideck-linux-arm64.tar.gz
+          - runs-on: macos-latest
+            goos: darwin
+            goarch: arm64
+            archive: omnideck-darwin-arm64.tar.gz
+          - runs-on: windows-latest
+            goos: windows
+            goarch: amd64
+            archive: omnideck-windows-amd64.zip
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
+        with:
+          go-version-file: go.mod
+
+      - name: Download the published archive and checksum manifest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p download
+          gh release download "${RELEASE_VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --dir download \
+            --pattern "${RELEASE_ARCHIVE}" \
+            --pattern SHA256SUMS
+          (cd download && grep -F "  ${RELEASE_ARCHIVE}" SHA256SUMS | sha256sum --check --strict -)
+          gh attestation verify "download/${RELEASE_ARCHIVE}" --repo "${GITHUB_REPOSITORY}"
+
+      - name: Execute the published binary contract
+        shell: bash
+        env:
+          EXPECTED_GOOS: ${{ matrix.goos }}
+          EXPECTED_GOARCH: ${{ matrix.goarch }}
+          RELEASE_ARCHIVE: ${{ matrix.archive }}
+          RELEASE_VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p artifacts/release-contract
+          go run ./tests/releasecontract \
+            --archive "download/${RELEASE_ARCHIVE}" \
+            --mode portable \
+            --expected-version "${RELEASE_VERSION}" \
+            --expected-os "${EXPECTED_GOOS}" \
+            --expected-arch "${EXPECTED_GOARCH}" \
+            --report "artifacts/release-contract/report.json" \
+            --junit "artifacts/release-contract/junit.xml"
+
+      - name: Upload portable report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: published-portable-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.run_id }}
+          path: artifacts/release-contract/
+          if-no-files-found: warn

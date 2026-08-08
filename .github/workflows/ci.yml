@@ -92,12 +92,20 @@ jobs:
         include:
           - runs-on: ubuntu-latest
             label: linux/amd64
+            goos: linux
+            goarch: amd64
           - runs-on: ubuntu-24.04-arm
             label: linux/arm64
+            goos: linux
+            goarch: arm64
           - runs-on: macos-latest
             label: darwin/arm64
+            goos: darwin
+            goarch: arm64
           - runs-on: windows-latest
             label: windows/amd64
+            goos: windows
+            goarch: amd64
 
     runs-on: ${{ matrix.runs-on }}
     timeout-minutes: 20
@@ -119,6 +127,37 @@ jobs:
       - name: Build
         shell: bash
         run: go build -o /dev/null .
+
+      - name: Run the portable release contract
+        shell: bash
+        env:
+          EXPECTED_GOOS: ${{ matrix.goos }}
+          EXPECTED_GOARCH: ${{ matrix.goarch }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/release-contract"
+          BINARY="${RUNNER_TEMP}/omnideck-contract"
+          if [ "${EXPECTED_GOOS}" = "windows" ]; then
+            BINARY="${BINARY}.exe"
+          fi
+          go build -trimpath -buildvcs=false \
+            -ldflags "-X main.version=ci-contract -X main.commit=${GITHUB_SHA} -X main.date=ci" \
+            -o "${BINARY}" .
+          go run ./tests/releasecontract \
+            --binary "${BINARY}" \
+            --mode portable \
+            --expected-version ci-contract \
+            --expected-os "${EXPECTED_GOOS}" \
+            --expected-arch "${EXPECTED_GOARCH}" \
+            --report "${RUNNER_TEMP}/release-contract/report.json" \
+            --junit "${RUNNER_TEMP}/release-contract/junit.xml"
+
+      - name: Upload portable contract report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: contract-${{ matrix.goos }}-${{ matrix.goarch }}-${{ github.run_id }}
+          path: ${{ runner.temp }}/release-contract/
+          if-no-files-found: warn
 
   # ── Compile checks for platforms without hosted native runners ──
   cross-build:

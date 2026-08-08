@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/omnideck-dev/cli/contracts/runtime/v4/status.schema.json",
+  "title": "Omnideck runtime status schema 4",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "runtime",
+    "state",
+    "ready",
+    "phase",
+    "activity",
+    "resources"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 4 },
+    "runtime": { "const": "podman" },
+    "state": { "type": "string", "minLength": 1 },
+    "ready": { "type": "boolean" },
+    "path": { "type": "string" },
+    "version": { "type": "string" },
+    "detail": { "type": "string" },
+    "warning": { "type": "string" },
+    "machineName": { "type": "string" },
+    "phase": { "enum": ["software", "environment"] },
+    "activity": { "type": "string", "minLength": 1 },
+    "resources": {
+      "type": "object",
+      "required": ["container", "machine"],
+      "properties": {
+        "container": {
+          "type": "object",
+          "required": ["memory", "shmSize"],
+          "properties": {
+            "memory": { "type": "string", "minLength": 1 },
+            "shmSize": { "type": "string", "minLength": 1 }
+          },
+          "additionalProperties": true
+        },
+        "machine": {
+          "type": "object",
+          "required": ["mode"],
+          "properties": {
+            "mode": { "type": "string", "minLength": 1 },
+            "cpus": { "type": "integer", "minimum": 0 },
+            "memoryMB": { "type": "integer", "minimum": 0 },
+            "diskGB": { "type": "integer", "minimum": 0 }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

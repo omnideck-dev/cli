@@ -4,6 +4,10 @@ This harness exercises the compiled CLI against a real Docker or Podman runtime.
 It is intended for dedicated macOS, Windows, and Linux test machines. It can be
 run manually before self-hosted GitHub runners are available.
 
+Podman is the release-gating runtime. Docker mode remains available only for
+legacy and coexistence diagnostics and must not be used as evidence that the
+current Podman-only production path passed.
+
 The lifecycle scenario uses a uniquely named container, two uniquely named
 volumes, high host ports, a temporary localhost image registry, and a tiny
 fixture image. It never uses the production Omnideck image or an existing

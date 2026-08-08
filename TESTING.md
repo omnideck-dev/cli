@@ -3,6 +3,36 @@
 This file tracks known assumptions, untested configurations, and open questions
 to validate before a broader release. Items marked ✅ have been verified.
 
+## Test layers and release policy
+
+Omnideck uses four deliberately separate test layers:
+
+1. Package unit and smoke tests exercise source on every merge.
+2. `tests/releasecontract` treats a compiled or packaged CLI as a black box and
+   checks executable architecture, process behavior, JSON, exit codes, stderr,
+   non-interactive safety, and timeouts without invoking Podman.
+3. `tests/hardware` exercises uniquely named containers, volumes, ports, and
+   temporary configuration against a real runtime. Podman is the release gate;
+   Docker coverage is retained only for legacy/coexistence diagnostics.
+4. `tests/manual` covers the terminal-first bare `omnideck` journey, clean-host
+   installation, operating-system permission UI, restart/resume, and scenarios
+   that cannot currently run on GitHub-hosted machines.
+
+The release contract can be run locally against an extracted binary:
+
+```sh
+go run ./tests/releasecontract --binary /path/to/omnideck \
+  --mode portable --expected-os linux --expected-arch amd64
+```
+
+The detailed promotion gate is maintained in [RELEASING.md](RELEASING.md).
+Machine-readable public schemas are maintained under `contracts/`. Generated
+reports belong in `artifacts/` or GitHub Actions artifacts, not source control.
+
+The remainder of this document tracks known assumptions, untested
+configurations, and platform risks. Older Docker scenarios do not override the
+current Podman-only product policy.
+
 ---
 
 ## 1. Container Internal Port
