@@ -86,6 +86,7 @@ jobs:
   # runners are scarce and frequently fail to allocate (jobs queue for
   # hours and get cancelled). darwin/amd64 is covered by cross-build below.
   test:
+    name: test (${{ matrix.runs-on }}, ${{ matrix.label }})
     strategy:
       fail-fast: false
       matrix:
