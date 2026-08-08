@@ -34,8 +34,7 @@ complete:
 
 - guided terminal setup and its key-by-key interaction
 - actual Podman or Docker installation and operating-system permission prompts
-- `omnideck update`, which currently has no non-interactive mode
-- upgrade from the previous stable CLI and production image
+- stable-to-candidate `update --plain`, repair, and production-image behavior
 - instance removal with a real data backup and restore
 - multiple simultaneous instances
 - local Ollama connectivity

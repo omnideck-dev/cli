@@ -169,8 +169,10 @@ safely or reliably exercised on hosted runners:
   verifies clean installation, WSL/runtime setup, permission UI,
   restart/resume, repair, and preservation of persistent volumes.
 - [Upgrade, backup, restore, and removal](tests/manual/upgrade-backup-restore.md)
-  verifies upgrade and rollback behavior, persistent data, simultaneous
-  instances, keep/delete choices, backup contents, restore, and cleanup.
+  verifies a real stable-to-candidate upgrade and repair, persistent data,
+  simultaneous instances, keep/delete choices, backup contents, restore, and
+  cleanup. Run it independently on Windows x64, a supported native macOS
+  architecture, and at least one supported mutable Linux x64 distribution.
 
 Each execution must identify the release tag and binary SHA-256; host,
 architecture, runtime, WSL, and operating-system versions; starting and final
@@ -213,7 +215,9 @@ An RC requires every beta gate plus recorded evidence for:
 
 - bare `omnideck` first run from clean configuration;
 - Windows clean-host installation and restart/resume when Windows is in scope;
-- upgrade and rollback from the supported prior release;
+- stable-to-candidate upgrade and repair from the supported prior release on
+  Windows x64, a supported native macOS architecture, and at least one
+  supported mutable Linux x64 distribution;
 - persistent-volume preservation;
 - backup and restore;
 - multiple simultaneous instances;

@@ -17,7 +17,9 @@ Available procedures:
 
 - [First run with bare `omnideck`](first-run.md)
 - [Windows clean-host installation and restart/resume](windows-clean-host.md)
-- [Upgrade, backup, restore, and removal](upgrade-backup-restore.md)
+- [Stable upgrade, backup, restore, and removal](upgrade-backup-restore.md), run
+  independently on Windows, macOS, and at least one supported Linux
+  distribution
 
 An agent may execute these files verbatim. It must stop before any action that
 could alter resources not created by the test and must report unavailable
