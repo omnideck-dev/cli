@@ -54,6 +54,10 @@ an RC, replace its assets, move a published tag, or retag a different commit.
 An RC may use the same source commit as a tested alpha, but it is still rebuilt
 with new embedded version metadata and therefore has different binary hashes.
 
+A direct stable promotion is permitted only by the narrow exception in the
+[stable promotion gate](TESTING.md#stable). It still creates a new immutable
+tag and rebuilt assets; it never renames or mutates the qualifying prerelease.
+
 Fix issues on `main`, then publish the next identifier:
 
 ```text
@@ -64,6 +68,11 @@ The required alpha, beta, RC, and stable gates are defined only in the
 [promotion gates section of TESTING.md](TESTING.md#promotion-gates). Apply the
 gate for the intended channel before creating its tag. Promotion is based on
 evidence for the exact commit and assets, not time spent in a channel.
+
+The normal channel sequence remains alpha, beta when needed, RC, then stable.
+Skipping directly from a qualifying prerelease to stable is an explicit,
+evidence-backed exception for unchanged product and release inputs, not a
+general shortcut around RC validation.
 
 ## Candidate evidence and approval
 

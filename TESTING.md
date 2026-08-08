@@ -233,9 +233,30 @@ in the candidate evidence and may be supplemented by dedicated hardware.
 
 ### Stable
 
-A stable release requires a selected RC with no unresolved release blocker.
-Release notes must describe upgrade behavior and known limitations. Any source
-change requires a new RC and a complete application of the applicable gates.
+A stable release normally requires a selected RC with no unresolved release
+blocker. Release notes must describe upgrade behavior and known limitations.
+
+A prerelease may be promoted directly to stable without publishing an RC only
+when every condition below is recorded and reviewed before the protected
+`release` environment is approved:
+
+- the qualifying prerelease passed every applicable beta and RC requirement,
+  including the required manual platform evidence;
+- the candidate differs from that prerelease only in documentation, test
+  procedures, release policy, or retained evidence;
+- Go source, dependencies, build inputs, release workflows, and packaged
+  application behavior are unchanged;
+- every remaining known issue is explicitly classified as non-blocking and is
+  included in the release notes when user-visible; and
+- the direct-promotion decision identifies the qualifying prerelease,
+  candidate commit, intended stable version, evidence, and known limitations.
+
+The stable tag still creates a new immutable build with new embedded version
+metadata. Its source gate, all six artifact checks, four native portable
+contracts, checksums, SBOMs, provenance, and post-publication public-asset
+verification remain mandatory. Any product source, dependency, build-input, or
+release-workflow change after the qualifying prerelease requires an RC and a
+complete application of the applicable gates.
 
 Beta may be skipped only when the candidate already satisfies every beta and RC
 requirement.
