@@ -18,27 +18,38 @@ with no arguments. This is a semantic and visual test; it is not replaced by
 1. Verify the release checksum, provenance, and `--json --version` output.
 2. Start a transcript or screen recording.
 3. Run the downloaded executable with exactly zero arguments.
-4. Confirm the welcome screen explains the one-time setup and Enter begins it.
+4. Confirm the welcome screen explains the one-time setup and Enter begins the
+   complete automatic first setup. For valid defaults, this is the normal
+   first-run journey's only confirmation.
 5. Confirm the visible phases progress through computer setup, secure space on
    Windows/macOS, application files, and final checks without exposing raw
    internal output as normal UI.
-6. Confirm recommended settings appear. Accept them with Enter.
-7. Confirm the review accurately describes the instance, runtime, port, memory,
-   volumes, and image. Continue with Enter.
+6. Confirm a normal first setup applies the recommended instance defaults
+   automatically after the runtime is ready. It must not pause at the
+   recommended-settings or review screens used when adding another instance.
+7. If a default is invalid, confirm setup opens settings to explain and correct
+   that value, then shows the review before applying the corrected settings.
+   Record this recovery route separately; it is not the expected clean-host
+   path.
 8. Confirm setup reaches a clear ready state and the loopback application URL
    returns a successful response.
 9. Exit normally and run the same bare executable again. Confirm it opens the
    dashboard rather than creating another instance.
 10. Run `--json list`, `--json runtime status`, and named `--json status`.
-    Validate JSON contract 2 and runtime schema 4.
-11. Confirm exactly one intended instance and its two named volumes were added;
-    all resources from the starting inventory must remain unchanged.
+    Validate JSON contract 2 and runtime schema 4. Use the results and saved
+    configuration to record the automatically selected runtime, name, port,
+    memory, shared memory, volumes, and image.
+11. Confirm those values match the documented recommended defaults, exactly one
+    intended instance and its two named volumes were added, and all resources
+    from the starting inventory remain unchanged.
 12. Remove the test instance through the documented removal flow, verify the
     selected volume policy, and revert the VM or clean only recorded test IDs.
 
 ## Pass criteria
 
-The first launch completes, the second launch routes to the dashboard, the web
-application is reachable, persisted state matches the UI, and no unrelated
-resource changes. Record visual/copy problems as failures or release issues;
-do not normalize them away as spinner noise.
+The first launch proceeds from its Welcome confirmation through automatic
+defaults and completes without an additional-instance settings/review pause.
+The second launch routes to the dashboard, the web application is reachable,
+the persisted defaults match the runtime resource contract and documented
+policy, and no unrelated resource changes. Record visual/copy problems as
+failures or release issues; do not normalize them away as spinner noise.

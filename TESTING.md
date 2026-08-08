@@ -163,8 +163,8 @@ The checked-in procedures are the required source for behavior that cannot be
 safely or reliably exercised on hosted runners:
 
 - [Bare `omnideck` first run](tests/manual/first-run.md) verifies the real
-  terminal-first setup, review, resource creation, dashboard routing, and
-  second-launch behavior.
+  terminal-first setup, automatic recommended defaults, resource creation,
+  dashboard routing, and second-launch behavior.
 - [Windows clean-host installation](tests/manual/windows-clean-host.md)
   verifies clean installation, WSL/runtime setup, permission UI,
   restart/resume, repair, and preservation of persistent volumes.
