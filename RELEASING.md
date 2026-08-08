@@ -1,8 +1,10 @@
 # Releasing Omnideck CLI
 
-This file is the authoritative release and promotion checklist. Test-suite
-implementation details live in [TESTING.md](TESTING.md), while procedures that
-require a person or agent live in [tests/manual](tests/manual/README.md).
+This file is the authoritative procedure for tagging, approving, and publishing
+a release. [TESTING.md](TESTING.md) is the authoritative source for test
+requirements, evidence, supported matrices, and promotion gates. Procedures
+that require a person or agent live in
+[tests/manual](tests/manual/README.md).
 
 Omnideck CLI uses Semantic Versioning and GitHub prereleases. A version suffix
 selects the release channel automatically:
@@ -58,44 +60,21 @@ Fix issues on `main`, then publish the next identifier:
 v0.8.0-alpha.1 → v0.8.0-alpha.2 → v0.8.0-beta.1 → v0.8.0-rc.1 → v0.8.0
 ```
 
-Recommended gates:
+The required alpha, beta, RC, and stable gates are defined only in the
+[promotion gates section of TESTING.md](TESTING.md#promotion-gates). Apply the
+gate for the intended channel before creating its tag. Promotion is based on
+evidence for the exact commit and assets, not time spent in a channel.
 
-- Alpha: hosted CI and packaged portable-contract checks pass; the release is a
-  meaningful testable increment rather than an artifact from every merge.
-- Beta: alpha gates plus Podman lifecycle and guided setup evidence across the
-  available supported-platform matrix.
-- RC: beta gates plus first-run, restart/resume where applicable, update,
-  rollback, backup/restore, multi-instance, and removal evidence. All six
-  packaged targets must pass static validation, and native execution gaps must
-  be recorded explicitly.
-- Stable: the selected RC has no unresolved release blockers and its notes call
-  out upgrades and known issues. Any code change requires another RC.
+## Candidate evidence and approval
 
-Beta may be skipped only when the candidate has already satisfied every beta
-and RC gate. Promotion is based on evidence, not time spent in a channel.
-
-## Candidate-to-release checklist
-
-Before creating an RC tag, record the candidate commit, source alpha, intended
-RC version, and links or attachments for every applicable item below:
-
-- [ ] Hosted CI is green on the exact candidate commit.
-- [ ] The published alpha passes the portable release contract.
-- [ ] All six archives have the expected format, architecture, checksum, SBOM,
-      and provenance.
-- [ ] Podman lifecycle tests passed on every machine presently available.
-- [ ] Bare `omnideck` first-run completed from a clean configuration.
-- [ ] Windows installation and restart/resume were checked, or the native gap
-      is explicitly recorded.
-- [ ] Upgrade, persistent-volume, backup/restore, multi-instance, removal, and
-      Ollama scenarios were checked as applicable.
-- [ ] Desktop/Tauri consumers accept JSON contract 2 and runtime schema 4,
-      including valid status JSON accompanied by a nonzero process exit.
-- [ ] Known issues were reviewed and none is an unresolved release blocker.
+Before creating a promotion tag, record the candidate commit, source release,
+intended version, and the evidence required by the intended channel in
+[TESTING.md](TESTING.md). Use the checked-in procedures under `tests/manual`
+for every required manual journey.
 
 The protected `release` environment is the enforcement point while clean-host
 and hardware testing is manual. Do not approve its publication step until the
-checklist evidence has been reviewed.
+required pre-publication evidence has been reviewed.
 
 After the tag is pushed, the release workflow repeats source verification,
 builds all six targets, statically validates every binary, and executes the

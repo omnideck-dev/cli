@@ -1,245 +1,250 @@
-# omnideck — Testing & Open Questions
+# Omnideck CLI testing policy
 
-This file tracks known assumptions, untested configurations, and open questions
-to validate before a broader release. Items marked ✅ have been verified.
+This document is the authoritative source for Omnideck CLI test requirements,
+release evidence, supported test matrices, and prerelease promotion gates.
+[RELEASING.md](RELEASING.md) defines the mechanics for tagging, approving, and
+publishing a release. Suite-specific operating instructions live beside each
+suite.
 
-## Test layers and release policy
+A workflow, public contract, supported target, or promotion requirement must be
+updated here in the same pull request that changes it. A passing check proves
+only the behavior described by its test layer; unavailable hardware or an
+unexecuted manual procedure is recorded as blocked coverage, never as a pass.
 
-Omnideck uses four deliberately separate test layers:
+## Test layers
 
-1. Package unit and smoke tests exercise source on every merge.
-2. `tests/releasecontract` treats a compiled or packaged CLI as a black box and
-   checks executable architecture, process behavior, JSON, exit codes, stderr,
-   non-interactive safety, and timeouts without invoking Podman.
-3. `tests/hardware` exercises uniquely named containers, volumes, ports, and
-   temporary configuration against a real runtime. Podman is the release gate;
-   Docker coverage is retained only for legacy/coexistence diagnostics.
-4. `tests/manual` covers the terminal-first bare `omnideck` journey, clean-host
-   installation, operating-system permission UI, restart/resume, and scenarios
-   that cannot currently run on GitHub-hosted machines.
+Omnideck uses four separate layers. No layer substitutes for a later layer.
 
-The release contract can be run locally against an extracted binary:
+| Layer | Implementation | Required evidence |
+|---|---|---|
+| Source | Go unit and smoke tests, formatting, module consistency, vet, staticcheck, actionlint, race detection, dependency review, and vulnerability scanning | Command result or GitHub Actions run for the exact commit |
+| Release contract | [`tests/releasecontract`](tests/releasecontract/README.md) | JSON and optional JUnit reports for the exact binary or archive |
+| Hardware lifecycle | [`tests/hardware`](tests/hardware/README.md) | Harness report and diagnostics from a dedicated machine using Podman |
+| Manual journey | [`tests/manual`](tests/manual/README.md) | A completed procedure with host inventory, commands, observations, cleanup, and pass/fail/blocked result |
+
+The source and release-contract layers are non-destructive. Hardware and manual
+tests may create containers, volumes, machine state, or operating-system state
+and therefore run only on dedicated machines or disposable virtual machines.
+
+## Source verification
+
+`make verify` is the canonical local source gate. It runs:
+
+- `gofmt` checking;
+- `go mod tidy -diff`;
+- `go vet ./...`;
+- staticcheck with the version and checks configured in the `Makefile`;
+- actionlint with the version configured in the `Makefile`;
+- `go test ./...`; and
+- govulncheck with the version configured in the `Makefile`.
+
+Run the race detector separately with `make race`.
+
+The `CI` workflow applies these requirements to pull requests and `main`:
+
+- `quality` runs the formatting, module, vet, staticcheck, and workflow checks;
+- `vulnerability-check` verifies downloaded modules and scans reachable code;
+- `race` runs the Go test suite with the race detector;
+- native test jobs run vet, tests, a build, and the portable release contract
+  on Linux x64, Linux ARM64, macOS ARM64, and Windows x64;
+- cross-build jobs compile macOS x64 and Windows ARM64; and
+- `dependency-review` runs when the event is a pull request.
+
+CodeQL is a required repository check and runs independently of `CI`. A commit
+is not release-ready until every required CI and CodeQL check is successful.
+
+## Release contract
+
+The release contract treats the CLI executable as a black box and does not
+import implementation packages. It accepts either an extracted binary with
+`--binary` or a release archive with `--archive`.
+
+`artifact` mode extracts the archive when necessary and verifies that the
+binary is nonempty and has the expected executable format and architecture.
+
+`portable` mode includes the artifact checks and executes bounded,
+non-destructive commands with closed stdin and a temporary
+`OMNIDECK_CONFIG_DIR`. It verifies:
+
+- checked-in JSON schemas compile;
+- text and JSON version output, including the expected embedded version;
+- root and subcommand help surfaces;
+- bare non-interactive behavior;
+- structured JSON success and error output with clean stderr;
+- JSON contract 2 and runtime status schema 4;
+- early argument and dispatch errors remain machine-readable;
+- ambiguous instance selection never prompts in automation; and
+- destructive removal requires explicit flags.
+
+Portable mode does not invoke Podman or Docker. The schemas under `contracts/`
+are part of the public process boundary and are executed by the contract suite,
+not merely documented examples.
+
+Example for an extracted binary:
 
 ```sh
-go run ./tests/releasecontract --binary /path/to/omnideck \
-  --mode portable --expected-os linux --expected-arch amd64
+go run ./tests/releasecontract \
+  --binary /path/to/omnideck \
+  --mode portable \
+  --expected-version v0.10.0-alpha.2 \
+  --expected-os linux \
+  --expected-arch amd64 \
+  --report artifacts/release-contract/report.json \
+  --junit artifacts/release-contract/junit.xml
 ```
 
-The detailed promotion gate is maintained in [RELEASING.md](RELEASING.md).
-Machine-readable public schemas are maintained under `contracts/`. Generated
-reports belong in `artifacts/` or GitHub Actions artifacts, not source control.
+## Packaged target matrix
 
-The remainder of this document tracks known assumptions, untested
-configurations, and platform risks. Older Docker scenarios do not override the
-current Podman-only product policy.
+Every release produces and statically validates all six archives. Portable
+execution is required where GitHub provides the corresponding native runner.
 
----
+| Target | Archive | Pre-publication artifact validation | Native portable execution |
+|---|---|---:|---:|
+| Linux x64 | `omnideck-linux-amd64.tar.gz` | Required | Required |
+| Linux ARM64 | `omnideck-linux-arm64.tar.gz` | Required | Required |
+| macOS x64 | `omnideck-darwin-amd64.tar.gz` | Required | Not available on the hosted matrix |
+| macOS ARM64 | `omnideck-darwin-arm64.tar.gz` | Required | Required |
+| Windows x64 | `omnideck-windows-amd64.zip` | Required | Required |
+| Windows ARM64 | `omnideck-windows-arm64.zip` | Required | Not available on the hosted matrix |
 
-## 1. Container Internal Port
+The `Release` workflow enforces the following sequence for a version tag:
 
-**Current behavior:** The container app listens on port 8080 internally. The CLI
-maps each instance's chosen host port (2337, 2338, …) to container port 8080.
+1. Validate the SemVer tag and confirm its commit is already on `main`.
+2. Run `make verify` against the tagged source.
+3. Build all six targets and generate executable SBOMs and attestations.
+4. Validate the final archive and architecture for all six targets.
+5. Run the packaged portable contract on the four native hosted targets.
+6. Pause at the protected `release` environment.
+7. Generate `SHA256SUMS`, attest the release archives and checksum manifest,
+   and publish the GitHub release after approval.
 
-**Risk:** If the image binds to a different port (e.g., 3000, 8000), the
-`-p HOST:8080` mapping silently fails — the container starts but the web UI is
-unreachable on any host port.
+After publication, the manually dispatched `Test a published CLI release`
+workflow downloads the public assets. It verifies the published checksum and
+GitHub attestation for every archive, runs artifact mode for all six targets,
+and runs portable mode for the four native hosted targets.
 
-**To test:**
-- `docker inspect --format '{{json .Config.ExposedPorts}}' <container>` — check
-  which ports the image declares
-- Run and confirm `http://localhost:2337` loads
-- Check whether the app logs show it reading the `PORT` env var
+```sh
+gh workflow run release-contract.yml \
+  --ref main \
+  -f version=v0.10.0-alpha.2
+```
 
----
+## Hardware lifecycle requirements
 
-## 2. Multi-Instance (Two Omnideck Installs)
+Podman is the release-gating container runtime. Docker mode exists only for
+legacy and coexistence diagnostics and is not evidence that the production
+runtime path passed.
 
-**To test:**
-- Set up a second instance (`omnideck setup`), confirm it picks port 2338
-- Both containers running simultaneously — confirm port 2337 and 2338 both load
-  correct web UIs
-- `omnideck status` / `omnideck --name omnideck2 status` — correct instance shown
-- `omnideck stop` / `omnideck --name omnideck2 stop` — stops correct instance only
-- `omnideck instance remove omnideck2` removes only the named instance
+The hardware harness uses unique `omnideck-hw-*` resources, high ports,
+temporary configuration, a local fixture registry, and a fixture image. It
+verifies explicit runtime selection, non-interactive setup, shared runtime and
+instance configuration, web UI port mapping, status, logs, persistent volumes,
+stop/start/restart, doctor output, removal, cleanup, and machine-readable
+reports. It does not install a runtime or exercise interactive operating-system
+permission flows.
 
----
+Run it directly on a dedicated machine:
 
-## 3. Named Volume Persistence / Instance Removal
+```sh
+OMNIDECK_HARDWARE_ENGINE=podman ./tests/hardware/run.sh
+```
 
-**Approach:** Docker and Podman use named volumes for `/home/omnideck` and
-`/var/lib/omnideck`, so host filesystem ownership no longer affects instance removal.
+```powershell
+./tests/hardware/run.ps1 -Engine podman
+```
 
-**To test:**
-- After install, inspect mounts and confirm `Type:"volume"`, not `Type:"bind"`
-- Confirm volumes are named `{container}-home` and `{container}-state`
-- Remove instance → delete saved data → should succeed without `sudo`
-- Test the backup path (answer yes to backup prompt) — tar.gz created and complete
-- Test with a container that has written files before removal (not just empty volumes)
+The `Hardware lifecycle tests` workflow is manual and targets hardened
+self-hosted Linux x64, Windows x64, and macOS ARM64 runners. It is not part of
+`release.yml` and does not run when those runners are unavailable.
 
----
+## Manual requirements
 
-## 4. Container Runtime × OS Matrix
+The checked-in procedures are the required source for behavior that cannot be
+safely or reliably exercised on hosted runners:
 
-Combinations to validate end-to-end (setup → use → remove instance):
+- [Bare `omnideck` first run](tests/manual/first-run.md) verifies the real
+  terminal-first setup, review, resource creation, dashboard routing, and
+  second-launch behavior.
+- [Windows clean-host installation](tests/manual/windows-clean-host.md)
+  verifies clean installation, WSL/runtime setup, permission UI,
+  restart/resume, repair, and preservation of persistent volumes.
+- [Upgrade, backup, restore, and removal](tests/manual/upgrade-backup-restore.md)
+  verifies upgrade and rollback behavior, persistent data, simultaneous
+  instances, keep/delete choices, backup contents, restore, and cleanup.
 
-| Container runtime | OS            | Notes                                      |
-|-----------------|-----------------|---------------------------------------------|
-| Docker          | Linux           | Primary target. `OLLAMA_HOST=http://host-gateway:11434` |
-| Podman rootless | Linux (Fedora)  | Primary target. Built-in host aliases      |
-| Podman rootless | Linux (Ubuntu)  | Podman version may differ                  |
-| Podman rootful  | Linux           | Named volume behavior should match rootless |
-| Docker Desktop  | macOS           | Volume ownership handled by Desktop        |
-| Podman          | macOS           | Host aliases resolved by Podman machine DNS |
+Each execution must identify the release tag and binary SHA-256; host,
+architecture, runtime, WSL, and operating-system versions; starting and final
+resource inventories; commands and exit codes; observations; cleanup; and an
+explicit pass, fail, or blocked result. Agents follow the same procedures and
+must stop before altering resources that were not created for the test.
 
----
+## Promotion gates
 
-## 5. Docker Version Requirements
+Promotion is based on evidence for the exact candidate commit and published
+assets. A new tag creates a new build; an alpha is never renamed or mutated
+into a beta or RC.
 
-**`--add-host=host-gateway:host-gateway`** was introduced in Docker 20.10.
-On older Docker, `docker run` fails with an unrecognised host entry error.
+### Alpha
 
-**To test:**
-- Check `docker version` and confirm ≥ 20.10 before using `host-gateway`
-- Consider adding a preflight version check in the doctor command
+Before an alpha is published, it requires:
 
-**Mitigation if needed:** Fall back to getting the docker bridge IP dynamically
-(`docker network inspect bridge --format '{{range .IPAM.Config}}{{.Gateway}}{{end}}'`)
-and using that as a literal IP address instead of `host-gateway`.
+- required CI and CodeQL checks green on the exact commit;
+- the tag accepted by the release source-verification gate;
+- all six final archives passing artifact validation;
+- all four native packaged targets passing the portable contract;
+- successful checksum, SBOM, and provenance generation.
 
----
+After publication, the published-release workflow must pass against the public
+assets. A failure does not mutate or replace the immutable alpha; it leaves that
+alpha unqualified as evidence for a later promotion until the issue is fixed in
+a new release.
 
-## 6. Podman Version Requirements
+An alpha is cut for a meaningful testable increment, not for every merge.
 
-**Policy:** Do not reject or warn about Podman based only on its major version.
-Podman 3.4 already documents `host.containers.internal`, while current Podman
-documentation says the address can still be skipped when Podman cannot determine
-the route back to the host. Version alone is not a reliable connectivity test.
+### Beta
 
-**Risk:** RHEL 8 ships Podman 3.x. Ubuntu 20.04 LTS ships an older version.
-On these systems, Ollama may be silently unreachable.
+A beta requires every alpha gate plus recorded Podman hardware-lifecycle and
+guided-setup evidence on every supported test machine available for the
+candidate. Any unavailable machine is recorded as blocked coverage.
 
-**To test:**
-- On a Podman 3.x system (VM / container), verify installation and cloud AI use
-- Verify local Ollama connectivity from inside the installed Omnideck container
-- Confirm the wizard neither blocks nor warns based only on Podman's version
+### Release candidate
 
----
+An RC requires every beta gate plus recorded evidence for:
 
-## 6a. Guided Runtime Bootstrap
+- bare `omnideck` first run from clean configuration;
+- Windows clean-host installation and restart/resume when Windows is in scope;
+- upgrade and rollback from the supported prior release;
+- persistent-volume preservation;
+- backup and restore;
+- multiple simultaneous instances;
+- instance removal with both keep and delete choices;
+- local Ollama connectivity where applicable; and
+- Desktop/Tauri compatibility with JSON contract 2 and runtime schema 4,
+  including valid status JSON accompanied by a nonzero process exit where the
+  command reports a non-ready state.
 
-The user journeys, runtime stages, and primary platform choices are documented
-in [docs/setup-flow-matrix.md](docs/setup-flow-matrix.md). Keep that matrix and
-the table-driven setup tests in sync when adding a runtime state or platform.
+All six targets must pass artifact validation. The four native hosted targets
+must pass portable execution. The two hosted-native gaps must remain explicit
+in the candidate evidence and may be supplemented by dedicated hardware.
 
-Validate the new no-runtime and repair paths before promoting the preview:
+### Stable
 
-| Host | Initial state | Expected default/action |
-|---|---|---|
-| Ubuntu/Debian | Neither installed | Recommend Podman; run `apt-get update` then `apt-get install -y podman` with narrow `sudo` |
-| Fedora/RHEL | Neither installed | Recommend Podman via `dnf` |
-| Linux | Docker socket permission denied | Explain that Docker access can give apps full control of the computer; do not change account groups |
-| macOS | Podman installed, no machine | Run `podman machine init --now --update-connection=true`, then continue without a technical connection prompt |
-| macOS | Docker Desktop stopped | Launch app, wait, then recheck |
-| Windows | Neither installed | Show only the Docker Desktop/WSL 2 setup; `--runtime podman` overrides it |
-| Windows | Podman machine stopped | Run `podman machine start`, then continue |
-| WSL 2 | Neither usable | Recommend Windows Docker Desktop and WSL integration |
-| Any | Exactly one runtime installed | Use it when ready, or show only its repair path when broken |
-| Any | Both runtimes installed | Show the runtime picker |
+A stable release requires a selected RC with no unresolved release blocker.
+Release notes must describe upgrade behavior and known limitations. Any source
+change requires a new RC and a complete application of the applicable gates.
 
-For every case, verify:
+Beta may be skipped only when the candidate already satisfies every beta and RC
+requirement.
 
-- The reason Omnideck needs a runtime is visible before any setup action.
-- Every command is available under **commands** before execution and uses direct arguments, not a shell pipeline. Installer URLs stay out of the normal flow because Omnideck opens them for the user.
-- Omnideck itself runs as the current user. Only the computer's built-in software or background-app tool may ask for the user's account password.
-- `--plain` prints guidance and exits non-zero without modifying the host.
-- The first setup honors `--runtime docker` or `--runtime podman`; later setups keep the saved machine-wide runtime.
+## Evidence and retention
 
----
+Automated evidence consists of immutable GitHub Actions run URLs and their
+uploaded JSON/JUnit reports, SBOMs, checksums, and attestations. Local generated
+reports belong under `artifacts/` and are not committed.
 
-## 7. Networking — Ollama Connectivity
-
-With the switch from `--network host` to bridge networking, Ollama access routes
-through a host alias instead of the loopback.
-
-The CLI always sets `OLLAMA_HOST` inside the Omnideck container. The app should
-read that env var instead of hardcoding a host name.
-
-**Docker/Linux:** `OLLAMA_HOST=http://host-gateway:11434` (requires Docker 20.10+)
-**Podman/Linux:** `OLLAMA_HOST=http://host.containers.internal:11434`
-**macOS/Windows Docker:** `OLLAMA_HOST=http://host.docker.internal:11434`
-**Windows Podman:** `OLLAMA_HOST=http://host.containers.internal:11434`
-
-**To test:**
-- Install with Ollama running → confirm the web UI can use Ollama models
-- Install with Ollama NOT running → confirm the install succeeds with the
-  expected warning, then start Ollama after and confirm it connects
-- Check container logs for Ollama connection errors: `omnideck logs`
-- On Windows with Podman and default Ollama settings, confirm preflight says
-  Ollama is running but does not call it ready. Confirm setup then checks from
-  inside the Omnideck container and, if that fails, shows the `OLLAMA_HOST`
-  user-variable and Ollama restart steps.
-
----
-
-## 8. SELinux (RHEL / Fedora)
-
-Named volumes do not require bind-mount relabel flags.
-
-**To test:**
-- Install on Fedora/RHEL with SELinux enforcing
-- Confirm no AVC denial in `journalctl -xe` or `ausearch -m avc`
-
----
-
-## 9. macOS — Docker Desktop Port Behaviour
-
-macOS `--network host` behaves differently in Docker Desktop (the container runs
-in a Linux VM). The SPEC originally noted this as limited. Now that we use bridge
-networking with explicit `-p` mapping, this should be more reliable.
-
-**To test:**
-- Install on macOS Docker Desktop → confirm port 2337 loads
-- Second instance on port 2338 → confirm both load
-- Confirm Ollama at `host.docker.internal:11434` is reachable from the container
-
----
-
-## 10. Memory / SHM Defaults
-
-The formula `M = max(1, min(floor(0.2 × HostRAM_GB), 8))` is applied at install
-time. SHM = 50% of M.
-
-**To test:**
-- On a machine with < 5 GB RAM — confirm minimum 1g is suggested
-- On a machine with 64+ GB RAM — confirm maximum 8g is capped
-- Confirm the container actually starts with the specified memory limit
-  (`docker inspect --format '{{.HostConfig.Memory}}' <container>`)
-- Test that the user can override the default in the TUI and it takes effect
-
----
-
-## 11. Instance Removal — Named Volumes
-
-`omnideck instance remove NAME` keeps Docker/Podman named volumes by default and
-removes them only when the user confirms permanent data deletion. Host
-bind-mount directories are never removed by the CLI.
-
-**To test:**
-- Confirm removal prompts to delete `{container}-home` and `{container}-state`
-- Confirm declining the prompt preserves both volumes
-- Confirm accepting the prompt removes both volumes
-
----
-
-## 12. Backup Archive
-
-`omnideck instance remove NAME` optionally creates a `.tar.gz` backup before deleting
-volumes. The archive contains native volume exports as `home.tar` and
-`state.tar`.
-
-**To test:**
-- Answer yes to backup prompt — verify archive created in home directory
-- Verify archive contains `home.tar` and `state.tar`
-- Verify archive can be extracted: `tar xzf omnideck-backup-*.tar.gz`
-- Verify a nested export can be inspected with `tar tf home.tar`
-- Test with very large shared directories — does it block the terminal?
+Hardware and manual evidence is attached to the candidate's promotion record.
+The protected `release` environment is the pre-publication approval point:
+approval means the reviewer has confirmed that all requirements applicable
+before publication are present and passing. Post-publication checks complete
+the release evidence. A failed or blocked required item prevents a later
+promotion from using that release as qualifying evidence.
