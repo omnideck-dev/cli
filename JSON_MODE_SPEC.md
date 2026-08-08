@@ -3,6 +3,12 @@
 `--json` is the stable process boundary for native shells and automation. It
 never prompts, opens a TUI, or writes styled text to stdout. The contract
 version is returned by `omnideck --json --version` as `jsonContract`.
+Machine-readable schemas live under [`contracts/`](contracts/README.md).
+
+Structured failures are written to stdout without Cobra appending an empty
+`Error:` line or command usage to stderr. Callers should still capture both
+streams for diagnostics, but they never need to parse Cobra text to understand
+a JSON-mode result.
 
 Ordinary commands emit one JSON value. Long-running commands emit newline-
 delimited JSON (NDJSON), one flushed event per line:

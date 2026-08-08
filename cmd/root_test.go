@@ -9,6 +9,26 @@ import (
 	"github.com/omnideck-dev/cli/engine"
 )
 
+func TestArgsRequestJSONBeforeCobraParsing(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "bare flag", args: []string{"--json", "status"}, want: true},
+		{name: "explicit true", args: []string{"status", "--json=true"}, want: true},
+		{name: "explicit false", args: []string{"--json=false", "status"}, want: false},
+		{name: "last value wins", args: []string{"--json=false", "--json", "status"}, want: true},
+		{name: "positional after terminator", args: []string{"status", "--", "--json"}, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := argsRequestJSON(test.args); got != test.want {
+				t.Fatalf("argsRequestJSON(%v) = %t, want %t", test.args, got, test.want)
+			}
+		})
+	}
+}
+
 func TestChooseInteractiveStart(t *testing.T) {
 	installed := &config.Config{ContainerName: "omnideck"}
 	instances := []config.InstanceInfo{{Name: "omnideck", Config: installed}}

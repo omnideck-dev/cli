@@ -1,5 +1,9 @@
 # Releasing Omnideck CLI
 
+This file is the authoritative release and promotion checklist. Test-suite
+implementation details live in [TESTING.md](TESTING.md), while procedures that
+require a person or agent live in [tests/manual](tests/manual/README.md).
+
 Omnideck CLI uses Semantic Versioning and GitHub prereleases. A version suffix
 selects the release channel automatically:
 
@@ -43,8 +47,12 @@ the latest stable release.
 
 ## Promotion
 
-Do not rebuild an existing version or retag a different commit. Fix issues on
-`main`, then publish the next identifier:
+Promotion creates a new immutable tag and release. Never rename an alpha into
+an RC, replace its assets, move a published tag, or retag a different commit.
+An RC may use the same source commit as a tested alpha, but it is still rebuilt
+with new embedded version metadata and therefore has different binary hashes.
+
+Fix issues on `main`, then publish the next identifier:
 
 ```text
 v0.8.0-alpha.1 → v0.8.0-alpha.2 → v0.8.0-beta.1 → v0.8.0-rc.1 → v0.8.0
@@ -52,10 +60,52 @@ v0.8.0-alpha.1 → v0.8.0-alpha.2 → v0.8.0-beta.1 → v0.8.0-rc.1 → v0.8.0
 
 Recommended gates:
 
-- Alpha: unit tests pass and the guided setup renders on every target OS.
-- Beta: runtime setup has been exercised on the supported platform matrix.
-- RC: setup, update, rollback, and instance removal pass end-to-end.
-- Stable: no unresolved release blockers; notes call out upgrades and known issues.
+- Alpha: hosted CI and packaged portable-contract checks pass; the release is a
+  meaningful testable increment rather than an artifact from every merge.
+- Beta: alpha gates plus Podman lifecycle and guided setup evidence across the
+  available supported-platform matrix.
+- RC: beta gates plus first-run, restart/resume where applicable, update,
+  rollback, backup/restore, multi-instance, and removal evidence. All six
+  packaged targets must pass static validation, and native execution gaps must
+  be recorded explicitly.
+- Stable: the selected RC has no unresolved release blockers and its notes call
+  out upgrades and known issues. Any code change requires another RC.
+
+Beta may be skipped only when the candidate has already satisfied every beta
+and RC gate. Promotion is based on evidence, not time spent in a channel.
+
+## Candidate-to-release checklist
+
+Before creating an RC tag, record the candidate commit, source alpha, intended
+RC version, and links or attachments for every applicable item below:
+
+- [ ] Hosted CI is green on the exact candidate commit.
+- [ ] The published alpha passes the portable release contract.
+- [ ] All six archives have the expected format, architecture, checksum, SBOM,
+      and provenance.
+- [ ] Podman lifecycle tests passed on every machine presently available.
+- [ ] Bare `omnideck` first-run completed from a clean configuration.
+- [ ] Windows installation and restart/resume were checked, or the native gap
+      is explicitly recorded.
+- [ ] Upgrade, persistent-volume, backup/restore, multi-instance, removal, and
+      Ollama scenarios were checked as applicable.
+- [ ] Desktop/Tauri consumers accept JSON contract 2 and runtime schema 4,
+      including valid status JSON accompanied by a nonzero process exit.
+- [ ] Known issues were reviewed and none is an unresolved release blocker.
+
+The protected `release` environment is the enforcement point while clean-host
+and hardware testing is manual. Do not approve its publication step until the
+checklist evidence has been reviewed.
+
+After the tag is pushed, the release workflow repeats source verification,
+builds all six targets, statically validates every binary, and executes the
+packaged portable contract on native GitHub-hosted Windows x64, Linux x64,
+Linux ARM64, and macOS ARM64 runners. Publication depends on those jobs. After
+publication, download the public assets once more and verify their checksums,
+provenance, embedded version, and portable contract.
+
+If any RC check fails after publication, fix forward on `main` and publish the
+next RC number. Do not replace the failed RC.
 
 GitHub-generated notes are a useful baseline. Curate the release description for
 user-visible changes, upgrade notes, known limitations, and a short request for
