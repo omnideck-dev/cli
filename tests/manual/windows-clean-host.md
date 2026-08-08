@@ -28,7 +28,8 @@ daily-use Windows installation.
    no second application instance is created.
 10. Remove only the application container while preserving both volumes, then
     relaunch. Confirm Doctor/repair is selected and the volumes remain intact.
-11. Save final inventories, screenshots, transcript, and pass/fail result, then
+11. Save final inventories, a compact transcript, the pass/fail result, and
+    only the screenshots needed to prove or diagnose visual behavior; then
     revert the VM snapshot.
 
 ## Pass criteria

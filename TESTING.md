@@ -157,6 +157,109 @@ The `Hardware lifecycle tests` workflow is manual and targets hardened
 self-hosted Linux x64, Windows x64, and macOS ARM64 runners. It is not part of
 `release.yml` and does not run when those runners are unavailable.
 
+## Local disposable VM lab
+
+Some development workstations may provide an external QEMU/KVM release lab.
+The lab is not stored in this repository and is not assumed to exist on every
+machine. Its root contains `lab.sh`, a lab-specific `README.md`, verified base
+images, clean golden states, and disposable overlay disks. When it is
+available, use it for the hardware and manual layers instead of changing the
+developer host's Podman, Docker, WSL, containers, volumes, or packages.
+
+Point to the external checkout without recording its machine-specific path in
+committed files:
+
+```sh
+export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
+test -x "$OMNIDECK_VM_LAB_DIR/lab.sh"
+cd "$OMNIDECK_VM_LAB_DIR"
+./lab.sh status
+```
+
+The currently provisioned x64 guests are:
+
+| VM identifier | Clean guest | Appropriate CLI coverage |
+|---|---|---|
+| `appimage` | Ubuntu 24.04 | Mutable Ubuntu clean-host, first-run, lifecycle, and upgrade tests |
+| `deb` | Debian 13 | Mutable Debian clean-host and lifecycle tests |
+| `rpm` | Fedora 44 Workstation | Mutable Fedora clean-host and lifecycle tests |
+| `atomic` | Fedora Silverblue 44 | Immutable-host compatibility; Podman is part of the stock image |
+| `windows` | Windows 11 x64 | Windows clean-host, WSL/Podman, restart/resume, lifecycle, and upgrade tests |
+
+The identifiers describe the VMs' original desktop-package roles. They do not
+mean that the CLI release publishes AppImage, DEB, or RPM packages; CLI release
+inputs remain the archives in the packaged target matrix. The lab has no
+macOS guest, so it cannot satisfy required native macOS manual coverage. It
+also cannot make the Silverblue guest satisfy a "Podman absent" precondition,
+because Silverblue includes Podman in its base deployment.
+
+### Normal VM workflow
+
+Choose the guest required by the checked-in manual procedure. Start only the
+VMs needed for the current run unless host capacity has been checked.
+
+```sh
+./lab.sh status deb
+./lab.sh start deb
+./lab.sh wait deb
+./lab.sh verify deb
+./lab.sh viewer deb
+# Or, for non-visual work:
+./lab.sh ssh deb
+```
+
+`wait` checks initial cloud-image or Windows provisioning. The installed
+Silverblue golden uses `start`, `verify`, `viewer`, and `ssh`; its separate
+installer workflow is only for rebuilding that golden. Use `viewer` for bare
+TUI journeys, operating-system prompts, Windows restart/resume, and any result
+whose visual behavior matters. SSH is suitable for inventory, transferring or
+downloading verified assets, portable checks, and non-visual lifecycle steps.
+
+Run the applicable procedure under [`tests/manual`](tests/manual/README.md)
+inside the guest. Use the exact candidate asset and, for upgrade testing, the
+actual supported previous-stable asset. Verify their checksums, provenance,
+embedded versions, and architecture before mutating the guest. Do not bake a
+candidate binary, runtime, or application state into a clean golden.
+
+At the end of the run, copy out the compact report, stop the guest, and restore
+its disposable disk:
+
+```sh
+./lab.sh stop deb
+./lab.sh reset deb
+./lab.sh status deb
+```
+
+`reset` is destructive to the active guest state and archives the old overlay
+under the lab's `discarded/` directory before recreating it from the golden.
+Confirm the report has everything needed before resetting, do not reset an
+unknown active run, and remove known-stale discarded overlays after they are no
+longer needed. Repeating `reset` unnecessarily consumes disk. `snapshot`
+replaces the trusted golden state and is reserved for deliberate lab
+maintenance; never run it as release-test cleanup. Likewise,
+`install-windows` and `install-atomic` are rebuild operations, not normal test
+commands.
+
+### Lab evidence and privacy
+
+Store local results outside the repository, normally beneath the lab's
+`artifacts/<candidate>/<guest>/` directory. A result should contain a compact
+Markdown summary, exact hashes, commands and exit codes, relevant configuration
+and inventory, small diagnostic excerpts, and the cleanup result. Prefer
+immutable GitHub Actions and release URLs over local copies of public assets.
+
+Do not retain test-created or discarded VM overlays, copied release payloads,
+extracted binaries, package caches, full console recordings, large screenshots,
+application images, or backup archives after their required assertions have
+been summarized. Keep a minimal screenshot only when it is needed to explain a
+visual failure or issue.
+
+Before sharing or committing any report, remove personal usernames, home
+directories, hostnames, external IP addresses, tokens, personal SSH material,
+and machine-specific lab paths. Generic guest identifiers and loopback
+addresses are sufficient. Lab images, seeds, firmware state, keys, logs, and
+artifacts are local infrastructure and must not be added to this repository.
+
 ## Manual requirements
 
 The checked-in procedures are the required source for behavior that cannot be
@@ -273,3 +376,10 @@ approval means the reviewer has confirmed that all requirements applicable
 before publication are present and passing. Post-publication checks complete
 the release evidence. A failed or blocked required item prevents a later
 promotion from using that release as qualifying evidence.
+
+Retain the smallest evidence set that proves the result. Compact reports,
+hashes, machine-readable summaries, and small failure-focused log excerpts are
+preferred. Once a public asset and its provenance are independently available,
+do not retain an additional local payload merely as evidence. Large local
+evidence must have a specific unresolved diagnostic purpose and should be
+removed after that purpose is satisfied.
