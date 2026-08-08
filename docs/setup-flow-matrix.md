@@ -7,11 +7,18 @@ failure next steps to a terminal. A user starts it by running bare `omnideck`;
 
 | Journey | Bare-command detection | Destination |
 | --- | --- | --- |
-| First setup | No saved OmniDeck instances | Welcome, automatic prerequisites and runtime, recommended instance defaults, application download, final checks |
+| First setup | No saved OmniDeck instances | Welcome, automatic prerequisites and runtime, automatically applied recommended instance defaults, application download, final checks |
 | Returning, working | At least one instance and Podman are ready | Control-plane dashboard |
 | Returning, runtime broken | Saved instances exist but Podman is not ready | Automatic runtime repair, then the dashboard; never create another instance |
 | Returning, instance broken | Podman is ready but a saved container is missing | Doctor on that instance, with its existing volumes preserved |
 | Add instance | User chooses Setup from the dashboard | Reuse/repair shared Podman, then show instance settings and review |
+
+A normal first setup has one confirmation: Enter on the Welcome screen. After
+the runtime is ready, valid recommended defaults are applied automatically and
+setup proceeds directly to the application phases. The settings and review
+screens belong to the add-instance journey. First setup reaches them only as a
+recovery path when a recommended value is invalid, such as a name or port
+collision.
 
 ## First-run phases
 
