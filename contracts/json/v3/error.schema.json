@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/omnideck-dev/cli/contracts/json/v3/error.schema.json",
+  "title": "Omnideck CLI structured error envelope",
+  "type": "object",
+  "required": ["error"],
+  "properties": {
+    "error": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": {
+          "enum": [
+            "AMBIGUOUS_INSTANCE",
+            "NOT_INSTALLED",
+            "ENGINE_NOT_FOUND",
+            "CONTAINER_NOT_FOUND",
+            "MISSING_REQUIRED_FLAG",
+            "MISSING_SUBCOMMAND",
+            "CANCELLED",
+            "RESTART_REQUIRED",
+            "PERMISSION_DENIED",
+            "PERMISSION_CANCELLED",
+            "WINDOWS_FEATURES_FAILED",
+            "PACKAGE_INDEX_FAILED",
+            "INSTALLER_FAILED",
+            "DOWNLOAD_FAILED",
+            "UNSUPPORTED",
+            "RUNTIME_SETUP_FAILED",
+            "PORT_IN_USE",
+            "CONTAINER_CONFLICT",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "message": { "type": "string", "minLength": 1 },
+        "hint": { "type": "string" },
+        "detail": { "type": "string" },
+        "action": {
+          "enum": ["runtime_setup", "start_instance", "setup_instance", "repair_instance"]
+        },
+        "actionValue": { "type": "string" },
+        "instances": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

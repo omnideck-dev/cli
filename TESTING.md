@@ -71,7 +71,7 @@ non-destructive commands with closed stdin and a temporary
 - root and subcommand help surfaces;
 - bare non-interactive behavior;
 - structured JSON success and error output with clean stderr;
-- JSON contract 2 and runtime status schema 4;
+- JSON contract 3 and runtime status schema 4;
 - early argument and dispatch errors remain machine-readable;
 - ambiguous instance selection never prompts in automation; and
 - destructive removal requires explicit flags.
@@ -175,6 +175,11 @@ test -x "$OMNIDECK_VM_LAB_DIR/lab.sh"
 cd "$OMNIDECK_VM_LAB_DIR"
 ./lab.sh status
 ```
+
+For the repeatable containerized CLI lifecycle, including the Go builder and
+guest staging/cleanup, use [`tests/manual/local-vm-lab.md`](tests/manual/local-vm-lab.md).
+It also records the exact `flock` ownership and graphical-viewer commands for
+steps that cannot be automated safely.
 
 The currently provisioned x64 guests are:
 
@@ -326,7 +331,7 @@ An RC requires every beta gate plus recorded evidence for:
 - multiple simultaneous instances;
 - instance removal with both keep and delete choices;
 - local Ollama connectivity where applicable; and
-- Desktop/Tauri compatibility with JSON contract 2 and runtime schema 4,
+- Desktop/Tauri compatibility with JSON contract 3 and runtime schema 4,
   including valid status JSON accompanied by a nonzero process exit where the
   command reports a non-ready state.
 

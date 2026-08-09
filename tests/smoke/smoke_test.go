@@ -221,8 +221,8 @@ func TestVersionJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
 		t.Fatalf("--version --json did not produce valid JSON: %v\n%s", err, stdout)
 	}
-	if payload.JSONContract != 2 {
-		t.Fatalf("jsonContract = %d, want 2", payload.JSONContract)
+	if payload.JSONContract != 3 {
+		t.Fatalf("jsonContract = %d, want 3", payload.JSONContract)
 	}
 	if payload.Version != "test" || payload.Commit != "abc1234" {
 		t.Fatalf("unexpected version payload: %+v", payload)

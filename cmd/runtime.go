@@ -153,8 +153,10 @@ func runRuntimeEnsure(_ *cobra.Command, _ []string) error {
 			if nd != nil {
 				nd.emit(runtimeSetupEventPayload{
 					Stage:    event.Stage,
+					Substage: event.Substage,
 					State:    event.State,
 					Activity: event.Activity,
+					Status:   event.Status,
 					Detail:   event.Detail,
 					Progress: event.Progress,
 				})
@@ -178,8 +180,10 @@ func runRuntimeEnsure(_ *cobra.Command, _ []string) error {
 
 type runtimeSetupEventPayload struct {
 	Stage    string   `json:"stage"`
+	Substage string   `json:"substage,omitempty"`
 	State    string   `json:"state"`
 	Activity string   `json:"activity,omitempty"`
+	Status   string   `json:"status,omitempty"`
 	Detail   string   `json:"detail,omitempty"`
 	Progress *float64 `json:"progress,omitempty"`
 }
@@ -195,10 +199,22 @@ func runtimeSetupJSONError(err error) *jsonCmdError {
 		code = ErrCodeRestartRequired
 	case engine.RuntimeSetupPermission:
 		code = ErrCodePermissionDenied
+	case engine.RuntimeSetupPermissionCancelled:
+		code = ErrCodePermissionCancelled
+	case engine.RuntimeSetupWindowsFeatures:
+		code = ErrCodeWindowsFeaturesFailed
+	case engine.RuntimeSetupPackageIndex:
+		code = ErrCodePackageIndexFailed
+	case engine.RuntimeSetupInstaller:
+		code = ErrCodeInstallerFailed
 	case engine.RuntimeSetupDownload:
 		code = ErrCodeDownloadFailed
 	case engine.RuntimeSetupSupport:
 		code = ErrCodeUnsupported
 	}
-	return newJSONError(code, setupError.Message).withHint(setupError.Hint)
+	structured := newJSONError(code, setupError.Message).withHint(setupError.Hint)
+	if setupError.Err != nil {
+		structured.withDetail(setupError.Err.Error())
+	}
+	return structured
 }

@@ -20,26 +20,30 @@ import (
 // JSON_MODE_SPEC.md changes in a way that isn't backward compatible. A
 // calling GUI checks this against the value it was built against before
 // trusting any other --json output.
-const jsonContract = 2
+const jsonContract = 3
 
 // Closed set of --json error codes. Every error surfaced under --json must
 // resolve to one of these — see JSON_MODE_SPEC.md's "Structured error shape".
 const (
-	ErrCodeAmbiguousInstance   = "AMBIGUOUS_INSTANCE"
-	ErrCodeNotInstalled        = "NOT_INSTALLED"
-	ErrCodeEngineNotFound      = "ENGINE_NOT_FOUND"
-	ErrCodeContainerNotFound   = "CONTAINER_NOT_FOUND"
-	ErrCodeMissingRequiredFlag = "MISSING_REQUIRED_FLAG"
-	ErrCodeMissingSubcommand   = "MISSING_SUBCOMMAND"
-	ErrCodeCancelled           = "CANCELLED"
-	ErrCodeRestartRequired     = "RESTART_REQUIRED"
-	ErrCodePermissionDenied    = "PERMISSION_DENIED"
-	ErrCodeDownloadFailed      = "DOWNLOAD_FAILED"
-	ErrCodeUnsupported         = "UNSUPPORTED"
-	ErrCodeRuntimeSetupFailed  = "RUNTIME_SETUP_FAILED"
-	ErrCodePortInUse           = "PORT_IN_USE"
-	ErrCodeContainerConflict   = "CONTAINER_CONFLICT"
-	ErrCodeInternal            = "INTERNAL_ERROR"
+	ErrCodeAmbiguousInstance     = "AMBIGUOUS_INSTANCE"
+	ErrCodeNotInstalled          = "NOT_INSTALLED"
+	ErrCodeEngineNotFound        = "ENGINE_NOT_FOUND"
+	ErrCodeContainerNotFound     = "CONTAINER_NOT_FOUND"
+	ErrCodeMissingRequiredFlag   = "MISSING_REQUIRED_FLAG"
+	ErrCodeMissingSubcommand     = "MISSING_SUBCOMMAND"
+	ErrCodeCancelled             = "CANCELLED"
+	ErrCodeRestartRequired       = "RESTART_REQUIRED"
+	ErrCodePermissionDenied      = "PERMISSION_DENIED"
+	ErrCodePermissionCancelled   = "PERMISSION_CANCELLED"
+	ErrCodeWindowsFeaturesFailed = "WINDOWS_FEATURES_FAILED"
+	ErrCodePackageIndexFailed    = "PACKAGE_INDEX_FAILED"
+	ErrCodeInstallerFailed       = "INSTALLER_FAILED"
+	ErrCodeDownloadFailed        = "DOWNLOAD_FAILED"
+	ErrCodeUnsupported           = "UNSUPPORTED"
+	ErrCodeRuntimeSetupFailed    = "RUNTIME_SETUP_FAILED"
+	ErrCodePortInUse             = "PORT_IN_USE"
+	ErrCodeContainerConflict     = "CONTAINER_CONFLICT"
+	ErrCodeInternal              = "INTERNAL_ERROR"
 )
 
 // jsonAction is the stable string form of workflow.CheckAction, shared by
@@ -81,6 +85,7 @@ type jsonErrorPayload struct {
 	Code        string   `json:"code"`
 	Message     string   `json:"message"`
 	Hint        string   `json:"hint,omitempty"`
+	Detail      string   `json:"detail,omitempty"`
 	Action      string   `json:"action,omitempty"`
 	ActionValue string   `json:"actionValue,omitempty"`
 	Instances   []string `json:"instances,omitempty"`
@@ -107,6 +112,11 @@ func newJSONError(code, message string) *jsonCmdError {
 
 func (e *jsonCmdError) withHint(hint string) *jsonCmdError {
 	e.payload.Hint = hint
+	return e
+}
+
+func (e *jsonCmdError) withDetail(detail string) *jsonCmdError {
+	e.payload.Detail = detail
 	return e
 }
 

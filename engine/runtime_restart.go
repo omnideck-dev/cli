@@ -15,7 +15,9 @@ const windowsSetupRunOnceName = "OmnideckSetupResume"
 var (
 	runtimeExecutable = os.Executable
 	runtimeRestartRun = func(name string, args ...string) error {
-		return exec.CommandContext(processCtx, name, args...).Run()
+		command := exec.CommandContext(processCtx, name, args...)
+		prepareHiddenConsoleCommand(command)
+		return command.Run()
 	}
 )
 

@@ -25,7 +25,10 @@ func buildCmd(binary string, args ...string) *exec.Cmd {
 	if debug.Enabled() {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", binary, strings.Join(args, " "))
 	}
-	return exec.CommandContext(processCtx, binary, args...)
+	command := exec.CommandContext(processCtx, binary, args...)
+	command.Env = hostCommandEnvironment(os.Environ())
+	prepareHiddenConsoleCommand(command)
+	return command
 }
 
 // RunSetupCommand executes one command from a SetupPlan and streams its

@@ -114,6 +114,9 @@ small Podman platform policy. Views do not construct platform commands.
   connection. An unrelated developer machine is never adopted.
 - Linux uses native Podman directly and never receives machine or connection
   flags.
+- Linux host commands clear AppImage-private dynamic-loader variables before
+  invoking distribution tools or Podman helpers, so host `conmon` loads the
+  distribution's GLib rather than a bundled desktop copy.
 - Windows machine creation uses the WSL provider and user-mode networking.
   macOS leaves CPU and sparse-disk defaults to Podman and sets only a detected
   memory ceiling that remains 2 GB above the container limit.
@@ -124,6 +127,11 @@ small Podman platform policy. Views do not construct platform commands.
 - Linux Desktop setup uses a graphical PolicyKit request. The interactive CLI
   may fall back to `sudo` because it owns a real terminal; the Desktop backend
   never launches a password prompt into an invisible pipe.
+- Setup installer and runtime helper commands are split by host in
+  `engine/runtime_setup_*_host.go`. On Windows, `engine/process_windows.go`
+  suppresses console windows only for console helpers; the UAC prompt remains
+  visible and MSI installation runs quietly with its result captured for the
+  TUI/Desktop.
 
 `engine.EnsureRuntime` owns prerequisite installation, machine creation and
 repair, progress events, verification, and typed failures. The TUI calls it
@@ -182,6 +190,9 @@ confirmation; keeping the named volumes is the default.
 - Add runtime-specific command construction under `engine/`.
 - Add persisted fields and platform paths under `config/`.
 - Add host probes or reusable validation under `checks/`.
+- Keep OS-specific setup behavior in the corresponding
+  `engine/runtime_setup_*_host.go` file and process-window behavior in
+  `engine/process_windows.go` / `engine/process_other.go`.
 
 Tests should cover state transitions, idempotent outcomes, transaction failure,
 and parity between command and TUI call sites. Cross-platform engine command
