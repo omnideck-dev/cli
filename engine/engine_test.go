@@ -261,6 +261,7 @@ func TestParseWindowsPodmanHostAddress(t *testing.T) {
 		output string
 		want   string
 	}{
+		{"default via 192.168.127.1 dev podman-usermode\n", "192.168.127.1"},
 		{"192.168.127.254 STREAM host.containers.internal\n", "192.168.127.254"},
 		{"192.168.127.254 DGRAM\n192.168.127.254 RAW\n", "192.168.127.254"},
 		{"999.168.127.254 STREAM invalid\n", ""},
