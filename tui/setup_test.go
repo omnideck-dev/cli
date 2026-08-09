@@ -456,6 +456,9 @@ func TestAutomaticRuntimeSetupStreamsDesktopPhasesAndContinues(t *testing.T) {
 
 	m := NewSetupModel(SetupRequest{Mode: SetupFirstRun, AutoStart: true})
 	m.hostPlatform = engine.HostPlatform{OS: "windows", Arch: "amd64", TotalMemoryMB: 32 * 1024}
+	resources := engine.DefaultRuntimeResources(m.hostPlatform)
+	m.inputs[inputMemory].SetValue(resources.ContainerMemory)
+	m.inputs[inputShmSize].SetValue(resources.ContainerSHMSize)
 	m.configureRuntimeSetup()
 	cmd := m.startRuntimeSetup()
 	seen := map[string]bool{}
