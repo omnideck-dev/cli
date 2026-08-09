@@ -180,14 +180,15 @@ func (e *PodmanEngine) RunContainer(opts RunOptions) error {
 }
 
 // resolveWindowsPodmanHostAddress asks the shared WSL-backed Podman machine
-// for the address it uses to reach Windows. Rootless pasta networking assigns
-// host.containers.internal a different, machine-local address inside a
-// container, so Windows containers need this explicit mapping.
+// for the default-route gateway it uses to reach Windows. A stock Podman 6 WSL
+// machine does not define host.containers.internal, and rootless pasta assigns
+// that name a container-local address, so Windows containers need this
+// explicit gateway mapping.
 func resolveWindowsPodmanHostAddress() (string, error) {
 	cmd := buildCmd(
 		"podman",
 		"machine", "ssh", OmnideckMachineName,
-		"getent", "ahostsv4", podmanHostAlias,
+		"ip", "-4", "route", "show", "default",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
