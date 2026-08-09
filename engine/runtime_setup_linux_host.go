@@ -12,11 +12,29 @@ var (
 )
 
 func installPodmanLinux(host HostPlatform, onEvent func(RuntimeSetupEvent), allowTerminalElevation bool) error {
+	return installPodmanLinuxWith(
+		host,
+		onEvent,
+		allowTerminalElevation,
+		effectiveUserID(),
+		exec.LookPath,
+		RunSetupCommand,
+	)
+}
+
+func installPodmanLinuxWith(
+	host HostPlatform,
+	onEvent func(RuntimeSetupEvent),
+	allowTerminalElevation bool,
+	effectiveUID int,
+	lookPath func(string) (string, error),
+	runCommand func(SetupCommand, func(string)) error,
+) error {
 	commands := podmanLinuxPackageCommands(host)
 	if len(commands) == 0 {
 		return runtimeSetupError(RuntimeSetupSupport, "Automatic Podman installation is not available for this Linux distribution.", "Install Podman with your distribution's package manager, then try again.", nil)
 	}
-	commands, err := prepareLinuxInstallCommands(commands, effectiveUserID(), allowTerminalElevation, exec.LookPath)
+	commands, err := prepareLinuxInstallCommands(commands, effectiveUID, allowTerminalElevation, lookPath)
 	if err != nil {
 		if errors.Is(err, errLinuxPackageManagerMissing) {
 			return runtimeSetupError(
@@ -42,7 +60,8 @@ func installPodmanLinux(host HostPlatform, onEvent func(RuntimeSetupEvent), allo
 		)
 	}
 	for commandIndex, command := range commands {
-		if effectiveUserID() != 0 && commandIndex == 0 {
+		permissionPending := effectiveUID != 0 && commandIndex == 0
+		if permissionPending {
 			emitRuntimeSetup(onEvent, setupSubstageEvent(
 				SetupStageSoftware,
 				"linux-permission",
@@ -58,23 +77,25 @@ func installPodmanLinux(host HostPlatform, onEvent func(RuntimeSetupEvent), allo
 		if len(commands) > 1 && commandIndex == 0 {
 			substage = SetupSubstagePackageIndex
 		}
-		emitRuntimeSetup(onEvent, setupSubstageEvent(
-			SetupStageSoftware,
-			substage,
-			"progress",
-			map[bool]string{true: "Checking available software packages…", false: "Installing Podman…"}[substage == SetupSubstagePackageIndex],
-			map[bool]string{true: "Package manager running", false: "Configuring dependencies"}[substage == SetupSubstagePackageIndex],
-			"",
-		))
-		if err := RunSetupCommand(command, func(line string) {
+		activity := map[bool]string{true: "Checking available software packages…", false: "Installing Podman…"}[substage == SetupSubstagePackageIndex]
+		status := map[bool]string{true: "Package manager running", false: "Configuring dependencies"}[substage == SetupSubstagePackageIndex]
+		emitProgress := func(detail string) {
 			emitRuntimeSetup(onEvent, setupSubstageProgress(
 				SetupStageSoftware,
 				substage,
-				map[bool]string{true: "Checking available software packages…", false: "Installing Podman…"}[substage == SetupSubstagePackageIndex],
-				map[bool]string{true: "Package manager running", false: "Configuring dependencies"}[substage == SetupSubstagePackageIndex],
-				line,
+				activity,
+				status,
+				detail,
 				-1,
 			))
+		}
+		progressStarted := !permissionPending
+		if progressStarted {
+			emitProgress("")
+		}
+		if err := runCommand(command, func(line string) {
+			progressStarted = true
+			emitProgress(line)
 		}); err != nil {
 			failure := RuntimeSetupInstaller
 			message := "Podman couldn’t be installed"
@@ -85,6 +106,10 @@ func installPodmanLinux(host HostPlatform, onEvent func(RuntimeSetupEvent), allo
 				hint = "Check your package manager and internet connection, then try again."
 			}
 			return runtimeSetupError(failure, message, hint, err)
+		} else if !progressStarted {
+			// A successful silent package-manager command still completes the
+			// public phase contract after the permission prompt goes away.
+			emitProgress("")
 		}
 	}
 	return nil

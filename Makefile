@@ -14,7 +14,7 @@ LDFLAGS := -ldflags "\
   -X main.date=$(DATE) \
 "
 
-.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test
+.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test vm-e2e vm-e2e-purge
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -66,3 +66,12 @@ release:
 
 hardware-test:
 	./tests/hardware/run.sh
+
+VM ?= appimage
+
+vm-e2e:
+	./tests/e2e/run.sh --vm $(VM)
+
+vm-e2e-purge:
+	@test -n "$(RUN)" || { echo "Set RUN to one artifacts/cli-e2e run directory"; exit 2; }
+	./tests/e2e/purge.sh "$(RUN)"

@@ -56,6 +56,18 @@ function Invoke-Cli([string[]]$Arguments) {
     }
 }
 
+function Invoke-AllowFailure([string]$Program, [string[]]$Arguments) {
+    $PreviousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
+    try {
+        $Output = @(& $Program @Arguments 2>&1)
+        $ExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $PreviousPreference
+    }
+    return [PSCustomObject]@{ Output = $Output; ExitCode = $ExitCode }
+}
+
 function Wait-WebUI {
     for ($Attempt = 1; $Attempt -le 45; $Attempt++) {
         try {
@@ -86,6 +98,8 @@ function Wait-Registry {
 
 function Remove-TestResources {
     if (-not $Instance.StartsWith("omnideck-hw-")) { return }
+    $PreviousPreference = $ErrorActionPreference
+    $ErrorActionPreference = "SilentlyContinue"
     if ($script:Engine -in @("docker", "podman") -and (Get-Command $script:Engine -ErrorAction SilentlyContinue)) {
         & $script:Engine rm -f $Instance *> $null
         & $script:Engine rm -f $RegistryContainer *> $null
@@ -98,6 +112,7 @@ function Remove-TestResources {
     if ($ConfigPath -and (Split-Path -Leaf $ConfigPath) -eq "$Instance.yaml") {
         Remove-Item -Force -ErrorAction SilentlyContinue $ConfigPath
     }
+    $ErrorActionPreference = $PreviousPreference
 }
 
 try {
@@ -187,10 +202,9 @@ try {
 
     $CurrentStep = "stop"
     Invoke-Cli @("stop")
-    $StoppedStatus = & $CliPath --no-color --name $Instance status 2>&1
-    $StoppedExitCode = $LASTEXITCODE
-    $StoppedStatus | Set-Content -Path (Join-Path $OutputDirectory "status-while-stopped.log")
-    if ($StoppedExitCode -eq 0) { throw "status succeeded even though the container was stopped." }
+    $StoppedStatus = Invoke-AllowFailure $CliPath @("--no-color", "--name", $Instance, "status")
+    $StoppedStatus.Output | Set-Content -Path (Join-Path $OutputDirectory "status-while-stopped.log")
+    if ($StoppedStatus.ExitCode -eq 0) { throw "status succeeded even though the container was stopped." }
 
     $CurrentStep = "start"
     Invoke-Cli @("start")
@@ -214,12 +228,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "instance removal failed." }
 
     $CurrentStep = "verify cleanup"
-    & $Engine container inspect $Instance *> $null
-    if ($LASTEXITCODE -eq 0) { throw "The container still exists after instance removal." }
-    & $Engine volume inspect "$Instance-home" *> $null
-    if ($LASTEXITCODE -eq 0) { throw "The home volume still exists after instance removal." }
-    & $Engine volume inspect "$Instance-state" *> $null
-    if ($LASTEXITCODE -eq 0) { throw "The state volume still exists after instance removal." }
+    if ((Invoke-AllowFailure $Engine @("container", "inspect", $Instance)).ExitCode -eq 0) { throw "The container still exists after instance removal." }
+    if ((Invoke-AllowFailure $Engine @("volume", "inspect", "$Instance-home")).ExitCode -eq 0) { throw "The home volume still exists after instance removal." }
+    if ((Invoke-AllowFailure $Engine @("volume", "inspect", "$Instance-state")).ExitCode -eq 0) { throw "The state volume still exists after instance removal." }
     if (Test-Path $ConfigPath) { throw "The configuration still exists after instance removal." }
 
     $CurrentStep = "complete"

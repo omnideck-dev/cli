@@ -209,6 +209,47 @@ func TestPrepareLinuxInstallCommandsChoosesSafeElevation(t *testing.T) {
 	})
 }
 
+func TestLinuxPermissionRemainsVisibleUntilPackageOutputBegins(t *testing.T) {
+	var events []RuntimeSetupEvent
+	commandsRun := 0
+	permissionWasVisible := false
+	err := installPodmanLinuxWith(
+		HostPlatform{OS: "linux", DistroID: "ubuntu", Version: "24.04"},
+		func(event RuntimeSetupEvent) { events = append(events, event) },
+		true,
+		1000,
+		func(name string) (string, error) {
+			if name == "pkexec" {
+				return "", fmt.Errorf("%s not found", name)
+			}
+			return "/usr/bin/" + name, nil
+		},
+		func(_ SetupCommand, onLine func(string)) error {
+			commandsRun++
+			if commandsRun == 1 {
+				last := events[len(events)-1]
+				permissionWasVisible = last.State == "permission" &&
+					last.Activity == "Waiting for approval from your computer…" &&
+					strings.Contains(last.Detail, "omnideck never sees or stores your password.")
+			}
+			onLine("package output")
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("installPodmanLinuxWith() error = %v", err)
+	}
+	if !permissionWasVisible {
+		t.Fatalf("permission event was overwritten before the command started: %#v", events)
+	}
+	if commandsRun != 2 {
+		t.Fatalf("commands run = %d, want apt index and install", commandsRun)
+	}
+	if len(events) < 2 || events[1].State != "progress" || events[1].Detail != "package output" {
+		t.Fatalf("events after package output = %#v", events)
+	}
+}
+
 func TestEnsureRuntimeSkipsWorkWhenPodmanIsReady(t *testing.T) {
 	events := []RuntimeSetupEvent{}
 	hostCalls := 0

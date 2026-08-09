@@ -1,0 +1,7 @@
+#!/bin/sh
+
+# A headless NOPASSWD lab would otherwise advance past the permission screen
+# before Bubble Tea can render it. Hold that public screen briefly, then hand
+# the unmodified arguments to the guest's real sudo.
+sleep "${OMNIDECK_E2E_SUDO_DELAY_SECONDS:-5}"
+exec /usr/bin/sudo "$@"

@@ -19,7 +19,7 @@ Omnideck uses four separate layers. No layer substitutes for a later layer.
 |---|---|---|
 | Source | Go unit and smoke tests, formatting, module consistency, vet, staticcheck, actionlint, race detection, dependency review, and vulnerability scanning | Command result or GitHub Actions run for the exact commit |
 | Release contract | [`tests/releasecontract`](tests/releasecontract/README.md) | JSON and optional JUnit reports for the exact binary or archive |
-| Hardware lifecycle | [`tests/hardware`](tests/hardware/README.md) | Harness report and diagnostics from a dedicated machine using Podman |
+| Hardware lifecycle | [`tests/hardware`](tests/hardware/README.md) and [`tests/e2e`](tests/e2e/README.md) | Harness report, terminal transcripts, and diagnostics from a dedicated machine or disposable VM using Podman |
 | Manual journey | [`tests/manual`](tests/manual/README.md) | A completed procedure with host inventory, commands, observations, cleanup, and pass/fail/blocked result |
 
 The source and release-contract layers are non-destructive. Hardware and manual
@@ -197,6 +197,38 @@ inputs remain the archives in the packaged target matrix. The lab has no
 macOS guest, so it cannot satisfy required native macOS manual coverage. It
 also cannot make the Silverblue guest satisfy a "Podman absent" precondition,
 because Silverblue includes Podman in its base deployment.
+
+### Automated CLI and TUI behavior
+
+The repo-owned [VM end-to-end suite](tests/e2e/README.md) is the canonical
+pre-release regression pass for mutable Linux and Windows 11 guests. It builds
+a release-shaped archive from the current checkout, installs it in a clean
+guest, drives guided setup and the management TUI through a real
+pseudo-terminal, and then runs the portable contract and unattended hardware
+lifecycle against the same binary. It records exact visible wording at
+semantic checkpoints plus JSON and JUnit evidence. It uses the tiny hardware
+fixture image through a loopback-only registry and SSH reverse tunnel; it never
+substitutes the fixture result for a production-image upgrade test.
+
+```sh
+export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
+make vm-e2e                 # Ubuntu lane; confirms the clean reset interactively
+make vm-e2e VM=deb          # Debian package-family variant
+make vm-e2e VM=rpm          # Fedora package-family variant
+make vm-e2e VM=windows      # Windows UAC, reboot, Podman MSI, TUI, and CLI
+```
+
+The suite requires a stopped, exclusively leased guest and restores its clean
+golden after the run. The Windows lane exercises the real UAC prompt, selects
+restart later, verifies a complete controlled reboot, installs Podman, and
+continues setup. The Windows restart-now RunOnce auto-reopen, macOS prompts,
+and subjective visual checks remain manual requirements.
+
+Each run lives under one `artifacts/cli-e2e/<run>/` directory. Successful runs
+automatically delete only the large discarded overlays they created, including
+Windows disk and TPM state. Failed runs list retained paths in that directory;
+`make vm-e2e-purge RUN=...` removes the exact listed paths and the compact run
+folder after confirmation.
 
 ### Normal VM workflow
 

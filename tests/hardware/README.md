@@ -29,15 +29,25 @@ The scripts currently verify:
 - instance removal and resource cleanup
 - JSON, JUnit, command, container, and diagnostic output
 
-The following need separate scenarios before the hardware suite can be called
-complete:
+The following are covered separately by the local
+[`tests/e2e`](../e2e/README.md) clean-guest terminal suite:
 
-- guided terminal setup and its key-by-key interaction
-- actual Podman or Docker installation and operating-system permission prompts
+- guided Linux terminal setup and its key-by-key interaction;
+- actual Podman installation on supported mutable Linux guests;
+- returning TUI dashboard, logs, settings, Doctor recovery, additional setup,
+  update review, and guarded removal journeys; and
+- Windows release ZIP execution, real UAC approval, required reboot and
+  post-reboot continuation, pinned Podman MSI installation, WSL machine setup,
+  attended TUI, and unattended lifecycle behavior.
+
+The following still need separate platform or production-release scenarios
+before the hardware coverage can be called complete:
+
 - stable-to-candidate `update --plain`, repair, and production-image behavior
 - instance removal with a real data backup and restore
 - multiple simultaneous instances
 - local Ollama connectivity
+- Windows **restart now** RunOnce auto-reopen and macOS installation prompts
 
 These gaps are deliberately visible. The lifecycle script does not claim that a
 simulated runtime installation is a real installation test.
