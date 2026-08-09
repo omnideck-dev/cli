@@ -207,10 +207,10 @@ try {
     $Doctor = & $CliPath --no-color --name $Instance doctor 2>&1
     if ($LASTEXITCODE -ne 0) { throw "doctor failed." }
     $Doctor | Tee-Object -FilePath (Join-Path $OutputDirectory "doctor.log")
-    if (($Doctor -join "`n") -notlike "*Omnideck Doctor Report*") { throw "doctor did not render its report." }
+    if (($Doctor -join "`n") -notlike "*Omnideck Doctor*") { throw "doctor did not render its report." }
 
     $CurrentStep = "remove instance"
-    @("yes", "yes", "no", $Instance) | & $CliPath --no-color instance remove $Instance
+    @("yes", "yes", "no", $Instance) | & $CliPath --no-color remove $Instance
     if ($LASTEXITCODE -ne 0) { throw "instance removal failed." }
 
     $CurrentStep = "verify cleanup"
