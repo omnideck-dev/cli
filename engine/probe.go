@@ -54,7 +54,10 @@ var probeLookPath = exec.LookPath
 var probeCommand = func(name string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	command := exec.CommandContext(ctx, name, args...)
+	command.Env = hostCommandEnvironment(os.Environ())
+	prepareHiddenConsoleCommand(command)
+	return command.CombinedOutput()
 }
 
 // ProbeAll diagnoses Podman even when it is not yet usable.

@@ -246,10 +246,10 @@ run_cli status
 
 current_step="doctor"
 run_cli doctor | tee "${output_dir}/doctor.log"
-grep -Fq "Omnideck Doctor Report" "${output_dir}/doctor.log" || fail "doctor did not render its report."
+grep -Fq "Omnideck Doctor" "${output_dir}/doctor.log" || fail "doctor did not render its report."
 
 current_step="remove instance"
-printf 'yes\nyes\nno\n%s\n' "${instance}" | run_cli instance remove "${instance}"
+printf 'yes\nyes\nno\n%s\n' "${instance}" | run_cli remove "${instance}"
 
 current_step="verify cleanup"
 if "${engine}" container inspect "${instance}" >/dev/null 2>&1; then

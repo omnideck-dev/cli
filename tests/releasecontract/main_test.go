@@ -62,11 +62,23 @@ func TestDecodeSingleJSONRejectsTrailingValue(t *testing.T) {
 func TestVersionSchemaRejectsMissingContractVersion(t *testing.T) {
 	contractsDir := filepath.Join("..", "..", "contracts")
 	invalid := `{"version":"test","commit":"abc","date":"today"}`
-	if err := validateJSONSchema(contractsDir, "json/v2/version.schema.json", invalid); err == nil {
+	if err := validateJSONSchema(contractsDir, "json/v3/version.schema.json", invalid); err == nil {
 		t.Fatal("version schema accepted a payload without jsonContract")
 	}
-	valid := `{"version":"test","commit":"abc","date":"today","jsonContract":2}`
-	if err := validateJSONSchema(contractsDir, "json/v2/version.schema.json", valid); err != nil {
+	valid := `{"version":"test","commit":"abc","date":"today","jsonContract":3}`
+	if err := validateJSONSchema(contractsDir, "json/v3/version.schema.json", valid); err != nil {
 		t.Fatalf("version schema rejected a valid payload: %v", err)
+	}
+}
+
+func TestJSONContract3AcceptsTypedRuntimeSetupEventsAndErrors(t *testing.T) {
+	contractsDir := filepath.Join("..", "..", "contracts")
+	errorEnvelope := `{"error":{"code":"PERMISSION_CANCELLED","message":"approval cancelled","detail":"ERROR_CANCELLED (1223)"}}`
+	if err := validateJSONSchema(contractsDir, "json/v3/error.schema.json", errorEnvelope); err != nil {
+		t.Fatalf("contract 3 rejected a typed setup error: %v", err)
+	}
+	event := `{"stage":"software","substage":"wsl-permission","state":"permission","activity":"Getting ready","status":"Approval required"}`
+	if err := validateJSONSchema(contractsDir, "json/v3/stage-event.schema.json", event); err != nil {
+		t.Fatalf("contract 3 rejected a runtime setup event: %v", err)
 	}
 }

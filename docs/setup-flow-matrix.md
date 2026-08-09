@@ -48,6 +48,18 @@ finishes.
 | Intel macOS | Download, checksum-check, package-signature-check, and install the newest official Intel Podman package | Create or repair `omnideck-runtime` with the same memory-only OmniDeck policy |
 | Linux | Install Podman through the recognized native package family, using direct root execution, PolicyKit, or sudo as appropriate | Not applicable; containers run directly |
 
+On Windows, non-interactive WSL, PowerShell, probing, and Podman helper
+processes do not create a second console window over the TUI or desktop. MSI
+installation runs quietly with a bounded log; the Windows UAC prompt remains
+visible and OmniDeck reports the install result. This is a process-launch
+detail; it does not add or change a setup phase or visible setup copy.
+
+On macOS, OmniDeck shows the verified Podman download before it asks for
+administrator approval. The native password prompt remains visible; after
+approval, the command-line package installer stays hidden while OmniDeck shows
+an indeterminate installation state. Cancelling the password prompt is reported
+as an approval cancellation, separately from a package installation failure.
+
 Windows setup reports a typed restart requirement when WSL cannot finish until
 reboot. **Restart now** creates a one-time per-user resume entry, restarts
 without forcing applications closed, and relaunches bare `omnideck` after

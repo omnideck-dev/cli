@@ -2,7 +2,8 @@
 
 `--json` is the stable process boundary for native shells and automation. It
 never prompts, opens a TUI, or writes styled text to stdout. The contract
-version is returned by `omnideck --json --version` as `jsonContract`.
+version is returned by `omnideck --json --version` as `jsonContract` (currently
+`3`).
 Machine-readable schemas live under [`contracts/`](contracts/README.md).
 
 Structured failures are written to stdout without Cobra appending an empty
@@ -68,6 +69,7 @@ The `environment ensure` complete result is:
 
 The closed error-code vocabulary is defined in `cmd/jsonout.go`. Codes relevant
 to native setup include `ENGINE_NOT_FOUND`, `RESTART_REQUIRED`,
-`PERMISSION_DENIED`, `DOWNLOAD_FAILED`, `UNSUPPORTED`,
+`PERMISSION_DENIED`, `PERMISSION_CANCELLED`, `WINDOWS_FEATURES_FAILED`,
+`PACKAGE_INDEX_FAILED`, `INSTALLER_FAILED`, `DOWNLOAD_FAILED`, `UNSUPPORTED`,
 `RUNTIME_SETUP_FAILED`, `PORT_IN_USE`, `CONTAINER_CONFLICT`, `CANCELLED`, and
 `INTERNAL_ERROR`.

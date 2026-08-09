@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/omnideck-dev/cli/engine"
@@ -133,5 +134,17 @@ func TestRuntimeEnsureExecutesSharedPlanAndReturnsReadyStatus(t *testing.T) {
 	result := last["result"].(map[string]any)
 	if result["ready"] != true || result["machineName"] != engine.OmnideckMachineName {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestRuntimeSetupJSONErrorPreservesTypedFailureAndTechnicalDetail(t *testing.T) {
+	structured := runtimeSetupJSONError(&engine.RuntimeSetupError{
+		Failure: engine.RuntimeSetupPermissionCancelled,
+		Message: "Windows approval wasn’t granted",
+		Hint:    "Try again and choose Yes.",
+		Err:     errors.New("ERROR_CANCELLED (1223)"),
+	})
+	if structured.payload.Code != ErrCodePermissionCancelled || structured.payload.Hint == "" || structured.payload.Detail != "ERROR_CANCELLED (1223)" {
+		t.Fatalf("structured error = %#v", structured.payload)
 	}
 }

@@ -51,7 +51,7 @@ workflow used by Desktop:
 | Linux | Uses the recognized distribution package family and a native permission prompt to install Podman, then verifies it |
 | macOS with an Apple chip (M1 or newer) | Downloads, verifies, and installs the pinned official Podman package, then prepares `omnideck-runtime` |
 | macOS with an Intel chip | Downloads, verifies, and installs Podman's latest official Intel package, then prepares `omnideck-runtime` |
-| Windows 10/11 | Enables WSL 2 when needed, resumes after a required restart, installs the pinned official Podman MSI, and prepares `omnideck-runtime` |
+| Windows 10/11 | Enables WSL 2 when needed, resumes after a required restart, installs the pinned official Podman MSI, and prepares `omnideck-runtime`; non-interactive helper processes do not open an extra console window |
 
 The Welcome screen is the confirmation. After the user presses Enter, setup
 continues automatically and shows the same four phases as Desktop: computer
@@ -66,7 +66,7 @@ Run `omnideck` as your normal user. Do not put `sudo` before it or choose
 |---|---|
 | Linux | The package manager may ask for permission while it installs Podman. The account must be allowed to install software. |
 | macOS | macOS may ask for the user's password while it installs Podman. |
-| Windows | Windows may request administrator approval while it enables WSL 2. A restart can be required; choosing **Restart now** makes the CLI reopen after sign-in and continue automatically. The Podman install itself uses the per-user MSI mode. |
+| Windows | Windows may request administrator approval while it enables WSL 2. A restart can be required; choosing **Restart now** makes the CLI reopen after sign-in and continue automatically. The Podman install itself uses the per-user MSI mode. Helper consoles and the quiet MSI UI stay hidden, while the UAC prompt remains visible and OmniDeck reports the install result. |
 
 When Ollama is running, setup checks it twice: first on the computer, then from
 inside the running Omnideck container. This prevents a Windows-local check from

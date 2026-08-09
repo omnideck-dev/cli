@@ -466,7 +466,10 @@ func podmanLinuxPackageCommands(host HostPlatform) []SetupCommand {
 			command("apt-get", "install", "-y", "podman"),
 		}
 	case "fedora", "rhel", "centos", "rocky", "almalinux", "amzn", "ol":
-		return []SetupCommand{command("dnf", "install", "-y", "podman")}
+		return []SetupCommand{
+			command("dnf", "makecache", "--refresh"),
+			command("dnf", "install", "-y", "podman"),
+		}
 	case "arch", "manjaro", "endeavouros":
 		return []SetupCommand{command("pacman", "-S", "--needed", "podman")}
 	case "opensuse", "opensuse-leap", "opensuse-tumbleweed", "sles":

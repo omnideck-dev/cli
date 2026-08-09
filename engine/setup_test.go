@@ -61,6 +61,13 @@ func TestLinuxDerivativesUseTheirDeclaredPackageFamily(t *testing.T) {
 	}
 }
 
+func TestFedoraPodmanInstallChecksPackagesBeforeInstalling(t *testing.T) {
+	commands := podmanLinuxPackageCommands(HostPlatform{OS: "linux", DistroID: "fedora"})
+	if len(commands) != 2 || commands[0].Display != "dnf makecache --refresh" || commands[1].Display != "dnf install -y podman" {
+		t.Fatalf("Fedora commands = %#v", commands)
+	}
+}
+
 func TestWindowsPodmanInstallerAndWSLGuidance(t *testing.T) {
 	for _, arch := range []string{"amd64", "arm64"} {
 		plan := BuildSetupPlans(

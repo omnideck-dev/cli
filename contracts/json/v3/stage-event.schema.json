@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/omnideck-dev/cli/contracts/json/v3/stage-event.schema.json",
+  "title": "Omnideck CLI NDJSON stage event",
+  "type": "object",
+  "required": ["stage", "state"],
+  "properties": {
+    "stage": { "type": "string", "minLength": 1 },
+    "substage": { "type": "string", "minLength": 1 },
+    "state": { "enum": ["start", "permission", "progress", "done", "error"] },
+    "activity": { "type": "string" },
+    "status": { "type": "string" },
+    "detail": { "type": "string" },
+    "progress": { "type": "number", "minimum": 0, "maximum": 1 },
+    "error": { "$ref": "#/$defs/errorPayload" },
+    "result": true
+  },
+  "additionalProperties": true,
+  "$defs": {
+    "errorPayload": {
+      "type": "object",
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "minLength": 1 },
+        "message": { "type": "string", "minLength": 1 },
+        "hint": { "type": "string" },
+        "detail": { "type": "string" }
+      },
+      "additionalProperties": true
+    }
+  }
+}

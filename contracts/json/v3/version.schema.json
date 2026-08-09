@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/omnideck-dev/cli/contracts/json/v3/version.schema.json",
+  "title": "Omnideck CLI JSON version payload",
+  "type": "object",
+  "required": ["version", "commit", "date", "jsonContract"],
+  "properties": {
+    "version": { "type": "string", "minLength": 1 },
+    "commit": { "type": "string", "minLength": 1 },
+    "date": { "type": "string", "minLength": 1 },
+    "jsonContract": { "const": 3 }
+  },
+  "additionalProperties": true
+}

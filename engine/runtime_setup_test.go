@@ -34,6 +34,131 @@ func TestPodmanInstallerMatrixCoversMacAndWindowsArchitectures(t *testing.T) {
 	}
 }
 
+func TestWindowsMSIIsQuietAndWritesABoundedLog(t *testing.T) {
+	args := windowsMSIArguments(`C:\cache\podman.msi`, `C:\cache\podman-install.log`)
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "/quiet") || strings.Contains(joined, "/passive") {
+		t.Fatalf("MSI arguments = %q, want quiet installation", joined)
+	}
+	if !strings.Contains(joined, "/l*v C:\\cache\\podman-install.log") {
+		t.Fatalf("MSI arguments = %q, want verbose log path", joined)
+	}
+}
+
+func TestInstallerLogRetainsOnlyTheBoundedTail(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "installer.log")
+	prefix := strings.Repeat("discarded\n", maxCommandOutput/5)
+	tail := "Windows Installer returned error 1603\n"
+	if err := os.WriteFile(path, []byte(prefix+tail), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	contents, err := retainBoundedLog(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contents) > maxCommandOutput || !strings.HasSuffix(string(contents), tail) {
+		t.Fatalf("bounded log length=%d suffix=%q", len(contents), contents[max(0, len(contents)-len(tail)):])
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Size() > maxCommandOutput {
+		t.Fatalf("retained installer log size=%d", info.Size())
+	}
+}
+
+func TestWindowsWSLInstallScriptKeepsCatchAttachedToTry(t *testing.T) {
+	script := windowsWSLInstallScript()
+	if strings.Contains(script, "}; catch") {
+		t.Fatal("PowerShell rejects a statement separator between try and catch")
+	}
+	if !strings.Contains(script, "} catch {") {
+		t.Fatalf("expected an attached catch block, got %q", script)
+	}
+}
+
+func TestWindowsWSLPostInstallStateRequiresRestartInsteadOfReportingFailure(t *testing.T) {
+	err := windowsWSLPostInstallError("restart")
+	var setupError *RuntimeSetupError
+	if !errors.As(err, &setupError) || setupError.Failure != RuntimeSetupRestart {
+		t.Fatalf("post-install restart error = %#v, want %q", err, RuntimeSetupRestart)
+	}
+	if err := windowsWSLPostInstallError("ready"); err != nil {
+		t.Fatalf("ready post-install state returned %v", err)
+	}
+}
+
+func TestMacOSAuthorizationCancellationIsDistinctFromInstallerFailure(t *testing.T) {
+	cancelled := fmt.Errorf("osascript: exit status 1\nexecution error: %s (-128)", macOSAuthorizationCancelledMarker)
+	if !macOSAuthorizationCancelled(cancelled) {
+		t.Fatalf("error %q was not classified as a cancelled macOS authorization", cancelled)
+	}
+	if macOSAuthorizationCancelled(errors.New("installer: package scripts failed")) {
+		t.Fatal("an installer failure was classified as a cancelled macOS authorization")
+	}
+}
+
+func TestMacOSInstallerProcessBecomesVisibleOnlyAfterApproval(t *testing.T) {
+	destination := "/Users/test/Library/Caches/omnideck-cli/downloads/podman.pkg"
+	beforeApproval := `/usr/bin/osascript -e do shell script "/usr/sbin/installer -pkg " with administrator privileges ` + destination
+	duringInstall := `/bin/sh -c /usr/sbin/installer -pkg '` + destination + `' -target /`
+	if macOSInstallerProcessVisible(beforeApproval, destination) {
+		t.Fatal("the authorization process was mistaken for a running installer")
+	}
+	if !macOSInstallerProcessVisible(duringInstall, destination) {
+		t.Fatal("the approved installer process was not detected")
+	}
+	if macOSInstallerProcessVisible(`/usr/sbin/installer -pkg /tmp/other.pkg -target /`, destination) {
+		t.Fatal("an unrelated installer process was treated as Podman setup")
+	}
+}
+
+func TestSetupCommandFailureKeepsBoundedCommandOutput(t *testing.T) {
+	environment := append(os.Environ(), "OMNIDECK_COMMAND_HELPER=1")
+	err := runSetupCommand(
+		os.Args[0],
+		[]string{"-test.run=TestCommandHelperProcess"},
+		environment,
+		nil,
+		nil,
+		true,
+	)
+	if err == nil {
+		t.Fatal("runSetupCommand() succeeded, want failure")
+	}
+	for _, want := range []string{"exit status 125", "Downloading layer", "machine is not ready"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("runSetupCommand() error %q does not contain %q", err, want)
+		}
+	}
+}
+
+func TestSetupSubstageProgressPreservesExactAndIndeterminateModes(t *testing.T) {
+	exact := setupSubstageProgress(
+		SetupStageSoftware,
+		SetupSubstagePodmanDownload,
+		"Downloading Podman…",
+		"Downloading required software",
+		"",
+		0.47,
+	)
+	if exact.Substage != SetupSubstagePodmanDownload || exact.Progress == nil || *exact.Progress != 0.47 || exact.Status != "Downloading required software" {
+		t.Fatalf("exact event = %#v", exact)
+	}
+	indeterminate := setupSubstageProgress(
+		SetupStageSoftware,
+		SetupSubstagePodmanInstall,
+		"Installing Podman…",
+		"Installer running",
+		"",
+		-1,
+	)
+	if indeterminate.Progress != nil || indeterminate.Substage != SetupSubstagePodmanInstall {
+		t.Fatalf("indeterminate event = %#v", indeterminate)
+	}
+}
+
 func TestPrepareLinuxInstallCommandsChoosesSafeElevation(t *testing.T) {
 	packageCommands := []SetupCommand{
 		command("apt-get", "update"),
@@ -196,8 +321,11 @@ func TestDownloadVerifiedFileReusesAReviewedDownload(t *testing.T) {
 	defer server.Close()
 	destination := filepath.Join(t.TempDir(), "podman-installer")
 	expected := hex.EncodeToString(digest[:])
+	progressEvents := []verifiedDownloadProgress{}
 	for attempt := 0; attempt < 2; attempt++ {
-		if err := downloadVerifiedFile(server.URL, destination, expected, nil); err != nil {
+		if err := downloadVerifiedFile(server.URL, destination, expected, func(progress verifiedDownloadProgress) {
+			progressEvents = append(progressEvents, progress)
+		}); err != nil {
 			t.Fatalf("download attempt %d: %v", attempt+1, err)
 		}
 	}
@@ -207,5 +335,12 @@ func TestDownloadVerifiedFileReusesAReviewedDownload(t *testing.T) {
 	got, err := os.ReadFile(destination)
 	if err != nil || string(got) != string(contents) {
 		t.Fatalf("downloaded file = %q, %v", got, err)
+	}
+	last := progressEvents[len(progressEvents)-1]
+	if last.Fraction != 1 || last.Received != int64(len(contents)) || last.Total != int64(len(contents)) {
+		t.Fatalf("final download progress = %#v", last)
+	}
+	if got := formatDownloadBytes(38_400_000); got != "38.4 MB" {
+		t.Fatalf("formatted download bytes = %q", got)
 	}
 }

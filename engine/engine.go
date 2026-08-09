@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -115,7 +116,10 @@ var runInfo = func(name string) error {
 	if name == "podman" {
 		args = podmanCommandArgs(runtime.GOOS, args...)
 	}
-	return exec.Command(name, args...).Run()
+	command := exec.Command(name, args...)
+	command.Env = hostCommandEnvironment(os.Environ())
+	prepareHiddenConsoleCommand(command)
+	return command.Run()
 }
 
 // parsePctFloat strips a trailing "%" and returns the value as a [0,1] fraction.
