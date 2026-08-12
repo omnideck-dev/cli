@@ -117,7 +117,13 @@ func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 
 func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "podman"}, []engine.ProbeResult{
+	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{
+		name: "podman",
+		volumes: map[string]bool{
+			cfg.HomeVolumeName():  true,
+			cfg.StateVolumeName(): true,
+		},
+	}, []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeReady, Version: "6.0.2"},
 	})
 	instance := results[1]
@@ -126,6 +132,22 @@ func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
 	}
 	if !strings.Contains(instance.Hint, "same saved data volumes") {
 		t.Fatalf("repair safety explanation = %q", instance.Hint)
+	}
+}
+
+func TestDoctorDoesNotOfferRepairWhenSavedStorageIsMissing(t *testing.T) {
+	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
+	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{
+		name:    "podman",
+		volumes: map[string]bool{cfg.StateVolumeName(): true},
+	}, []engine.ProbeResult{{Name: "podman", State: engine.RuntimeReady}})
+
+	instance := results[1]
+	if instance.Action != DoctorActionNone {
+		t.Fatalf("unsafe repair action remained available: %#v", instance)
+	}
+	if !strings.Contains(instance.Hint, "Automatic repair is paused") {
+		t.Fatalf("repair safety hint = %q", instance.Hint)
 	}
 }
 

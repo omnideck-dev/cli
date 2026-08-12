@@ -13,6 +13,7 @@ type fakeCreationEngine struct {
 	containerExists bool
 	existsErr       error
 	createVolumeErr error
+	existingVolumes map[string]bool
 	createdVolumes  []string
 	removedVolumes  []string
 	pullErr         error
@@ -24,12 +25,34 @@ type fakeCreationEngine struct {
 func (f *fakeCreationEngine) ContainerExists(string) (bool, error) {
 	return f.containerExists, f.existsErr
 }
-func (f *fakeCreationEngine) CreateVolume(name string) error {
+func (f *fakeCreationEngine) CreateVolume(name string) (bool, error) {
 	if f.createVolumeErr != nil {
-		return f.createVolumeErr
+		return false, f.createVolumeErr
+	}
+	if f.existingVolumes[name] {
+		return false, nil
 	}
 	f.createdVolumes = append(f.createdVolumes, name)
-	return nil
+	return true, nil
+}
+
+func TestCreateInstanceFailurePreservesPreexistingVolumes(t *testing.T) {
+	cfg := testCreateConfig()
+	eng := &fakeCreationEngine{
+		existingVolumes: map[string]bool{
+			cfg.HomeVolumeName():  true,
+			cfg.StateVolumeName(): true,
+		},
+		pullErr: errors.New("registry unavailable"),
+	}
+
+	err := CreateInstance(eng, cfg, func() error { return nil }, CreateInstanceOptions{})
+	if err == nil {
+		t.Fatal("expected image download failure")
+	}
+	if len(eng.removedVolumes) != 0 {
+		t.Fatalf("pre-existing volumes were removed: %v", eng.removedVolumes)
+	}
 }
 func (f *fakeCreationEngine) RemoveVolume(name string) error {
 	f.removedVolumes = append(f.removedVolumes, name)
@@ -48,7 +71,30 @@ func (f *fakeCreationEngine) RemoveContainer(string) error {
 }
 
 func testCreateConfig() *config.Config {
-	return &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "58231"}
+	return &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "58231", Memory: "2g", ShmSize: "512m"}
+}
+
+func TestCreateInstanceEmitsTypedLifecycleEvents(t *testing.T) {
+	eng := &fakeCreationEngine{}
+	var events []InstanceCreationEvent
+	err := CreateInstance(eng, testCreateConfig(), func() error { return nil }, CreateInstanceOptions{
+		OnEvent: func(event InstanceCreationEvent) { events = append(events, event) },
+		Verify:  func() (string, bool) { return "optional service unavailable", true },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 14 {
+		t.Fatalf("events = %#v, want start/done for seven stages", events)
+	}
+	for i := 0; i < len(events); i += 2 {
+		if events[i].State != "start" || events[i+1].State != "done" || events[i].Stage != events[i+1].Stage {
+			t.Fatalf("event pair %d = %#v / %#v", i/2, events[i], events[i+1])
+		}
+	}
+	if !events[11].Warning || events[11].Stage != CreateStageVerify {
+		t.Fatalf("verification event = %#v, want warning", events[11])
+	}
 }
 
 func TestCreateInstanceSuccessRunsStagesInOrderAndSaves(t *testing.T) {
@@ -139,10 +185,10 @@ type failSecondCreateEngine struct {
 	calls *int
 }
 
-func (f *failSecondCreateEngine) CreateVolume(name string) error {
+func (f *failSecondCreateEngine) CreateVolume(name string) (bool, error) {
 	*f.calls++
 	if *f.calls == 2 {
-		return errors.New("disk full")
+		return false, errors.New("disk full")
 	}
 	return f.fakeCreationEngine.CreateVolume(name)
 }

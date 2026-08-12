@@ -153,6 +153,15 @@ func EnsureRuntime(options RuntimeSetupOptions) (ProbeResult, error) {
 	if host.OS == "" {
 		host = DetectHostPlatform()
 	}
+	host = normalizeHostPlatform(host)
+	if !supportedHostTarget(host) {
+		return ProbeResult{Name: "podman", State: RuntimeMissing}, runtimeSetupError(
+			RuntimeSetupSupport,
+			"This operating system or architecture is not supported by this Omnideck release.",
+			"Use a supported Linux, macOS, or Windows build for AMD64 or ARM64.",
+			nil,
+		)
+	}
 	probe := options.probe
 	if probe == nil {
 		probe = func() ProbeResult {

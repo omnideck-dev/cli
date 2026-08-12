@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 )
 
@@ -611,6 +612,39 @@ func TestReadyPodmanCompletesTheInstanceSetupFlow(t *testing.T) {
 	}
 }
 
+func TestSetupApplyingConsumesSharedLifecycleTransaction(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
+	_ = listener.Close()
+
+	m := NewSetupModel(SetupRequest{Mode: SetupAdditionalInstance})
+	m.eng = &mockEngine{name: "podman"}
+	m.inputs[inputContainerName].SetValue("shared-lifecycle")
+	m.inputs[inputWebUIPort].SetValue(port)
+	m.Stage = SetupStageApplying
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+
+	msg := m.startSetupWorkflow()()
+	for iterations := 0; iterations < 20 && m.Stage != SetupStageComplete && m.Stage != SetupStageFailed; iterations++ {
+		updated, _ := m.updateApplying(msg)
+		m = updated.(SetupModel)
+		if m.Stage == SetupStageComplete || m.Stage == SetupStageFailed {
+			break
+		}
+		msg = <-m.setupEvents
+	}
+	if m.Stage != SetupStageComplete {
+		t.Fatalf("shared lifecycle ended at stage %d: %s", m.Stage, m.errorDetail)
+	}
+	if _, err := config.Load(config.InstancePath("shared-lifecycle")); err != nil {
+		t.Fatalf("shared lifecycle did not save config: %v", err)
+	}
+}
+
 func TestRecommendedSettingsAreOneStep(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	m := NewSetupModel(SetupRequest{})
@@ -660,6 +694,8 @@ func TestSetupFailureAfterBothVolumesRollsBackBothVolumes(t *testing.T) {
 	m.Stage = SetupStageApplying
 	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
 	m.lastCompletedStep = setupStepStateVolume
+	m.homeVolumeCreated = true
+	m.stateVolumeCreated = true
 	eng := &mockEngine{}
 	m.eng = eng
 	cfg := m.buildConfig()

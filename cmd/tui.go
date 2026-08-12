@@ -39,27 +39,31 @@ func runTUI(_ *cobra.Command, _ []string) error {
 		return fmt.Errorf("no container runtime is ready: %w", err)
 	}
 
-	instances, err := config.ListInstances()
+	inventory, err := config.LoadInventory()
 	if err != nil {
 		return fmt.Errorf("reading saved Omnideck installations: %w", err)
 	}
-	return runApp(eng, instances, LoadedConfig, ConfigPath)
+	return runAppWithInventory(eng, inventory.Instances, inventory.Issues, LoadedConfig, ConfigPath)
 }
 
 // runApp is the single interactive shell for returning users. A legacy
 // single-file configuration is included until the user next saves it in the
 // conventional instances directory.
 func runApp(eng engine.Engine, instances []config.InstanceInfo, loaded *config.Config, loadedPath string) error {
+	return runAppWithInventory(eng, instances, nil, loaded, loadedPath)
+}
+
+func runAppWithInventory(eng engine.Engine, instances []config.InstanceInfo, issues []config.InstanceIssue, loaded *config.Config, loadedPath string) error {
 	if eng == nil {
 		return fmt.Errorf("Podman is not ready\nRun `omnideck` for guided setup")
 	}
 	instances = withLoadedInstance(instances, loaded, loadedPath)
-	model := tui.NewAppModel(eng, instances)
+	model := tui.NewAppModelWithInventory(eng, instances, issues)
 	return runAppModel(model)
 }
 
-func runAppForDoctor(eng engine.Engine, instances []config.InstanceInfo, selected int) error {
-	model := tui.NewAppModelForDoctor(eng, instances, selected)
+func runAppForDoctorWithInventory(eng engine.Engine, instances []config.InstanceInfo, issues []config.InstanceIssue, selected int) error {
+	model := tui.NewAppModelForDoctorWithInventory(eng, instances, issues, selected)
 	return runAppModel(model)
 }
 

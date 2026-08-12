@@ -36,6 +36,7 @@ const (
 // CheckResult is one plain-language Doctor result. Action fields are used by
 // the interactive Doctor screen; Hint remains useful in the plain report.
 type CheckResult struct {
+	ID          string
 	Label       string
 	Status      CheckStatus
 	Detail      string
@@ -69,7 +70,7 @@ func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.P
 			},
 			CheckResult{Label: "This computer", Status: CheckInfo, Detail: friendlyOS(runtime.GOOS) + " · " + runtime.GOARCH},
 		)
-		return results, usableEngine
+		return finalizeDiagnosticResults(results), usableEngine
 	}
 
 	if usableEngine == nil {
@@ -81,21 +82,111 @@ func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.P
 			doctorOllamaCheck(nil, "", false),
 			CheckResult{Label: "This computer", Status: CheckInfo, Detail: friendlyOS(runtime.GOOS) + " · " + runtime.GOARCH},
 		)
-		return results, nil
+		return finalizeDiagnosticResults(results), nil
 	}
 
+	homeVolumeResult := CheckVolume("Saved files", cfg.HomeVolumeName(), usableEngine)
+	stateVolumeResult := CheckVolume("Saved app data", cfg.StateVolumeName(), usableEngine)
 	containerResult, running := doctorContainerCheck(cfg, usableEngine)
+	if containerResult.Action == DoctorActionRepairInstance &&
+		(homeVolumeResult.Status != CheckPass || stateVolumeResult.Status != CheckPass) {
+		containerResult.Action = DoctorActionNone
+		containerResult.ActionLabel = ""
+		containerResult.ActionValue = ""
+		containerResult.Hint = "Automatic repair is paused because expected saved data is missing. Do not create replacement volumes; use the reported volume names when asking for support."
+	}
 	results = append(results, containerResult)
 	results = append(results, doctorBrowserCheck(cfg, running))
 	results = append(results,
-		CheckVolume("Saved files", cfg.HomeVolumeName(), usableEngine),
-		CheckVolume("Saved app data", cfg.StateVolumeName(), usableEngine),
+		homeVolumeResult,
+		stateVolumeResult,
 		doctorImageCheck(cfg, usableEngine),
 		doctorMemoryCheck(),
 		doctorOllamaCheck(usableEngine, cfg.ContainerName, running),
 		CheckResult{Label: "This computer", Status: CheckInfo, Detail: friendlyOS(runtime.GOOS) + " · " + runtime.GOARCH},
 	)
-	return results, usableEngine
+	return finalizeDiagnosticResults(results), usableEngine
+}
+
+// DiagnoseInventoryIssues converts unreadable saved configuration files into
+// durable Doctor findings. The original file is never rewritten or removed.
+func DiagnoseInventoryIssues(issues []config.InstanceIssue) []CheckResult {
+	results := make([]CheckResult, 0, len(issues))
+	for _, issue := range issues {
+		detail := "The saved instance file " + issue.Name + ".yaml could not be read"
+		hint := "Keep the file in place and repair its YAML or restore it from backup: " + issue.Path
+		if issue.Err != nil {
+			hint += " (" + issue.Err.Error() + ")"
+		}
+		results = append(results, CheckResult{
+			ID:     "config.instance_file." + stableCheckID(issue.Name),
+			Label:  "Saved installation: " + issue.Name,
+			Status: CheckFail,
+			Detail: detail,
+			Hint:   hint,
+		})
+	}
+	return results
+}
+
+func finalizeDiagnosticResults(results []CheckResult) []CheckResult {
+	counts := map[string]int{}
+	for i := range results {
+		if results[i].ID != "" {
+			continue
+		}
+		base := diagnosticID(results[i].Label)
+		counts[base]++
+		results[i].ID = base
+		if counts[base] > 1 {
+			results[i].ID = fmt.Sprintf("%s.%d", base, counts[base])
+		}
+	}
+	return results
+}
+
+func diagnosticID(label string) string {
+	switch label {
+	case "Container runtime":
+		return "runtime.podman"
+	case "Omnideck setup":
+		return "instance.setup"
+	case "Omnideck instance":
+		return "instance.container"
+	case "Browser":
+		return "instance.browser"
+	case "Saved data":
+		return "storage.summary"
+	case "Saved files":
+		return "storage.home"
+	case "Saved app data":
+		return "storage.state"
+	case "Omnideck download":
+		return "instance.image"
+	case "Available memory":
+		return "host.memory"
+	case "Local AI (optional)":
+		return "optional.ollama"
+	case "This computer":
+		return "host.platform"
+	default:
+		return "doctor." + stableCheckID(label)
+	}
+}
+
+func stableCheckID(value string) string {
+	var b strings.Builder
+	lastSeparator := false
+	for _, r := range strings.ToLower(value) {
+		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			b.WriteRune(r)
+			lastSeparator = false
+		} else if !lastSeparator && b.Len() > 0 {
+			b.WriteByte('_')
+			lastSeparator = true
+		}
+	}
+	return strings.Trim(b.String(), "_")
 }
 
 // CheckVolume reports whether one of an instance's persisted volumes is still

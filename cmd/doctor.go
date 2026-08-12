@@ -20,7 +20,7 @@ func init() {
 }
 
 func runDoctor(_ *cobra.Command, _ []string) error {
-	instances, err := config.ListInstances()
+	inventory, err := config.LoadInventory()
 	if err != nil {
 		wrapped := fmt.Errorf("reading saved Omnideck installations: %w", err)
 		if jsonFlag {
@@ -28,7 +28,7 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 		}
 		return wrapped
 	}
-	if LoadedConfig == nil && (len(instances) > 0 || nameFlag != "" || cfgPath != "") {
+	if LoadedConfig == nil && (len(inventory.Instances) > 0 || nameFlag != "" || cfgPath != "") {
 		if err := requireConfigMulti(); err != nil {
 			return err
 		}
@@ -36,6 +36,7 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 	detectedEng, _ := detectReadyEngine()
 
 	results := workflow.Diagnose(LoadedConfig, detectedEng)
+	results = append(results, workflow.DiagnoseInventoryIssues(inventory.Issues)...)
 
 	if jsonFlag {
 		allPass := allChecksPass(results)

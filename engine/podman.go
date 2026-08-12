@@ -36,7 +36,7 @@ func (e *PodmanEngine) ContainerExists(name string) (bool, error) {
 	return strings.TrimSpace(string(out)) == name, nil
 }
 
-func (e *PodmanEngine) CreateVolume(name string) error {
+func (e *PodmanEngine) CreateVolume(name string) (bool, error) {
 	return createVolumeIfMissing(name, e.VolumeExists, func() error {
 		cmd := buildCmd("podman", "volume", "create", name)
 		_, err := commandCombinedOutput("podman volume create", cmd)
@@ -47,23 +47,23 @@ func (e *PodmanEngine) CreateVolume(name string) error {
 // createVolumeIfMissing makes Podman setup safe to retry. Podman 3 does not
 // support `volume create --ignore`, and unlike Docker it returns an error when
 // a named volume already exists.
-func createVolumeIfMissing(name string, exists func(string) (bool, error), create func() error) error {
+func createVolumeIfMissing(name string, exists func(string) (bool, error), create func() error) (bool, error) {
 	found, err := exists(name)
 	if err != nil {
-		return fmt.Errorf("checking volume %q: %w", name, err)
+		return false, fmt.Errorf("checking volume %q: %w", name, err)
 	}
 	if found {
-		return nil
+		return false, nil
 	}
 	if err := create(); err != nil {
 		// Another setup process can create the same volume after our check.
 		// Treat that race as success without hiding unrelated create failures.
 		if found, inspectErr := exists(name); inspectErr == nil && found {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
-	return nil
+	return true, nil
 }
 
 func (e *PodmanEngine) VolumeExists(name string) (bool, error) {
@@ -80,11 +80,8 @@ func (e *PodmanEngine) VolumeExists(name string) (bool, error) {
 
 func (e *PodmanEngine) RemoveVolume(name string) error {
 	cmd := buildCmd("podman", "volume", "rm", name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("podman volume rm: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := commandCombinedOutput("podman volume rm", cmd)
+	return err
 }
 
 func (e *PodmanEngine) ExportVolume(name string, w io.Writer) error {
@@ -223,36 +220,27 @@ func (e *PodmanEngine) CheckOllamaConnection(name string) error {
 
 func (e *PodmanEngine) StopContainer(name string) error {
 	cmd := buildCmd("podman", "stop", name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("podman stop: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := commandCombinedOutput("podman stop", cmd)
+	return err
 }
 
 func (e *PodmanEngine) StartContainer(name string) error {
 	cmd := buildCmd("podman", "start", name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("podman start: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := commandCombinedOutput("podman start", cmd)
+	return err
 }
 
 func (e *PodmanEngine) RemoveContainer(name string) error {
 	cmd := buildCmd("podman", "rm", "-f", name)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("podman rm: %w: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := commandCombinedOutput("podman rm", cmd)
+	return err
 }
 
 func (e *PodmanEngine) ContainerStatus(name string) (string, error) {
 	cmd := buildCmd("podman", "inspect", "--format", "{{.State.Status}}", name)
-	out, err := cmd.Output()
+	out, err := commandOutput("podman inspect", cmd)
 	if err != nil {
-		return "", fmt.Errorf("podman inspect: %w", err)
+		return "", err
 	}
 	return strings.TrimSpace(string(out)), nil
 }

@@ -40,7 +40,10 @@ type Engine interface {
 	IsAvailable() bool
 	HasPermission() bool
 	ContainerExists(name string) (bool, error)
-	CreateVolume(name string) error
+	// CreateVolume ensures a named volume exists. created is true only when this
+	// call created the volume, allowing transaction rollback to preserve volumes
+	// that belonged to an earlier installation.
+	CreateVolume(name string) (created bool, err error)
 	VolumeExists(name string) (bool, error)
 	RemoveVolume(name string) error
 	ExportVolume(name string, w io.Writer) error

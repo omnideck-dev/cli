@@ -12,6 +12,14 @@ type podmanInstaller struct {
 	SHA256   string
 }
 
+func (i podmanInstaller) URL() string {
+	return fmt.Sprintf(
+		"https://github.com/podman-container-tools/podman/releases/download/%s/%s",
+		i.Version,
+		i.Filename,
+	)
+}
+
 var podmanInstallers = map[string]podmanInstaller{
 	"darwin-amd64": {
 		Version:  "v5.8.5",
@@ -35,6 +43,11 @@ var podmanInstallers = map[string]podmanInstaller{
 	},
 }
 
+func podmanInstallerFor(host HostPlatform) (podmanInstaller, bool) {
+	installer, ok := podmanInstallers[host.OS+"-"+host.Arch]
+	return installer, ok
+}
+
 func installPodmanRuntime(host HostPlatform, downloadRoot string, onEvent func(RuntimeSetupEvent), allowTerminalElevation bool) error {
 	switch host.OS {
 	case "linux":
@@ -54,7 +67,7 @@ func installPodmanRuntime(host HostPlatform, downloadRoot string, onEvent func(R
 }
 
 func downloadPodmanInstaller(host HostPlatform, downloadRoot string, onEvent func(RuntimeSetupEvent)) (string, error) {
-	installer, ok := podmanInstallers[host.OS+"-"+host.Arch]
+	installer, ok := podmanInstallerFor(host)
 	if !ok {
 		return "", runtimeSetupError(
 			RuntimeSetupSupport,
@@ -67,11 +80,7 @@ func downloadPodmanInstaller(host HostPlatform, downloadRoot string, onEvent fun
 		return "", runtimeSetupError(RuntimeSetupDownload, "The Podman download could not be saved.", "Check available disk space and try again.", err)
 	}
 	destination := filepath.Join(downloadRoot, installer.Filename)
-	url := fmt.Sprintf(
-		"https://github.com/podman-container-tools/podman/releases/download/%s/%s",
-		installer.Version,
-		installer.Filename,
-	)
+	url := installer.URL()
 	emitRuntimeSetup(onEvent, setupSubstageProgress(
 		SetupStageSoftware,
 		SetupSubstagePodmanDownload,

@@ -110,17 +110,19 @@ type statsTickMsg time.Time
 type toastClearMsg struct{}
 
 type instanceStatsMsg struct {
-	idx      int
-	status   string
-	cpu      string
-	cpuPct   float64
-	ram      string
-	ramTotal string
-	ramPct   float64
-	uptime   string
-	restarts string
-	created  string
-	health   string
+	id         string
+	generation int
+	idx        int
+	status     string
+	cpu        string
+	cpuPct     float64
+	ram        string
+	ramTotal   string
+	ramPct     float64
+	uptime     string
+	restarts   string
+	created    string
+	health     string
 	// statsUnavailable mirrors InstanceState.StatsUnavailable: the instance
 	// is running but the engine's stats call failed.
 	statsUnavailable bool
@@ -130,7 +132,7 @@ type instanceStatsMsg struct {
 }
 
 type instanceLogsMsg struct {
-	idx   int
+	id    string
 	lines []LogLine
 }
 type doctorResultsMsg struct {
@@ -172,13 +174,14 @@ type WorkflowExitMsg struct {
 type settingsApplyDoneMsg struct {
 	err error
 	cfg *config.Config
-	idx int
+	id  string
 }
 
 // instancesRefreshedMsg carries either a fresh instance list or the read error.
 // A refresh failure must never look like every instance was deleted.
 type instancesRefreshedMsg struct {
 	instances []config.InstanceInfo
+	issues    []config.InstanceIssue
 	err       error
 }
 
@@ -203,6 +206,12 @@ func (m *AppModel) CurrentInstance() *InstanceState {
 
 // NewAppModel creates an application shell rooted at the Dashboard screen.
 func NewAppModel(eng engine.Engine, instances []config.InstanceInfo) AppModel {
+	return NewAppModelWithInventory(eng, instances, nil)
+}
+
+// NewAppModelWithInventory preserves unreadable saved instance files so the
+// Doctor screen can report them alongside usable installations.
+func NewAppModelWithInventory(eng engine.Engine, instances []config.InstanceInfo, issues []config.InstanceIssue) AppModel {
 	states := make([]InstanceState, len(instances))
 	for i, inst := range instances {
 		states[i] = InstanceState{
@@ -215,8 +224,9 @@ func NewAppModel(eng engine.Engine, instances []config.InstanceInfo) AppModel {
 	sp.Style = lipgloss.NewStyle().Foreground(styles.TNBlue)
 	return AppModel{
 		ControlPlaneSection: ControlPlaneSection{
-			eng:       eng,
-			instances: states,
+			eng:             eng,
+			instances:       states,
+			inventoryIssues: append([]config.InstanceIssue(nil), issues...),
 			DoctorScreenState: DoctorScreenState{
 				doctorSpinner: sp,
 			},
@@ -231,7 +241,11 @@ func NewAppModel(eng engine.Engine, instances []config.InstanceInfo) AppModel {
 
 // NewAppModelForDoctor opens Doctor for a selected broken installation.
 func NewAppModelForDoctor(eng engine.Engine, instances []config.InstanceInfo, selected int) AppModel {
-	m := NewAppModel(eng, instances)
+	return NewAppModelForDoctorWithInventory(eng, instances, nil, selected)
+}
+
+func NewAppModelForDoctorWithInventory(eng engine.Engine, instances []config.InstanceInfo, issues []config.InstanceIssue, selected int) AppModel {
+	m := NewAppModelWithInventory(eng, instances, issues)
 	if selected >= 0 && selected < len(instances) {
 		m.selected = selected
 	}
@@ -298,10 +312,7 @@ func NewAppModelForUpdate(eng engine.Engine, instances []config.InstanceInfo, cf
 // Init starts live polling for all instance stats.
 func (m AppModel) Init() tea.Cmd {
 	cmds := []tea.Cmd{
-		tea.Tick(time.Second, func(t time.Time) tea.Msg { return statsTickMsg(t) }),
-	}
-	for i := range m.instances {
-		cmds = append(cmds, m.pollStats(i))
+		func() tea.Msg { return statsTickMsg(time.Now()) },
 	}
 	if m.router.Current() == RouteSetup {
 		cmds = append(cmds, m.setupModel.Init())

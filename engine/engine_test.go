@@ -82,7 +82,7 @@ func TestRuntimeCommandErrorKeepsEngineExplanation(t *testing.T) {
 
 func TestCreateVolumeIfMissingReusesExistingVolume(t *testing.T) {
 	createCalls := 0
-	err := createVolumeIfMissing(
+	created, err := createVolumeIfMissing(
 		"omnideck-home",
 		func(string) (bool, error) { return true, nil },
 		func() error {
@@ -90,14 +90,14 @@ func TestCreateVolumeIfMissingReusesExistingVolume(t *testing.T) {
 			return nil
 		},
 	)
-	if err != nil || createCalls != 0 {
-		t.Fatalf("createVolumeIfMissing() = %v, create calls = %d; want success without creating", err, createCalls)
+	if err != nil || created || createCalls != 0 {
+		t.Fatalf("createVolumeIfMissing() = %v, %t, create calls = %d; want reused volume", err, created, createCalls)
 	}
 }
 
 func TestCreateVolumeIfMissingHandlesCreateRace(t *testing.T) {
 	inspectCalls := 0
-	err := createVolumeIfMissing(
+	created, err := createVolumeIfMissing(
 		"omnideck-home",
 		func(string) (bool, error) {
 			inspectCalls++
@@ -105,8 +105,8 @@ func TestCreateVolumeIfMissingHandlesCreateRace(t *testing.T) {
 		},
 		func() error { return errors.New("volume already exists") },
 	)
-	if err != nil {
-		t.Fatalf("createVolumeIfMissing() = %v, want race to succeed", err)
+	if err != nil || created {
+		t.Fatalf("createVolumeIfMissing() = %v, %t, want race to reuse volume", err, created)
 	}
 }
 

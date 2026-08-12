@@ -44,6 +44,38 @@ func TestUnknownOrOldLinuxUsesManualPodmanGuidance(t *testing.T) {
 	}
 }
 
+func TestImmutableLinuxUsesManualGuidanceWithoutHostPackageMutation(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{Name: "podman", State: RuntimeMissing}},
+		HostPlatform{OS: "linux", Arch: "amd64", DistroID: "fedora", Variant: "silverblue", Immutable: true},
+	)[0]
+	if !plan.Manual || len(plan.Commands) != 0 || plan.RequiresElevation {
+		t.Fatalf("immutable plan = %#v", plan)
+	}
+}
+
+func TestImmutableLinuxDetectionCoversVariantAndDistroFamilies(t *testing.T) {
+	for _, host := range []HostPlatform{
+		{Variant: "kinoite"},
+		{DistroID: "bazzite", DistroLike: []string{"fedora"}},
+		{DistroID: "flatcar"},
+		{DistroID: "opensuse", DistroLike: []string{"microos"}},
+	} {
+		if !immutableLinuxHost(host) {
+			t.Fatalf("host was not detected as immutable: %#v", host)
+		}
+	}
+}
+
+func TestInstallerPlanUsesVerifiedInstallerCatalogURL(t *testing.T) {
+	host := HostPlatform{OS: "windows", Arch: "arm64"}
+	plan := BuildSetupPlans([]ProbeResult{{Name: "podman", State: RuntimeMissing}}, host)[0]
+	installer, ok := podmanInstallerFor(host)
+	if !ok || plan.URL != installer.URL() {
+		t.Fatalf("plan URL = %q, catalog = %#v", plan.URL, installer)
+	}
+}
+
 func TestLinuxDerivativesUseTheirDeclaredPackageFamily(t *testing.T) {
 	tests := []struct {
 		host    HostPlatform

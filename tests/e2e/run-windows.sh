@@ -284,10 +284,19 @@ json_command() {
 prepare_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Prepare -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest}"
 bootstrap_remote="set \"OMNIDECK_CONFIG_DIR=${remote_root}\\config\"&& ${remote_root}\\bin\\omnideck.exe install --image ${fixture_guest}"
 install_remote="set \"OMNIDECK_CONFIG_DIR=${remote_root}\\config\"&& ${remote_root}\\bin\\omnideck.exe install --image ${fixture_guest}"
+ca_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_registry.ps1 -CertificatePath ${remote_root}\\registry.crt -RegistryAuthority ${registry_authority}"
 installed_command="wsl.exe --shutdown&& podman.exe machine start omnideck-runtime&& podman.exe start omnideck&& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Installed -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest}&& echo OMNIDECK_E2E_INSTALLED_PASSED"
 manage_remote="wsl.exe --shutdown&& podman.exe machine start omnideck-runtime&& podman.exe start omnideck&& set \"OMNIDECK_CONFIG_DIR=${remote_root}\\config\"&& ${remote_root}\\bin\\omnideck.exe tui"
 final_command="wsl.exe --shutdown&& podman.exe machine start omnideck-runtime&& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Final -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest}&& echo OMNIDECK_E2E_FINAL_PASSED"
-ca_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_registry.ps1 -CertificatePath ${remote_root}\\registry.crt -RegistryAuthority ${registry_authority}"
+
+set_registry_bridge() {
+	local target_port="$1"
+	"${lab_dir}/lab.sh" run windows \
+		"netsh.exe interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=${bridge_port}" \
+		>/dev/null 2>&1 || true
+	"${lab_dir}/lab.sh" run windows \
+		"netsh.exe interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=${bridge_port} connectaddress=127.0.0.1 connectport=${target_port}"
+}
 
 set +e
 (
@@ -295,9 +304,8 @@ set +e
   printf 'Validating the packaged CLI on the clean Windows host.\n'
   "${lab_dir}/lab.sh" run windows "${prepare_command}"
 
-  printf 'Bridging the fixture registry into the Podman machine.\n'
-  "${lab_dir}/lab.sh" run windows \
-    "netsh.exe interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=${bridge_port} connectaddress=127.0.0.1 connectport=${reverse_port}"
+	printf 'Bridging the fixture registry into the Podman machine.\n'
+	set_registry_bridge "${reverse_port}"
   "${lab_dir}/lab.sh" run windows \
     "netsh.exe advfirewall firewall add rule name=${firewall_rule} dir=in action=allow protocol=TCP localport=${bridge_port} profile=any"
 
@@ -342,6 +350,9 @@ set +e
     --hook-command-json "${ca_hook_json}"
 
   printf 'Checking installed state and unattended JSON/update behavior.\n'
+  # Windows OpenSSH places session children in a job that is torn down when
+  # the session closes. Start the WSL-backed Podman machine inside every phase
+  # that uses it, and attach the registry forward to that same live session.
   ssh "${ssh_terminal_options[@]}" tester@127.0.0.1 "${installed_command}" \
     | tee "${build_dir}/windows-installed-session.log"
   grep -Fq 'OMNIDECK_E2E_INSTALLED_PASSED' "${build_dir}/windows-installed-session.log"
@@ -376,7 +387,8 @@ if [[ "${vm_started}" == "1" ]]; then
     0|1) ;;
     *) printf 'Could not extract Windows evidence (unzip exit %s).\n' "${unzip_status}" >&2; exit "${unzip_status}" ;;
   esac
-  python3 - "${evidence_dir}/summary.json" <<'PY'
+	if [[ "${test_status}" == "0" && -f "${evidence_dir}/summary.json" ]]; then
+		python3 - "${evidence_dir}/summary.json" <<'PY'
 import json
 import sys
 
@@ -384,6 +396,10 @@ with open(sys.argv[1], encoding="utf-8-sig") as stream:
     summary = json.load(stream)
 assert summary["status"] == "passed", summary
 PY
+	elif [[ "${test_status}" == "0" ]]; then
+		printf 'Windows E2E completed without its required summary.json evidence.\n' >&2
+		exit 1
+	fi
 fi
 
 exit "${test_status}"

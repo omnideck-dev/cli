@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
-	"github.com/omnideck-dev/cli/cmd/debug"
+	"github.com/omnideck-dev/cli/debuglog"
 )
 
 const maxCommandOutput = 64 * 1024
@@ -22,7 +22,7 @@ func buildCmd(binary string, args ...string) *exec.Cmd {
 	if binary == "podman" {
 		args = podmanCommandArgs(runtime.GOOS, args...)
 	}
-	if debug.Enabled() {
+	if debuglog.Enabled() {
 		fmt.Fprintf(os.Stderr, "[debug] %s %s\n", binary, strings.Join(args, " "))
 	}
 	command := exec.CommandContext(processCtx, binary, args...)

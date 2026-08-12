@@ -82,16 +82,17 @@ func (m *AppModel) validateSettingFields() error {
 
 // applySettingsCmd recreates the container first, then saves the candidate settings.
 // If either operation fails it restores the previous runtime/settings pairing.
-func applySettingsCmd(current, candidate *config.Config, configPath string, eng engine.Engine, idx int) tea.Cmd {
+func applySettingsCmd(current, candidate *config.Config, configPath string, eng engine.Engine, _ int) tea.Cmd {
 	return func() tea.Msg {
 		currentCopy := *current
 		candidateCopy := *candidate
+		id := currentCopy.ContainerName
 		if candidateCopy.WebUIPortOrDefault() != currentCopy.WebUIPortOrDefault() && !checks.PortAvailable(candidateCopy.WebUIPortOrDefault()) {
-			return settingsApplyDoneMsg{err: fmt.Errorf("another app is already using browser address number %s", candidateCopy.WebUIPortOrDefault()), idx: idx}
+			return settingsApplyDoneMsg{err: fmt.Errorf("another app is already using browser address number %s", candidateCopy.WebUIPortOrDefault()), id: id}
 		}
 		if err := workflow.RecreateAndSave(eng, &currentCopy, &candidateCopy, configPath); err != nil {
-			return settingsApplyDoneMsg{err: err, idx: idx}
+			return settingsApplyDoneMsg{err: err, id: id}
 		}
-		return settingsApplyDoneMsg{cfg: &candidateCopy, idx: idx}
+		return settingsApplyDoneMsg{cfg: &candidateCopy, id: id}
 	}
 }

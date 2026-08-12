@@ -11,8 +11,8 @@ import (
 	"syscall"
 
 	"github.com/charmbracelet/x/term"
-	"github.com/omnideck-dev/cli/cmd/debug"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/debuglog"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/styles"
 	"github.com/omnideck-dev/cli/tui"
@@ -141,18 +141,22 @@ func init() {
 		// private resume flag still routes through the normal bare-command
 		// detection so first setup and runtime repair continue in the right mode.
 		if isInteractive() || resumeSetupFlag {
-			instances, listErr := config.ListInstances()
+			inventory, listErr := config.LoadInventory()
+			instances := inventory.Instances
 			instances = withLoadedInstance(instances, LoadedConfig, ConfigPath)
 			probes := engine.ProbeAll()
 			readyEngine := selectReadyEngine(engine.ReadyEngines(probes))
 			brokenIndex := firstBrokenInstance(readyEngine, instances)
+			if listErr == nil && len(inventory.Issues) > 0 && len(instances) == 0 {
+				return runAppForDoctorWithInventory(readyEngine, instances, inventory.Issues, -1)
+			}
 			switch chooseInteractiveStart(LoadedConfig, instances, listErr, readyEngine != nil, brokenIndex >= 0) {
 			case interactiveStartSetup:
 				return runSetup(nil, nil)
 			case interactiveStartRuntimeSetup:
 				return runRuntimeSetup(instances)
 			case interactiveStartDoctor:
-				return runAppForDoctor(readyEngine, instances, brokenIndex)
+				return runAppForDoctorWithInventory(readyEngine, instances, inventory.Issues, brokenIndex)
 			}
 			return runApp(readyEngine, instances, LoadedConfig, ConfigPath)
 		}
@@ -334,7 +338,7 @@ func persistentPreRun(cmd *cobra.Command, _ []string) {
 	cmd.Root().SilenceErrors = jsonFlag
 	cmd.Root().SilenceUsage = jsonFlag
 	styles.NoColor(noColor)
-	debug.SetEnabled(debugFlag)
+	debuglog.SetEnabled(debugFlag)
 	LoadedConfig = nil
 	ConfigPath = ""
 	RuntimeName = ""

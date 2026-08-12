@@ -211,6 +211,6 @@ func (m AppModel) toggleContainer() tea.Cmd {
 		if err != nil {
 			return containerToggleDoneMsg{action: action, err: err}
 		}
-		return containerToggleDoneMsg{stats: fetchStats(eng, name, idx).(instanceStatsMsg), action: action}
+		return containerToggleDoneMsg{stats: fetchStats(eng, name, idx, 0).(instanceStatsMsg), action: action}
 	}
 }

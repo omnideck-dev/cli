@@ -109,10 +109,13 @@ type SetupModel struct {
 	reviewWarnings []string
 
 	// Apply setup.
-	spinnerModel      SpinnerModel
-	lastCompletedStep int             // -1 = none; used for rollback on failure
-	existingNames     map[string]bool // container names already in use (cached at init)
-	existingPorts     map[string]bool // browser ports already reserved by Omnideck
+	spinnerModel       SpinnerModel
+	setupEvents        chan tea.Msg
+	lastCompletedStep  int             // -1 = none; used for rollback on failure
+	homeVolumeCreated  bool            // true only when this setup created the volume
+	stateVolumeCreated bool            // true only when this setup created the volume
+	existingNames      map[string]bool // container names already in use (cached at init)
+	existingPorts      map[string]bool // browser ports already reserved by Omnideck
 
 	// Image override (from --image flag, not shown in TUI).
 	imageOverride string

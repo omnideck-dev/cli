@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/omnideck-dev/cli/config"
 )
 
 // Update dispatches messages to the appropriate screen handler.
@@ -54,25 +55,41 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statsTickMsg:
+		nextTick := tea.Tick(time.Second, func(t time.Time) tea.Msg { return statsTickMsg(t) })
+		if m.statsInFlight || m.router.Current() != RouteDashboard {
+			return m, nextTick
+		}
+		m.statsGeneration++
+		generation := m.statsGeneration
 		var cmds []tea.Cmd
 		for i := range m.instances {
-			cmds = append(cmds, m.pollStats(i))
+			if cmd := m.pollStatsGeneration(i, generation); cmd != nil {
+				cmds = append(cmds, cmd)
+			}
 		}
-		return m, tea.Batch(append(cmds,
-			tea.Tick(time.Second, func(t time.Time) tea.Msg { return statsTickMsg(t) }),
-		)...)
+		m.statsPending = len(cmds)
+		m.statsInFlight = m.statsPending > 0
+		return m, tea.Batch(append(cmds, nextTick)...)
 
 	case instanceStatsMsg:
-		if msg.idx >= 0 && msg.idx < len(m.instances) {
-			applyInstanceStats(&m.instances[msg.idx], msg)
+		if msg.generation > 0 && msg.generation != m.statsGeneration {
+			return m, nil
+		}
+		if idx := m.instanceIndex(msg.id); idx >= 0 {
+			applyInstanceStats(&m.instances[idx], msg)
+		}
+		if msg.generation > 0 && m.statsPending > 0 {
+			m.statsPending--
+			m.statsInFlight = m.statsPending > 0
 		}
 		return m, nil
 
 	case instanceLogsMsg:
-		if msg.idx >= 0 && msg.idx < len(m.instances) {
-			m.instances[msg.idx].Logs = msg.lines
+		idx := m.instanceIndex(msg.id)
+		if idx >= 0 {
+			m.instances[idx].Logs = msg.lines
 		}
-		if m.router.Current() == RouteLogs {
+		if m.router.Current() == RouteLogs && idx == m.selected {
 			m.logScroll = 0
 		}
 		return m, nil
@@ -82,6 +99,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toast = "Could not refresh saved installations: " + msg.err.Error()
 			return m, clearToastCmd()
 		}
+		selectedID := m.currentInstanceID()
+		m.inventoryIssues = append([]config.InstanceIssue(nil), msg.issues...)
 		existing := map[string]InstanceState{}
 		for _, inst := range m.instances {
 			if inst.Info.Config == nil {
@@ -102,6 +121,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.instances = newStates
+		if selectedID != "" {
+			if selected := m.instanceIndex(selectedID); selected >= 0 {
+				m.selected = selected
+			}
+		}
 		if m.selected >= len(m.instances) {
 			m.selected = max(0, len(m.instances)-1)
 		}
@@ -158,15 +182,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.router.Replace(RouteDashboard)
 		}
 		m.settingFields = nil
-		if msg.idx >= 0 && msg.idx < len(m.instances) && msg.cfg != nil {
-			*m.instances[msg.idx].Info.Config = *msg.cfg
+		idx := m.instanceIndex(msg.id)
+		if idx >= 0 && msg.cfg != nil {
+			*m.instances[idx].Info.Config = *msg.cfg
 		}
 		name := "Omnideck"
 		if msg.cfg != nil {
 			name = msg.cfg.ContainerName
 		}
 		m.toast = "Settings applied — " + name + " restarted"
-		return m, tea.Batch(m.pollStats(msg.idx), clearToastCmd())
+		return m, tea.Batch(m.pollStats(idx), clearToastCmd())
 
 	case containerToggleDoneMsg:
 		if msg.err != nil {
@@ -174,8 +199,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, clearToastCmd()
 		}
 		stats := msg.stats
-		if stats.idx >= 0 && stats.idx < len(m.instances) {
-			inst := &m.instances[stats.idx]
+		if idx := m.instanceIndex(stats.id); idx >= 0 {
+			inst := &m.instances[idx]
 			applyInstanceStats(inst, stats)
 			action := "Stopped"
 			if stats.status == "running" {

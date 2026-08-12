@@ -12,7 +12,7 @@ import (
 // create a new Omnideck instance.
 type InstanceCreationEngine interface {
 	ContainerExists(name string) (bool, error)
-	CreateVolume(name string) error
+	CreateVolume(name string) (bool, error)
 	RemoveVolume(name string) error
 	PullImage(image string, msgs chan<- string) error
 	RunContainer(opts engine.RunOptions) error
@@ -29,11 +29,44 @@ type CreateInstanceOptions struct {
 	OnStage func(stage string)
 	// OnPullProgress is called with each raw line Podman pull emits.
 	OnPullProgress func(line string)
+	// OnEvent receives typed start/completion events for every lifecycle stage.
+	OnEvent func(InstanceCreationEvent)
+	// Verify runs an optional, non-destructive post-start check before the
+	// configuration is saved. A warning does not roll back a healthy instance.
+	Verify func() (detail string, warning bool)
+}
+
+type InstanceCreationStage string
+
+const (
+	CreateStageAvailability InstanceCreationStage = "check_availability"
+	CreateStageHomeVolume   InstanceCreationStage = "create_home_volume"
+	CreateStageStateVolume  InstanceCreationStage = "create_state_volume"
+	CreateStagePullImage    InstanceCreationStage = "pull_image"
+	CreateStageRunContainer InstanceCreationStage = "run_container"
+	CreateStageVerify       InstanceCreationStage = "verify_instance"
+	CreateStageSaveConfig   InstanceCreationStage = "save_config"
+)
+
+type InstanceCreationEvent struct {
+	Stage   InstanceCreationStage
+	State   string
+	Detail  string
+	Warning bool
 }
 
 func (o CreateInstanceOptions) reportStage(stage string) {
 	if o.OnStage != nil {
 		o.OnStage(stage)
+	}
+	if o.OnEvent != nil {
+		o.OnEvent(InstanceCreationEvent{Stage: InstanceCreationStage(stage), State: "start"})
+	}
+}
+
+func (o CreateInstanceOptions) reportDone(stage InstanceCreationStage, detail string, warning bool) {
+	if o.OnEvent != nil {
+		o.OnEvent(InstanceCreationEvent{Stage: stage, State: "done", Detail: detail, Warning: warning})
 	}
 }
 
@@ -51,6 +84,9 @@ func (o CreateInstanceOptions) reportStage(stage string) {
 // satisfies errors.Is(err, context.Canceled) — checked and captured before
 // the context is reset for the cleanup calls themselves to be able to run.
 func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() error, opts CreateInstanceOptions) (err error) {
+	if err := ValidateInstanceConfig(cfg); err != nil {
+		return err
+	}
 	var homeVolumeCreated, stateVolumeCreated, containerCreated bool
 	defer func() {
 		if err == nil {
@@ -70,7 +106,7 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 		}
 	}()
 
-	opts.reportStage("check_availability")
+	opts.reportStage(string(CreateStageAvailability))
 	exists, existsErr := eng.ContainerExists(cfg.ContainerName)
 	if existsErr != nil {
 		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, existsErr)
@@ -81,20 +117,23 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
 		return classifyError(ErrPortInUse, fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault()))
 	}
+	opts.reportDone(CreateStageAvailability, "available", false)
 
-	opts.reportStage("create_home_volume")
-	if err := eng.CreateVolume(cfg.HomeVolumeName()); err != nil {
+	opts.reportStage(string(CreateStageHomeVolume))
+	homeVolumeCreated, err = eng.CreateVolume(cfg.HomeVolumeName())
+	if err != nil {
 		return err
 	}
-	homeVolumeCreated = true
+	opts.reportDone(CreateStageHomeVolume, creationDetail(homeVolumeCreated), false)
 
-	opts.reportStage("create_state_volume")
-	if err := eng.CreateVolume(cfg.StateVolumeName()); err != nil {
+	opts.reportStage(string(CreateStageStateVolume))
+	stateVolumeCreated, err = eng.CreateVolume(cfg.StateVolumeName())
+	if err != nil {
 		return err
 	}
-	stateVolumeCreated = true
+	opts.reportDone(CreateStageStateVolume, creationDetail(stateVolumeCreated), false)
 
-	opts.reportStage("pull_image")
+	opts.reportStage(string(CreateStagePullImage))
 	msgs := make(chan string, 32)
 	forwarded := make(chan struct{})
 	go func() {
@@ -111,16 +150,32 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 	if pullErr != nil {
 		return classifyError(ErrImageDownload, pullErr)
 	}
+	opts.reportDone(CreateStagePullImage, "", false)
 
-	opts.reportStage("run_container")
+	opts.reportStage(string(CreateStageRunContainer))
 	if err := eng.RunContainer(RunOptions(cfg)); err != nil {
 		return classifyContainerRunError(err)
 	}
 	containerCreated = true
+	opts.reportDone(CreateStageRunContainer, "", false)
 
-	opts.reportStage("save_config")
+	if opts.Verify != nil {
+		opts.reportStage(string(CreateStageVerify))
+		detail, warning := opts.Verify()
+		opts.reportDone(CreateStageVerify, detail, warning)
+	}
+
+	opts.reportStage(string(CreateStageSaveConfig))
 	if err := save(); err != nil {
 		return err
 	}
+	opts.reportDone(CreateStageSaveConfig, "", false)
 	return nil
+}
+
+func creationDetail(created bool) string {
+	if created {
+		return "created"
+	}
+	return "reusing existing"
 }

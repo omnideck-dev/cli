@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/workflow"
@@ -81,25 +80,8 @@ func desiredEnvironmentConfig(current *config.Config) (*config.Config, error) {
 		desired.StateVolume = environmentStateVolumeFlag
 	}
 	desired.LayoutVersion = config.CurrentContainerLayout
-	if !checks.ValidContainerName(desired.ContainerName) {
-		return nil, fmt.Errorf("--name must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens")
-	}
-	if !checks.ValidPort(desired.WebUIPortOrDefault()) {
-		return nil, fmt.Errorf("--port must be a number between 1 and 65535")
-	}
-	if !checks.ValidMemorySize(desired.Memory) {
-		return nil, fmt.Errorf("--memory must be a positive number and unit, such as 2g")
-	}
-	if !checks.ValidMemorySize(desired.ShmSize) {
-		return nil, fmt.Errorf("--shm-size must be a positive number and unit, such as 512m")
-	}
-	memoryMB, _ := checks.MemorySizeMB(desired.Memory)
-	shmMB, _ := checks.MemorySizeMB(desired.ShmSize)
-	if shmMB > memoryMB {
-		return nil, fmt.Errorf("--shm-size cannot be larger than --memory")
-	}
-	if strings.TrimSpace(desired.Image) == "" {
-		return nil, fmt.Errorf("--image cannot be empty")
+	if err := workflow.ValidateInstanceConfig(desired); err != nil {
+		return nil, setupValidationError(err)
 	}
 	if desired.InstalledAt.IsZero() {
 		desired.InstalledAt = time.Now()

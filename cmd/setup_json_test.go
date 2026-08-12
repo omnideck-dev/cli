@@ -34,7 +34,7 @@ func decodeNDJSON(t *testing.T, out string) []map[string]any {
 }
 
 func TestRunSetupStepsJSONSuccessEmitsAllStagesAndCompletes(t *testing.T) {
-	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
+	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337", Memory: "2g", ShmSize: "512m"}
 	eng := &mockEngine{
 		name:            "podman",
 		containerStatus: map[string]string{"demo": "running"},
@@ -93,7 +93,7 @@ func TestRunSetupStepsJSONSuccessEmitsAllStagesAndCompletes(t *testing.T) {
 }
 
 func TestRunSetupStepsJSONFailureEmitsNestedError(t *testing.T) {
-	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
+	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337", Memory: "2g", ShmSize: "512m"}
 	eng := &mockEngine{createVolumeErr: errors.New("disk full")}
 
 	var runErr error
@@ -121,7 +121,7 @@ func TestRunSetupStepsJSONFailureEmitsNestedError(t *testing.T) {
 }
 
 func TestRunSetupStepsJSONClassifiesDownloadFailure(t *testing.T) {
-	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
+	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337", Memory: "2g", ShmSize: "512m"}
 	eng := &mockEngine{pullErr: errors.New("registry unavailable")}
 
 	var runErr error
@@ -153,7 +153,7 @@ func TestRunSetupStepsJSONClassifiesDownloadFailure(t *testing.T) {
 // regressed originally: detection must come from the shared context having
 // been cancelled, not from the subprocess's own returned error.
 func TestRunSetupStepsJSONCancellationCleansUpAndReportsCancelled(t *testing.T) {
-	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337"}
+	cfg := &config.Config{ContainerName: "demo", Image: "img", WebUIPort: "2337", Memory: "2g", ShmSize: "512m"}
 	eng := &mockEngine{
 		runErr: errors.New("signal: killed"),
 	}
