@@ -143,6 +143,7 @@ func environmentJSONError(err error) *jsonCmdError {
 	lower := strings.ToLower(message)
 	if errors.Is(err, workflow.ErrPortInUse) ||
 		strings.Contains(lower, "already using port") ||
+		strings.Contains(lower, "already uses port") ||
 		strings.Contains(lower, "address already in use") ||
 		strings.Contains(lower, "already allocated") ||
 		strings.Contains(lower, "cannot listen on the tcp port") ||
