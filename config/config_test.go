@@ -268,6 +268,30 @@ func TestListInstancesMultiple(t *testing.T) {
 	}
 }
 
+func TestLoadInventoryReportsUnreadableInstanceFiles(t *testing.T) {
+	origDir := instancesDirOverride
+	dir := t.TempDir()
+	instancesDirOverride = dir
+	defer func() { instancesDirOverride = origDir }()
+
+	if err := Save(filepath.Join(dir, "healthy.yaml"), DefaultConfig()); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "broken.yaml"), []byte("container_name: [\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	inventory, err := LoadInventory()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(inventory.Instances) != 1 || len(inventory.Issues) != 1 {
+		t.Fatalf("inventory = %#v", inventory)
+	}
+	if inventory.Issues[0].Name != "broken" || inventory.Issues[0].Err == nil {
+		t.Fatalf("issue = %#v", inventory.Issues[0])
+	}
+}
+
 func TestWebUIPortOrDefault(t *testing.T) {
 	cfg := &Config{}
 	if got := cfg.WebUIPortOrDefault(); got != "2337" {

@@ -14,8 +14,10 @@ func (m AppModel) runDoctorCmd() tea.Cmd {
 		cfg = inst.Info.Config
 	}
 	eng := m.eng
+	issues := append([]config.InstanceIssue(nil), m.inventoryIssues...)
 	return func() tea.Msg {
 		results, usableEngine := workflow.DiagnoseWithProbes(cfg, eng, engine.ProbeAll())
+		results = append(results, workflow.DiagnoseInventoryIssues(issues)...)
 		return doctorResultsMsg{results: results, eng: usableEngine}
 	}
 }

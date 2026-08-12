@@ -17,9 +17,9 @@ func (m AppModel) pollLogs(idx int) tea.Cmd {
 	return func() tea.Msg {
 		raw, err := eng.FetchLogs(name, 200)
 		if err != nil {
-			return instanceLogsMsg{idx: idx}
+			return instanceLogsMsg{id: name}
 		}
-		return instanceLogsMsg{idx: idx, lines: parseLogLines(raw)}
+		return instanceLogsMsg{id: name, lines: parseLogLines(raw)}
 	}
 }
 

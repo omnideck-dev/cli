@@ -22,8 +22,10 @@ type HostPlatform struct {
 	DistroID      string
 	DistroLike    []string
 	Version       string
+	Variant       string
 	WSL           bool
 	Systemd       bool
+	Immutable     bool
 	CPUCount      int
 	TotalMemoryMB int64
 }
@@ -146,12 +148,62 @@ func DetectHostPlatform() HostPlatform {
 	host.DistroID = values["ID"]
 	host.DistroLike = strings.Fields(values["ID_LIKE"])
 	host.Version = values["VERSION_ID"]
+	host.Variant = values["VARIANT_ID"]
+	host.Immutable = immutableLinuxHost(host)
+	if _, err := os.Stat("/run/ostree-booted"); err == nil {
+		host.Immutable = true
+	}
+	return host
+}
+
+func immutableLinuxVariant(variant string) bool {
+	switch strings.ToLower(variant) {
+	case "silverblue", "kinoite", "sericea", "onyx", "coreos":
+		return true
+	default:
+		return false
+	}
+}
+
+func immutableLinuxHost(host HostPlatform) bool {
+	if immutableLinuxVariant(host.Variant) {
+		return true
+	}
+	for _, id := range append([]string{host.DistroID}, host.DistroLike...) {
+		switch strings.ToLower(id) {
+		case "bazzite", "coreos", "fedora-coreos", "flatcar", "microos", "rhcos", "ublue-os":
+			return true
+		}
+	}
+	return false
+}
+
+func supportedHostTarget(host HostPlatform) bool {
+	if host.Arch != "amd64" && host.Arch != "arm64" {
+		return false
+	}
+	switch host.OS {
+	case "linux", "darwin", "windows":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeHostPlatform(host HostPlatform) HostPlatform {
+	if host.OS == "" {
+		host.OS = runtime.GOOS
+	}
+	if host.Arch == "" {
+		host.Arch = runtime.GOARCH
+	}
 	return host
 }
 
 // BuildSetupPlans describes the Podman recovery or installation path for the
 // current host. Unsupported legacy runtime probes are deliberately ignored.
 func BuildSetupPlans(probes []ProbeResult, host HostPlatform) []SetupPlan {
+	host = normalizeHostPlatform(host)
 	plans := make([]SetupPlan, 0, len(probes))
 	for _, probe := range probes {
 		if probe.Name != "podman" || probe.Ready() {
@@ -267,13 +319,10 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 	}
 	if host.OS == "darwin" {
 		plan.Description = "Download Podman's official Mac installer."
-		filename := "podman-installer-macos-arm64.pkg"
-		if host.Arch == "amd64" {
-			filename = "podman-installer-macos-amd64.pkg"
-		}
+		installer, _ := podmanInstallerFor(host)
 		plan.Steps = []string{
 			"Wait for the official Podman installer download to finish.",
-			"Open " + filename + " from Downloads and follow the instructions on screen.",
+			"Open " + installer.Filename + " from Downloads and follow the instructions on screen.",
 			"Return to Omnideck and check again.",
 		}
 		plan.DirectDownload = true
@@ -281,10 +330,11 @@ func explainMissingPlan(plan *SetupPlan, host HostPlatform) {
 		return
 	}
 	if host.OS == "windows" {
+		installer, _ := podmanInstallerFor(host)
 		plan.Description = "Download Podman's official Windows installer. WSL 2 is recommended for most people."
 		plan.Steps = []string{
 			"Wait for the official Podman installer download to finish.",
-			"Open the .msi installer from Downloads and keep the recommended Just for me choice.",
+			"Open " + installer.Filename + " from Downloads and keep the recommended Just for me choice.",
 			"Return to Omnideck and check again. Omnideck will finish setup using WSL 2, Podman's default Windows option.",
 		}
 		plan.DirectDownload = true
@@ -413,6 +463,12 @@ func stoppedPlan(plan SetupPlan, host HostPlatform) SetupPlan {
 }
 
 func missingPlan(plan SetupPlan, host HostPlatform) SetupPlan {
+	if !supportedHostTarget(host) {
+		plan.Description = "This operating system or architecture is not supported by this Omnideck release"
+		plan.Manual = true
+		plan.URL = "https://github.com/omnideck-dev/cli/releases"
+		return plan
+	}
 	switch host.OS {
 	case "linux":
 		plan.Description = "Install Podman"
@@ -421,22 +477,16 @@ func missingPlan(plan SetupPlan, host HostPlatform) SetupPlan {
 			plan.Manual = true
 			plan.URL = "https://podman.io/docs/installation"
 		}
-	case "windows":
-		plan.Description = "Install Podman with its official Windows installer"
-		arch := "amd64"
-		if host.Arch == "arm64" {
-			arch = "arm64"
+	case "windows", "darwin":
+		installer, ok := podmanInstallerFor(host)
+		if !ok {
+			plan.Description = "This release does not include Podman for this computer architecture"
+			plan.Manual = true
+			plan.URL = "https://github.com/omnideck-dev/cli/releases"
+			return plan
 		}
-		plan.URL = "https://github.com/containers/podman/releases/latest/download/podman-installer-windows-" + arch + ".msi"
-		plan.DirectDownload = true
-		plan.Manual = true
-	case "darwin":
-		plan.Description = "Install Podman with its official Mac installer"
-		if host.Arch == "amd64" {
-			plan.URL = "https://github.com/podman-container-tools/podman/releases/download/v5.8.5/podman-installer-macos-amd64.pkg"
-		} else {
-			plan.URL = "https://github.com/podman-container-tools/podman/releases/download/" + PodmanInstallerVersion + "/podman-installer-macos-arm64.pkg"
-		}
+		plan.Description = "Install Podman with its official " + map[bool]string{true: "Windows", false: "Mac"}[host.OS == "windows"] + " installer"
+		plan.URL = installer.URL()
 		plan.DirectDownload = true
 		plan.Manual = true
 	}
@@ -452,6 +502,9 @@ func podmanLinuxCommands(host HostPlatform) ([]SetupCommand, bool) {
 }
 
 func podmanLinuxPackageCommands(host HostPlatform) []SetupCommand {
+	if host.Immutable {
+		return nil
+	}
 	distroFamily := host.DistroID
 	if !knownLinuxDistroFamily(distroFamily) {
 		for _, candidate := range host.DistroLike {

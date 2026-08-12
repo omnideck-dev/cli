@@ -142,6 +142,9 @@ func selectSetupEngine() (eng engine.Engine, probes []engine.ProbeResult, err er
 // Shared with runSetupJSON.
 func resolveSetupConfig(eng engine.Engine, instances []config.InstanceInfo) (*config.Config, error) {
 	cfg := workflow.NewInstanceDefaults(instances)
+	resources := engine.DefaultRuntimeResources(engine.DetectHostPlatform())
+	cfg.Memory = resources.ContainerMemory
+	cfg.ShmSize = resources.ContainerSHMSize
 	if nameFlag != "" {
 		cfg.ContainerName = nameFlag
 	}
@@ -398,20 +401,8 @@ func suggestAvailableRuntimeName(initial string, eng engine.Engine) (string, err
 }
 
 func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
-	if !checks.ValidContainerName(cfg.ContainerName) {
-		return fmt.Errorf("--name must start with a letter or number and use only letters, numbers, dots, underscores, or hyphens")
-	}
-	if !checks.ValidPort(cfg.WebUIPortOrDefault()) {
-		return fmt.Errorf("--port must be a number between 1 and 65535")
-	}
-	if !checks.ValidMemorySize(cfg.Memory) {
-		return fmt.Errorf("--memory must be a positive number and unit, such as 2g")
-	}
-	if !checks.ValidMemorySize(cfg.ShmSize) {
-		return fmt.Errorf("--shm-size must be a positive number and unit, such as 512m")
-	}
-	if strings.TrimSpace(cfg.Image) == "" {
-		return fmt.Errorf("--image cannot be empty")
+	if err := workflow.ValidateInstanceConfig(cfg); err != nil {
+		return setupValidationError(err)
 	}
 	instances, err := config.ListInstances()
 	if err != nil {
@@ -439,4 +430,33 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 		return fmt.Errorf("another app is already using port %s; choose a different --port", cfg.WebUIPortOrDefault())
 	}
 	return nil
+}
+
+func setupValidationError(err error) error {
+	var validation *workflow.ConfigValidationError
+	if !errors.As(err, &validation) {
+		return err
+	}
+	flag := map[string]string{
+		"name": "--name", "port": "--port", "memory": "--memory",
+		"shm_size": "--shm-size", "image": "--image",
+		"home_volume": "--home-volume", "state_volume": "--state-volume",
+	}[validation.Field]
+	if flag == "" {
+		return err
+	}
+	message := validation.Message
+	if validation.Field == "shm_size" {
+		if strings.Contains(message, "larger than memory") {
+			return errors.New("--shm-size cannot be larger than --memory")
+		}
+		message = strings.Replace(message, "shared memory", "--shm-size", 1)
+		return errors.New(message)
+	}
+	if strings.HasPrefix(message, validation.Field) {
+		message = flag + strings.TrimPrefix(message, validation.Field)
+	} else {
+		message = flag + " " + message
+	}
+	return errors.New(message)
 }

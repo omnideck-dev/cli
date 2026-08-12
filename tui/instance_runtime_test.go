@@ -3,6 +3,8 @@ package tui
 import (
 	"errors"
 	"testing"
+
+	"github.com/omnideck-dev/cli/config"
 )
 
 func TestFetchStatsRunningSucceeds(t *testing.T) {
@@ -11,7 +13,7 @@ func TestFetchStatsRunningSucceeds(t *testing.T) {
 		statsCPU:        "12.3%", statsCPUPct: 0.123,
 		statsRAM: "1.2GiB", statsRAMTotal: "2GiB", statsRAMPct: 0.6,
 	}
-	msg := fetchStats(eng, "demo", 0).(instanceStatsMsg)
+	msg := fetchStats(eng, "demo", 0, 0).(instanceStatsMsg)
 
 	if msg.statsUnavailable {
 		t.Fatal("statsUnavailable should be false on a successful running fetch")
@@ -35,7 +37,7 @@ func TestFetchStatsPausedStillCallsEngineStats(t *testing.T) {
 		statsCPU:        "0.00%", statsCPUPct: 0,
 		statsRAM: "1.2GiB", statsRAMTotal: "2GiB", statsRAMPct: 0.6,
 	}
-	msg := fetchStats(eng, "demo", 0).(instanceStatsMsg)
+	msg := fetchStats(eng, "demo", 0, 0).(instanceStatsMsg)
 
 	if eng.statsCalls != 1 {
 		t.Fatalf("ContainerStats was called %d times for a paused container, want 1", eng.statsCalls)
@@ -60,7 +62,7 @@ func TestFetchStatsStoppedNeverCallsEngineStats(t *testing.T) {
 		containerStatus: "exited",
 		statsCPU:        "0.00%", statsRAM: "0B", // what the engine would return if asked
 	}
-	msg := fetchStats(eng, "demo", 0).(instanceStatsMsg)
+	msg := fetchStats(eng, "demo", 0, 0).(instanceStatsMsg)
 
 	if eng.statsCalls != 0 {
 		t.Fatalf("ContainerStats was called %d times for a stopped container, want 0", eng.statsCalls)
@@ -85,7 +87,7 @@ func TestFetchStatsRunningStatsErrorSetsUnavailable(t *testing.T) {
 		containerStatus: "running",
 		statsErr:        errors.New(`unknown FS magic on "/run/user/1000/netns/...": 1021994`),
 	}
-	msg := fetchStats(eng, "demo", 0).(instanceStatsMsg)
+	msg := fetchStats(eng, "demo", 0, 0).(instanceStatsMsg)
 
 	if !msg.statsUnavailable {
 		t.Fatal("statsUnavailable should be true when a running container's stats call fails")
@@ -137,5 +139,35 @@ func TestApplyInstanceStatsPreservesLastKnownGoodFieldsOnUnavailable(t *testing.
 	}
 	if !inst.StatsUnavailable {
 		t.Fatal("StatsUnavailable should be true")
+	}
+}
+
+func TestStatsResultsApplyByStableInstanceIdentity(t *testing.T) {
+	instances := []config.InstanceInfo{
+		{Name: "one", Config: &config.Config{ContainerName: "one"}},
+		{Name: "two", Config: &config.Config{ContainerName: "two"}},
+	}
+	m := NewAppModel(&mockEngine{}, instances)
+	m.statsGeneration = 4
+	m.statsPending = 1
+	m.statsInFlight = true
+
+	updated, _ := m.Update(instanceStatsMsg{id: "two", idx: 0, generation: 4, status: "running", cpu: "10%", sampleOK: true})
+	m = updated.(AppModel)
+	if m.instances[0].CPU != "" || m.instances[1].CPU != "10%" {
+		t.Fatalf("stats applied by stale index: %#v", m.instances)
+	}
+	if m.statsInFlight || m.statsPending != 0 {
+		t.Fatalf("poll bookkeeping pending=%d inFlight=%t", m.statsPending, m.statsInFlight)
+	}
+}
+
+func TestStatsResultsFromOldGenerationAreIgnored(t *testing.T) {
+	m := NewAppModel(&mockEngine{}, []config.InstanceInfo{{Name: "one", Config: &config.Config{ContainerName: "one"}}})
+	m.statsGeneration = 3
+	updated, _ := m.Update(instanceStatsMsg{id: "one", generation: 2, status: "running", cpu: "99%", sampleOK: true})
+	m = updated.(AppModel)
+	if m.instances[0].CPU != "" {
+		t.Fatalf("stale stats were applied: %#v", m.instances[0])
 	}
 }

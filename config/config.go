@@ -60,6 +60,21 @@ type InstanceInfo struct {
 	Config *Config
 }
 
+// InstanceIssue preserves a saved instance file that could not be loaded.
+// Inventory callers must surface these issues instead of treating a corrupt
+// installation as though it never existed.
+type InstanceIssue struct {
+	Name string
+	Path string
+	Err  error
+}
+
+// Inventory is the complete result of scanning saved instance files.
+type Inventory struct {
+	Instances []InstanceInfo
+	Issues    []InstanceIssue
+}
+
 // instancesDirOverride is set in tests to avoid touching the real config dir.
 var instancesDirOverride string
 
@@ -219,17 +234,18 @@ func InstancePath(name string) string {
 	return filepath.Join(InstancesDir(), name+".yaml")
 }
 
-// ListInstances scans InstancesDir for *.yaml files and returns all valid instances.
-func ListInstances() ([]InstanceInfo, error) {
+// LoadInventory scans InstancesDir and returns valid instances alongside any
+// files that could not be decoded.
+func LoadInventory() (Inventory, error) {
 	dir := InstancesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, nil
+			return Inventory{}, nil
 		}
-		return nil, err
+		return Inventory{}, err
 	}
-	var instances []InstanceInfo
+	var inventory Inventory
 	for _, e := range entries {
 		if e.IsDir() || !strings.HasSuffix(e.Name(), ".yaml") {
 			continue
@@ -237,12 +253,25 @@ func ListInstances() ([]InstanceInfo, error) {
 		path := filepath.Join(dir, e.Name())
 		cfg, err := Load(path)
 		if err != nil {
+			inventory.Issues = append(inventory.Issues, InstanceIssue{
+				Name: strings.TrimSuffix(e.Name(), ".yaml"),
+				Path: path,
+				Err:  err,
+			})
 			continue
 		}
 		name := strings.TrimSuffix(e.Name(), ".yaml")
-		instances = append(instances, InstanceInfo{Name: name, Path: path, Config: cfg})
+		inventory.Instances = append(inventory.Instances, InstanceInfo{Name: name, Path: path, Config: cfg})
 	}
-	return instances, nil
+	return inventory, nil
+}
+
+// ListInstances is retained for callers that only need usable configurations.
+// User-facing inventory and Doctor flows should use LoadInventory so corrupt
+// files remain visible.
+func ListInstances() ([]InstanceInfo, error) {
+	inventory, err := LoadInventory()
+	return inventory.Instances, err
 }
 
 // DefaultPath returns the legacy single-file config path (kept for --config flag use).
@@ -300,7 +329,7 @@ func (c *Config) MigrateImage() bool {
 	return false
 }
 
-// WebUIPortOrDefault returns WebUIPort, falling back to "8080" for configs
+// WebUIPortOrDefault returns WebUIPort, falling back to "2337" for configs
 // written before the port field was added.
 func (c *Config) WebUIPortOrDefault() string {
 	if c.WebUIPort == "" {
@@ -344,12 +373,42 @@ func ensurePrivateDir(path string) error {
 }
 
 func writePrivateFile(path string, data []byte) error {
-	if err := os.WriteFile(path, data, 0o600); err != nil {
+	dir := filepath.Dir(path)
+	temp, err := os.CreateTemp(dir, "."+filepath.Base(path)+"-*")
+	if err != nil {
 		return err
 	}
-	// WriteFile preserves the mode of an existing file. Tighten files created
-	// by older CLI versions as soon as they are saved again.
-	return os.Chmod(path, 0o600)
+	tempPath := temp.Name()
+	committed := false
+	defer func() {
+		_ = temp.Close()
+		if !committed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+	if err := temp.Chmod(0o600); err != nil {
+		return err
+	}
+	if _, err := temp.Write(data); err != nil {
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := replaceFile(tempPath, path); err != nil {
+		return err
+	}
+	committed = true
+	// Best effort: some platforms/filesystems do not support syncing a
+	// directory, but where they do this makes the rename durable after a crash.
+	if directory, openErr := os.Open(dir); openErr == nil {
+		_ = directory.Sync()
+		_ = directory.Close()
+	}
+	return nil
 }
 
 // expandHome replaces a leading ~ with the user's home directory.

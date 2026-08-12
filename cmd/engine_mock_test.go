@@ -73,7 +73,19 @@ func (m *mockEngine) ContainerExists(name string) (bool, error) {
 	return m.containerExists[name], nil
 }
 
-func (m *mockEngine) CreateVolume(string) error { return m.createVolumeErr }
+func (m *mockEngine) CreateVolume(name string) (bool, error) {
+	if m.createVolumeErr != nil {
+		return false, m.createVolumeErr
+	}
+	if m.volumes == nil {
+		m.volumes = map[string]bool{}
+	}
+	if m.volumes[name] {
+		return false, nil
+	}
+	m.volumes[name] = true
+	return true, nil
+}
 
 func (m *mockEngine) VolumeExists(name string) (bool, error) {
 	if m.volumeExistsErr != nil {

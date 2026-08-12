@@ -23,12 +23,12 @@ import (
 // after the host restarts out from under a long-lived container),
 // statsUnavailable is set instead of silently leaving the same blank fields
 // a "not polled yet" state would show.
-func fetchStats(eng engine.Engine, name string, idx int) tea.Msg {
+func fetchStats(eng engine.Engine, name string, idx, generation int) tea.Msg {
 	status, _ := eng.ContainerStatus(name)
 	if status == "" {
 		status = "unknown"
 	}
-	msg := instanceStatsMsg{idx: idx, status: status}
+	msg := instanceStatsMsg{id: name, generation: generation, idx: idx, status: status}
 	active := workflow.IsActiveContainerStatus(status)
 	if active {
 		cpu, cpuPct, ram, ramTotal, ramPct, err := eng.ContainerStats(name)
@@ -88,14 +88,37 @@ func applyInstanceStats(inst *InstanceState, stats instanceStatsMsg) {
 
 // pollStats returns a command that fetches status+stats for instance idx.
 func (m AppModel) pollStats(idx int) tea.Cmd {
+	return m.pollStatsGeneration(idx, 0)
+}
+
+func (m AppModel) pollStatsGeneration(idx, generation int) tea.Cmd {
 	if m.eng == nil || idx < 0 || idx >= len(m.instances) {
+		return nil
+	}
+	if m.instances[idx].Info.Config == nil {
 		return nil
 	}
 	name := m.instances[idx].Info.Config.ContainerName
 	eng := m.eng
 	return func() tea.Msg {
-		return fetchStats(eng, name, idx)
+		return fetchStats(eng, name, idx, generation)
 	}
+}
+
+func (m AppModel) currentInstanceID() string {
+	if inst := m.CurrentInstance(); inst != nil && inst.Info.Config != nil {
+		return inst.Info.Config.ContainerName
+	}
+	return ""
+}
+
+func (m AppModel) instanceIndex(id string) int {
+	for i := range m.instances {
+		if m.instances[i].Info.Config != nil && m.instances[i].Info.Config.ContainerName == id {
+			return i
+		}
+	}
+	return -1
 }
 
 // pushHistory appends val to hist and trims to the last 16 samples.

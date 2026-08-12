@@ -10,8 +10,8 @@ import (
 // reloadInstancesCmd fetches the current instance list and returns instancesRefreshedMsg.
 func reloadInstancesCmd() tea.Cmd {
 	return func() tea.Msg {
-		instances, err := config.ListInstances()
-		return instancesRefreshedMsg{instances: instances, err: err}
+		inventory, err := config.LoadInventory()
+		return instancesRefreshedMsg{instances: inventory.Instances, issues: inventory.Issues, err: err}
 	}
 }
 

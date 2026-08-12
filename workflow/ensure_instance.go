@@ -12,7 +12,7 @@ import (
 // Omnideck instance match a desired configuration.
 type InstanceEnsureEngine interface {
 	ContainerEngine
-	CreateVolume(name string) error
+	CreateVolume(name string) (bool, error)
 	RemoveVolume(name string) error
 	VolumeExists(name string) (bool, error)
 	PullImage(image string, msgs chan<- string) error
@@ -58,6 +58,9 @@ func SameInstanceConfig(a, b *config.Config) bool {
 // repairs a missing container, or safely replaces a container whose desired
 // settings changed. Existing data volumes are never removed.
 func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, save func() error, opts EnsureInstanceOptions) (result EnsureInstanceResult, err error) {
+	if err := ValidateInstanceConfig(desired); err != nil {
+		return result, err
+	}
 	defer func() { err = engine.WrapIfCancelled(err) }()
 	if desired == nil {
 		return result, fmt.Errorf("desired instance configuration is required")
@@ -114,10 +117,19 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 		if present {
 			continue
 		}
-		if volumeErr := eng.CreateVolume(volume); volumeErr != nil {
+		if current != nil {
+			return result, classifyError(
+				ErrMissingStorage,
+				fmt.Errorf("saved data volume %q is missing; automatic repair stopped to avoid creating an empty replacement", volume),
+			)
+		}
+		created, volumeErr := eng.CreateVolume(volume)
+		if volumeErr != nil {
 			return result, fmt.Errorf("preparing storage %q: %w", volume, volumeErr)
 		}
-		createdVolumes = append(createdVolumes, volume)
+		if created {
+			createdVolumes = append(createdVolumes, volume)
+		}
 	}
 
 	opts.stage("pull_image")

@@ -458,6 +458,7 @@ func (w *jsonLogLineWriter) Write(p []byte) (int, error) {
 // checkResultPayload is one entry of "doctor --json"'s checks array —
 // workflow.CheckResult with its enums mapped to stable strings.
 type checkResultPayload struct {
+	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Status      string `json:"status"`
 	Detail      string `json:"detail"`
@@ -476,6 +477,7 @@ func jsonCheckResults(results []workflow.CheckResult) []checkResultPayload {
 	out := make([]checkResultPayload, len(results))
 	for i, r := range results {
 		out[i] = checkResultPayload{
+			ID:          r.ID,
 			Label:       r.Label,
 			Status:      jsonCheckStatus(r.Status),
 			Detail:      r.Detail,

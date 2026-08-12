@@ -24,13 +24,16 @@ func (f *fakeEnsureEngine) VolumeExists(name string) (bool, error) {
 	return f.volumes[name], nil
 }
 
-func (f *fakeEnsureEngine) CreateVolume(name string) error {
+func (f *fakeEnsureEngine) CreateVolume(name string) (bool, error) {
 	if f.volumes == nil {
 		f.volumes = map[string]bool{}
 	}
+	if f.volumes[name] {
+		return false, nil
+	}
 	f.volumes[name] = true
 	f.created = append(f.created, name)
-	return nil
+	return true, nil
 }
 
 func (f *fakeEnsureEngine) RemoveVolume(name string) error {
@@ -164,5 +167,23 @@ func TestEnsureInstanceChangedConfigRecreatesAndSaves(t *testing.T) {
 	}
 	if eng.runOptions[0].Image != desired.Image {
 		t.Fatalf("replacement image = %q", eng.runOptions[0].Image)
+	}
+}
+
+func TestEnsureInstanceRefusesToReplaceMissingSavedStorage(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: false},
+		volumes: map[string]bool{
+			desired.HomeVolumeName(): true,
+		},
+	}
+	_, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if !errors.Is(err, ErrMissingStorage) {
+		t.Fatalf("err = %v, want ErrMissingStorage", err)
+	}
+	if len(eng.created) != 0 || len(eng.runOptions) != 0 {
+		t.Fatalf("repair mutated storage/container: created=%v runs=%d", eng.created, len(eng.runOptions))
 	}
 }

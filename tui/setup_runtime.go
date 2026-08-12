@@ -164,10 +164,12 @@ func (m SetupModel) afterRuntimeReady() (tea.Model, tea.Cmd) {
 func (m SetupModel) beginApplying() (tea.Model, tea.Cmd) {
 	m.Stage = SetupStageApplying
 	m.lastCompletedStep = -1
+	m.homeVolumeCreated = false
+	m.stateVolumeCreated = false
 	m.errorMsg = ""
 	m.errorDetail = ""
 	m.errorShowDetails = false
 	m.failureFromRuntime = false
 	m.spinnerModel = NewSpinnerModel(setupStepLabels, defaultFlavorMessages)
-	return m, tea.Batch(m.spinnerModel.Init(), m.startSetupStep(0))
+	return m, tea.Batch(m.spinnerModel.Init(), m.startSetupWorkflow())
 }

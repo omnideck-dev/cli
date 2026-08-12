@@ -16,6 +16,7 @@ func (m SetupModel) updateReview(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -78,7 +79,21 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.HandleWindowSize(msg)
 
+	case StepStartedMsg:
+		var cmd tea.Cmd
+		m.spinnerModel, cmd = m.spinnerModel.Update(msg)
+		if m.setupEvents != nil {
+			return m, tea.Batch(cmd, waitForSetupEvent(m.setupEvents))
+		}
+		return m, cmd
+
 	case StepDoneMsg:
+		if msg.Index == setupStepHomeVolume {
+			m.homeVolumeCreated = msg.Detail == "created"
+		}
+		if msg.Index == setupStepStateVolume {
+			m.stateVolumeCreated = msg.Detail == "created"
+		}
 		if msg.Index == setupStepOllama {
 			m.ollamaContainerChecked = m.ollamaOK
 			m.ollamaContainerOK = msg.Detail == ollamaCheckConnected
@@ -100,7 +115,16 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorDetail = msg.Err.Error()
 		m.errorShowDetails = true
 		var inputErr *setupInputError
-		if msg.Index == setupStepAvailability && errors.As(msg.Err, &inputErr) {
+		if msg.Index == setupStepAvailability && errors.Is(msg.Err, workflow.ErrContainerConflict) {
+			inputErr = &setupInputError{field: inputContainerName, message: "another container already uses this name; choose a different name"}
+		}
+		if msg.Index == setupStepAvailability && errors.Is(msg.Err, workflow.ErrPortInUse) {
+			inputErr = &setupInputError{field: inputWebUIPort, message: "another app is already using this browser address number"}
+		}
+		if inputErr == nil {
+			_ = errors.As(msg.Err, &inputErr)
+		}
+		if msg.Index == setupStepAvailability && inputErr != nil {
 			m.Stage = SetupStageSettings
 			m.settingsAdvanced = true
 			m.errorMsg = ""
@@ -114,16 +138,15 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.inputs[m.inputFocus].Focus()
 			return m, cmd
 		}
-		// Attempt rollback of whatever this run already created — volumes as
-		// well as the container — so a failed setup never leaves an
-		// untracked container or orphaned volumes behind. lastCompletedStep
-		// only advances on a step's success, so each flag below reflects
-		// exactly what actually exists to clean up.
-		if m.lastCompletedStep >= setupStepHomeVolume {
+		// Roll back only resources proven to have been created by this setup.
+		// Retained volumes from an earlier installation must survive a failed
+		// reconnect attempt.
+		if m.setupEvents == nil && (m.homeVolumeCreated || m.stateVolumeCreated || m.lastCompletedStep >= setupStepContainer) {
 			cfg := m.buildConfig()
 			eng := m.eng
 			containerCreated := m.lastCompletedStep >= setupStepContainer
-			stateVolumeCreated := m.lastCompletedStep >= setupStepStateVolume
+			homeVolumeCreated := m.homeVolumeCreated
+			stateVolumeCreated := m.stateVolumeCreated
 			rollbackCmd := func() tea.Msg {
 				if containerCreated {
 					_, _ = workflow.EnsureRemoved(eng, cfg.ContainerName)
@@ -131,7 +154,9 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if stateVolumeCreated {
 					_ = eng.RemoveVolume(cfg.StateVolumeName())
 				}
-				_ = eng.RemoveVolume(cfg.HomeVolumeName())
+				if homeVolumeCreated {
+					_ = eng.RemoveVolume(cfg.HomeVolumeName())
+				}
 				return nil
 			}
 			return m, tea.Batch(cmd, rollbackCmd)
@@ -152,10 +177,83 @@ func (m SetupModel) finishSetupStep(index int, msg tea.Msg) (tea.Model, tea.Cmd)
 	m.spinnerModel, cmd = m.spinnerModel.Update(msg)
 	next := index + 1
 	if next < len(setupStepLabels) {
+		if m.setupEvents != nil {
+			return m, tea.Batch(cmd, waitForSetupEvent(m.setupEvents))
+		}
 		return m, tea.Batch(cmd, m.startSetupStep(next))
 	}
 	m.Stage = SetupStageComplete
 	return m, cmd
+}
+
+func (m *SetupModel) startSetupWorkflow() tea.Cmd {
+	m.setupEvents = make(chan tea.Msg, 32)
+	events := m.setupEvents
+	cfg := m.buildConfig()
+	eng := m.eng
+	ollamaAvailable := m.ollamaOK
+	return func() tea.Msg {
+		go func() {
+			current := setupStepAvailability
+			err := workflow.CreateInstance(eng, cfg, func() error {
+				cfg.InstalledAt = time.Now()
+				cfg.Engine = ""
+				if err := config.SaveRuntime(eng.Name()); err != nil {
+					return err
+				}
+				return config.Save(config.InstancePath(cfg.ContainerName), cfg)
+			}, workflow.CreateInstanceOptions{
+				OnEvent: func(event workflow.InstanceCreationEvent) {
+					current = setupStepForCreationStage(event.Stage)
+					if event.State == "start" {
+						events <- StepStartedMsg{Index: current}
+					} else if event.Warning {
+						events <- StepWarningMsg{Index: current, Detail: event.Detail}
+					} else {
+						events <- StepDoneMsg{Index: current, Detail: event.Detail}
+					}
+				},
+				Verify: func() (string, bool) {
+					if !ollamaAvailable {
+						return ollamaCheckNotInstalled, false
+					}
+					if err := eng.CheckOllamaConnection(cfg.ContainerName); err != nil {
+						return ollamaCheckNotConnected, true
+					}
+					return ollamaCheckConnected, false
+				},
+			})
+			if err != nil {
+				events <- StepFailedMsg{Index: current, Err: err}
+			}
+		}()
+		return <-events
+	}
+}
+
+func waitForSetupEvent(events <-chan tea.Msg) tea.Cmd {
+	return func() tea.Msg { return <-events }
+}
+
+func setupStepForCreationStage(stage workflow.InstanceCreationStage) int {
+	switch stage {
+	case workflow.CreateStageAvailability:
+		return setupStepAvailability
+	case workflow.CreateStageHomeVolume:
+		return setupStepHomeVolume
+	case workflow.CreateStageStateVolume:
+		return setupStepStateVolume
+	case workflow.CreateStagePullImage:
+		return setupStepImage
+	case workflow.CreateStageRunContainer:
+		return setupStepContainer
+	case workflow.CreateStageVerify:
+		return setupStepOllama
+	case workflow.CreateStageSaveConfig:
+		return setupStepSave
+	default:
+		return setupStepAvailability
+	}
 }
 
 func (m SetupModel) updateFailed(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -196,11 +294,19 @@ func (m *SetupModel) startSetupStep(i int) tea.Cmd {
 		})
 	case setupStepHomeVolume: // Create home volume.
 		workCmd = StepCmd(i, func() (string, error) {
-			return "", eng.CreateVolume(cfg.HomeVolumeName())
+			created, err := eng.CreateVolume(cfg.HomeVolumeName())
+			if created {
+				return "created", err
+			}
+			return "reusing existing", err
 		})
 	case setupStepStateVolume: // Create state volume.
 		workCmd = StepCmd(i, func() (string, error) {
-			return "", eng.CreateVolume(cfg.StateVolumeName())
+			created, err := eng.CreateVolume(cfg.StateVolumeName())
+			if created {
+				return "created", err
+			}
+			return "reusing existing", err
 		})
 	case setupStepImage: // Pull image.
 		workCmd = StepCmd(i, func() (string, error) {

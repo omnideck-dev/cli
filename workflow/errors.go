@@ -9,6 +9,9 @@ var (
 	ErrContainerConflict = errors.New("container conflict")
 	// ErrImageDownload identifies a failed application-image pull.
 	ErrImageDownload = errors.New("image download failed")
+	// ErrMissingStorage identifies a saved instance whose expected data volume
+	// is absent. Repair must not silently create an empty replacement.
+	ErrMissingStorage = errors.New("saved storage missing")
 )
 
 type classifiedError struct {
