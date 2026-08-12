@@ -231,6 +231,69 @@ func TestStoppedMachineStartsTheSharedOmnideckMachine(t *testing.T) {
 	}
 }
 
+func TestMacStopsACompetingMachineBeforeStartingTheSharedMachine(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{
+			Name:                   "podman",
+			State:                  RuntimeMachineStopped,
+			MachineName:            OmnideckMachineName,
+			ConflictingMachineName: "podman-machine-default",
+		}},
+		HostPlatform{OS: "darwin"},
+	)[0]
+	want := []string{
+		"podman machine stop podman-machine-default",
+		"podman machine start omnideck-runtime",
+	}
+	if len(plan.Commands) != len(want) {
+		t.Fatalf("commands = %#v, want %d commands", plan.Commands, len(want))
+	}
+	for index, display := range want {
+		if plan.Commands[index].Display != display {
+			t.Fatalf("command %d = %q, want %q", index, plan.Commands[index].Display, display)
+		}
+	}
+	if plan.Action != "Switch Podman to omnideck" ||
+		plan.Description != "macOS can run only one Podman machine at a time. Another one is currently running." ||
+		plan.Steps[0] != "Stop \"podman-machine-default\". This keeps its files but stops any containers running inside it." ||
+		plan.SafetyNote != "The other Podman machine is stopped, not removed. Its files, images, and containers stay on this Mac." {
+		t.Fatalf("conflict wording changed: %#v", plan)
+	}
+}
+
+func TestMacStopsACompetingMachineBeforeCreatingTheSharedMachine(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{
+			Name:                   "podman",
+			State:                  RuntimeMachineMissing,
+			MachineName:            OmnideckMachineName,
+			ConflictingMachineName: "podman-machine-default",
+		}},
+		HostPlatform{OS: "darwin", TotalMemoryMB: 8192},
+	)[0]
+	if len(plan.Commands) != 2 ||
+		plan.Commands[0].Display != "podman machine stop podman-machine-default" ||
+		!strings.Contains(plan.Commands[1].Display, "machine init") ||
+		!strings.HasSuffix(plan.Commands[1].Display, " omnideck-runtime") {
+		t.Fatalf("commands = %#v", plan.Commands)
+	}
+}
+
+func TestWindowsNeverStopsAnUnrelatedMachine(t *testing.T) {
+	plan := BuildSetupPlans(
+		[]ProbeResult{{
+			Name:                   "podman",
+			State:                  RuntimeMachineStopped,
+			MachineName:            OmnideckMachineName,
+			ConflictingMachineName: "developer-machine",
+		}},
+		HostPlatform{OS: "windows"},
+	)[0]
+	if len(plan.Commands) != 1 || plan.Commands[0].Display != "podman machine start omnideck-runtime" {
+		t.Fatalf("Windows plan changed another machine: %#v", plan.Commands)
+	}
+}
+
 func TestWindowsNetworkingMigrationOnlyChangesTheSharedMachine(t *testing.T) {
 	plan := BuildSetupPlans(
 		[]ProbeResult{{Name: "podman", State: RuntimeMachineNeedsUpdate, MachineName: "developer-machine", MachineRunning: true}},

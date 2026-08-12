@@ -59,6 +59,11 @@ administrator approval. The native password prompt remains visible; after
 approval, the command-line package installer stays hidden while OmniDeck shows
 an indeterminate installation state. Cancelling the password prompt is reported
 as an approval cancellation, separately from a package installation failure.
+If a different Podman machine is already running, setup reports the switch,
+stops that machine without removing its files, images, or containers, and then
+starts `omnideck-runtime`. This macOS-only repair is required because the Podman
+provider can run only one machine at a time; stopping the other machine also
+stops any containers running inside it.
 
 Windows setup reports a typed restart requirement when WSL cannot finish until
 reboot. **Restart now** creates a one-time per-user resume entry, restarts

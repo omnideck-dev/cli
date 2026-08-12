@@ -331,6 +331,64 @@ func TestEnsureRuntimeInstallsAndPreparesTheSharedMachine(t *testing.T) {
 	}
 }
 
+func TestEnsureRuntimeExplainsAndRepairsAMacMachineConflict(t *testing.T) {
+	probes := []ProbeResult{
+		{
+			Name:                   "podman",
+			State:                  RuntimeMachineStopped,
+			MachineName:            OmnideckMachineName,
+			ConflictingMachineName: "podman-machine-default",
+		},
+		{Name: "podman", State: RuntimeReady, MachineName: OmnideckMachineName, MachineRunning: true},
+	}
+	probeIndex := 0
+	commands := []string{}
+	events := []RuntimeSetupEvent{}
+	result, err := EnsureRuntime(RuntimeSetupOptions{
+		Host: HostPlatform{OS: "darwin", Arch: "arm64", TotalMemoryMB: 8192},
+		probe: func() ProbeResult {
+			result := probes[probeIndex]
+			if probeIndex < len(probes)-1 {
+				probeIndex++
+			}
+			return result
+		},
+		ensureHost: func(HostPlatform, func(RuntimeSetupEvent)) error { return nil },
+		runCommand: func(command SetupCommand, _ func(string)) error {
+			commands = append(commands, command.Display)
+			return nil
+		},
+		OnEvent: func(event RuntimeSetupEvent) { events = append(events, event) },
+	})
+	if err != nil || !result.Ready() {
+		t.Fatalf("EnsureRuntime() = %#v, %v", result, err)
+	}
+	wantCommands := []string{
+		"podman machine stop podman-machine-default",
+		"podman machine start omnideck-runtime",
+	}
+	if len(commands) != len(wantCommands) {
+		t.Fatalf("commands = %q", commands)
+	}
+	for index, want := range wantCommands {
+		if commands[index] != want {
+			t.Fatalf("command %d = %q, want %q", index, commands[index], want)
+		}
+	}
+	foundExplanation := false
+	for _, event := range events {
+		if event.Status == "Switching Podman machines" {
+			foundExplanation = event.Detail == "macOS can run only one Podman machine at a time. Stopping \"podman-machine-default\" keeps its files but also stops its running containers."
+			if foundExplanation {
+				break
+			}
+		}
+	}
+	if !foundExplanation {
+		t.Fatalf("wording-locked conflict explanation missing from events: %#v", events)
+	}
+}
+
 func TestEnsureRuntimePreservesRestartGuidance(t *testing.T) {
 	want := &RuntimeSetupError{
 		Failure: RuntimeSetupRestart,

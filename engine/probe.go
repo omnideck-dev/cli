@@ -42,6 +42,10 @@ type ProbeResult struct {
 	// below the user-facing payload because callers only need the resulting
 	// commands, not another machine-state API.
 	MachineRunning bool
+	// ConflictingMachineName identifies a different running Podman machine that
+	// prevents the dedicated Omnideck machine from starting on macOS. It remains
+	// setup-policy input rather than part of the public runtime JSON contract.
+	ConflictingMachineName string
 }
 
 // Ready reports whether this runtime can be used immediately.
@@ -134,10 +138,11 @@ func probeRuntimeOnCurrentPath(name, goos string) ProbeResult {
 	}
 
 	if name == "podman" && podmanPolicy(goos).UsesMachine {
-		if state, machineName, ok, running := probePodmanMachine(goos); ok {
+		if state, machineName, ok, running, conflictingMachineName := probePodmanMachine(goos); ok {
 			result.State = state
 			result.MachineName = machineName
 			result.MachineRunning = running
+			result.ConflictingMachineName = conflictingMachineName
 			return result
 		}
 	}
@@ -263,24 +268,36 @@ func omnideckPodmanMachine(machines []podmanMachine) (podmanMachine, bool) {
 	return podmanMachine{}, false
 }
 
-func probePodmanMachine(goos string) (RuntimeState, string, bool, bool) {
+func conflictingPodmanMachine(machines []podmanMachine, goos string) string {
+	if goos != "darwin" {
+		return ""
+	}
+	for _, machine := range machines {
+		if machine.Running && machine.Name != OmnideckMachineName {
+			return machine.Name
+		}
+	}
+	return ""
+}
+
+func probePodmanMachine(goos string) (RuntimeState, string, bool, bool, string) {
 	machines, ok := listPodmanMachines()
 	if !ok {
-		return "", "", false, false
+		return "", "", false, false, ""
 	}
 	machine, found := omnideckPodmanMachine(machines)
 	if !found {
-		return RuntimeMachineMissing, OmnideckMachineName, true, false
+		return RuntimeMachineMissing, OmnideckMachineName, true, false, conflictingPodmanMachine(machines, goos)
 	}
 	if goos == "windows" && !machine.UserModeNetworking {
-		return RuntimeMachineNeedsUpdate, OmnideckMachineName, true, machine.Running
+		return RuntimeMachineNeedsUpdate, OmnideckMachineName, true, machine.Running, ""
 	}
 	if machine.Running {
 		// A named running machine with a failed info probe can be safely restarted;
 		// setup targets only Omnideck's machine and preserves its data.
-		return RuntimeBroken, OmnideckMachineName, true, true
+		return RuntimeBroken, OmnideckMachineName, true, true, ""
 	}
-	return RuntimeMachineStopped, OmnideckMachineName, true, false
+	return RuntimeMachineStopped, OmnideckMachineName, true, false, conflictingPodmanMachine(machines, goos)
 }
 
 func applyVersionPolicy(result *ProbeResult, goos string) {
