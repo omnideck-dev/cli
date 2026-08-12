@@ -241,6 +241,16 @@ func explainSetupPlan(plan SetupPlan, probe ProbeResult, host HostPlatform) Setu
 	if plan.RequiresElevation {
 		plan.PermissionNote = "Your computer may ask for your account password before installing Podman. The password gives your computer's built-in installer permission to add the app. Omnideck does not see or store it."
 	}
+	if host.OS == "darwin" && probe.ConflictingMachineName != "" && len(plan.Commands) > 0 {
+		plan.Action = "Switch Podman to omnideck"
+		plan.Description = "macOS can run only one Podman machine at a time. Another one is currently running."
+		plan.Steps = []string{
+			"Stop \"" + probe.ConflictingMachineName + "\". This keeps its files but stops any containers running inside it.",
+			"Start the dedicated omnideck secure space.",
+			"Check that omnideck can use it.",
+		}
+		plan.SafetyNote = "The other Podman machine is stopped, not removed. Its files, images, and containers stay on this Mac."
+	}
 	return plan
 }
 
@@ -313,11 +323,11 @@ func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	switch probe.State {
 	case RuntimeMachineMissing:
 		plan.Description = "Finish Podman's one-time setup"
-		plan.Commands = []SetupCommand{podmanMachineInitCommand(host)}
+		plan.Commands = append(macMachineConflictCommands(probe, host), podmanMachineInitCommand(host))
 		return plan
 	case RuntimeMachineStopped:
 		plan.Description = "Start Podman"
-		plan.Commands = []SetupCommand{command("podman", "machine", "start", OmnideckMachineName)}
+		plan.Commands = append(macMachineConflictCommands(probe, host), command("podman", "machine", "start", OmnideckMachineName))
 		return plan
 	case RuntimeMachineNeedsUpdate:
 		plan.Description = "Update Podman's networking"
@@ -357,6 +367,14 @@ func setupPlanFor(probe ProbeResult, host HostPlatform) SetupPlan {
 	default:
 		return missingPlan(plan, host)
 	}
+}
+
+func macMachineConflictCommands(probe ProbeResult, host HostPlatform) []SetupCommand {
+	name := probe.ConflictingMachineName
+	if host.OS != "darwin" || name == "" || name == OmnideckMachineName {
+		return nil
+	}
+	return []SetupCommand{command("podman", "machine", "stop", name)}
 }
 
 func podmanMachineInitCommand(host HostPlatform) SetupCommand {

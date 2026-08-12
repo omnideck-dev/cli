@@ -195,6 +195,49 @@ func TestProbeMacDoesNotApplyWindowsNetworkingMigration(t *testing.T) {
 	}
 }
 
+func TestProbeMacReportsTheRunningMachineThatBlocksOmnideck(t *testing.T) {
+	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return []byte("podman version 6.0.2"), nil
+		case "--connection omnideck-runtime info":
+			return []byte("cannot connect to Podman"), errors.New("exit 1")
+		case "machine list --format json":
+			return []byte(`[
+				{"Name":"podman-machine-default","Running":true,"Default":true},
+				{"Name":"omnideck-runtime","Running":false,"Default":false}
+			]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", args)
+		}
+	})
+
+	result := probeRuntime("podman", "darwin")
+	if result.State != RuntimeMachineStopped || result.MachineRunning || result.ConflictingMachineName != "podman-machine-default" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestProbeDoesNotReportAMacMachineConflictOnWindows(t *testing.T) {
+	withProbeStubs(t, func(_ string, args ...string) ([]byte, error) {
+		switch strings.Join(args, " ") {
+		case "--version":
+			return []byte("podman version 6.0.2"), nil
+		case "--connection omnideck-runtime info":
+			return []byte("cannot connect to Podman"), errors.New("exit 1")
+		case "machine list --format json":
+			return []byte(`[{"Name":"podman-machine-default","Running":true,"Default":true}]`), nil
+		default:
+			return nil, fmt.Errorf("unexpected command: %v", args)
+		}
+	})
+
+	result := probeRuntime("podman", "windows")
+	if result.State != RuntimeMachineMissing || result.ConflictingMachineName != "" {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func TestProbeRunningSharedMachineWithBrokenConnectionCanBeRestarted(t *testing.T) {
 	for _, goos := range []string{"windows", "darwin"} {
 		t.Run(goos, func(t *testing.T) {

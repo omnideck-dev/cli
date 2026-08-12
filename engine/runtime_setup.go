@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -133,6 +134,18 @@ func runtimeSetupError(failure RuntimeSetupFailure, message, hint string, err er
 	return &RuntimeSetupError{Failure: failure, Message: message, Hint: hint, Err: err}
 }
 
+func runtimeSetupCommandProgress(command SetupCommand, host HostPlatform) (string, string) {
+	status := "Podman machine starting"
+	if host.OS == "darwin" && command.Name == "podman" && len(command.Args) == 3 &&
+		command.Args[0] == "machine" && command.Args[1] == "stop" && command.Args[2] != OmnideckMachineName {
+		return "Switching Podman machines", fmt.Sprintf(
+			"macOS can run only one Podman machine at a time. Stopping %q keeps its files but also stops its running containers.",
+			command.Args[2],
+		)
+	}
+	return status, ""
+}
+
 // EnsureRuntime installs host prerequisites and Podman when needed, prepares
 // the shared omnideck-runtime machine on macOS/Windows, and verifies readiness.
 func EnsureRuntime(options RuntimeSetupOptions) (ProbeResult, error) {
@@ -219,23 +232,35 @@ func EnsureRuntime(options RuntimeSetupOptions) (ProbeResult, error) {
 		)
 	}
 
+	commands := plans[0].Commands
+	initialStatus, initialDetail := runtimeSetupCommandProgress(commands[0], host)
 	emitRuntimeSetup(options.OnEvent, setupSubstageEvent(
 		SetupStageEnvironment,
 		SetupSubstageSecureSpace,
 		"start",
 		SetupActivityEnvironment,
-		"Podman machine starting",
-		"",
+		initialStatus,
+		initialDetail,
 	))
-	commands := plans[0].Commands
 	for i, command := range commands {
+		status, detail := runtimeSetupCommandProgress(command, host)
+		if i > 0 {
+			emitRuntimeSetup(options.OnEvent, setupSubstageProgress(
+				SetupStageEnvironment,
+				SetupSubstageSecureSpace,
+				SetupActivityEnvironment,
+				status,
+				detail,
+				float64(i)/float64(len(commands)),
+			))
+		}
 		err := runCommand(command, func(line string) {
 			fraction := float64(i) / float64(len(commands))
 			emitRuntimeSetup(options.OnEvent, setupSubstageProgress(
 				SetupStageEnvironment,
 				SetupSubstageSecureSpace,
 				SetupActivityEnvironment,
-				"Podman machine starting",
+				status,
 				line,
 				fraction,
 			))
@@ -252,7 +277,7 @@ func EnsureRuntime(options RuntimeSetupOptions) (ProbeResult, error) {
 			SetupStageEnvironment,
 			SetupSubstageSecureSpace,
 			SetupActivityEnvironment,
-			"Podman machine starting",
+			status,
 			"",
 			float64(i+1)/float64(len(commands)),
 		))

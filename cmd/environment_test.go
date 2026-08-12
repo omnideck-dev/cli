@@ -30,6 +30,7 @@ func TestEnvironmentJSONErrorUsesWorkflowClassifications(t *testing.T) {
 		want string
 	}{
 		{name: "port", err: errors.Join(workflow.ErrPortInUse, errors.New("localized detail")), want: ErrCodePortInUse},
+		{name: "saved installation port wording", err: errors.New("another Omnideck installation already uses port 2337"), want: ErrCodePortInUse},
 		{name: "container", err: errors.Join(workflow.ErrContainerConflict, errors.New("localized detail")), want: ErrCodeContainerConflict},
 	}
 	for _, tt := range tests {
