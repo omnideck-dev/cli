@@ -8,6 +8,8 @@ import (
 	"github.com/omnideck-dev/cli/config"
 )
 
+const dashboardPollInterval = 3 * time.Second
+
 // Update dispatches messages to the appropriate screen handler.
 func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if key, ok := msg.(tea.KeyMsg); ok && key.Type == tea.KeyCtrlC {
@@ -55,7 +57,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case statsTickMsg:
-		nextTick := tea.Tick(time.Second, func(t time.Time) tea.Msg { return statsTickMsg(t) })
+		nextTick := tea.Tick(dashboardPollInterval, func(t time.Time) tea.Msg { return statsTickMsg(t) })
 		if m.statsInFlight || m.router.Current() != RouteDashboard {
 			return m, nextTick
 		}

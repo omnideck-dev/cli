@@ -3,9 +3,17 @@ package tui
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 )
+
+func TestDashboardPollIntervalIsThreeSeconds(t *testing.T) {
+	if dashboardPollInterval != 3*time.Second {
+		t.Fatalf("dashboard poll interval = %s, want 3s", dashboardPollInterval)
+	}
+}
 
 func TestFetchStatsRunningSucceeds(t *testing.T) {
 	eng := &mockEngine{
@@ -21,8 +29,33 @@ func TestFetchStatsRunningSucceeds(t *testing.T) {
 	if !msg.sampleOK {
 		t.Fatal("sampleOK should be true on a successful running fetch")
 	}
+	if eng.inspectCalls != 1 || eng.statusCalls != 0 {
+		t.Fatalf("poll used inspect=%d status=%d calls, want one consolidated inspect", eng.inspectCalls, eng.statusCalls)
+	}
 	if msg.cpu != "12.3%" || msg.cpuPct != 0.123 || msg.ram != "1.2GiB" {
 		t.Fatalf("unexpected msg: %+v", msg)
+	}
+}
+
+func TestFetchStatsUsesInspectMetadata(t *testing.T) {
+	started := time.Now().Add(-2 * time.Hour)
+	created := started.Add(-time.Hour)
+	eng := &mockEngine{
+		inspectData: engine.InspectData{
+			Status:       "running",
+			StartedAt:    started,
+			CreatedAt:    created,
+			RestartCount: 2,
+			HealthStatus: "healthy",
+		},
+	}
+	msg := fetchStats(eng, "demo", 0, 0).(instanceStatsMsg)
+
+	if msg.status != "running" || msg.health != "healthy" || msg.restarts != "2" || msg.created != created.Format("2006-01-02") {
+		t.Fatalf("inspect metadata was not applied: %+v", msg)
+	}
+	if msg.uptime == "" {
+		t.Fatal("running inspect metadata should produce uptime")
 	}
 }
 
