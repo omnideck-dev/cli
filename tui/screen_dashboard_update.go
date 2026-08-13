@@ -21,12 +21,18 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.selected < len(m.instances)-1 {
 			m.selected++
 			m.chipFocus = -1
+			m.dashboardScroll = 0
 		}
 	case "up", "k":
 		if m.selected > 0 {
 			m.selected--
 			m.chipFocus = -1
+			m.dashboardScroll = 0
 		}
+	case "pgdown", "ctrl+f":
+		m.dashboardScroll += max(1, m.contentHeight()/2)
+	case "pgup", "ctrl+b":
+		m.dashboardScroll -= max(1, m.contentHeight()/2)
 
 	case "enter":
 		if len(m.instances) == 0 {
@@ -37,6 +43,7 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		name := m.instances[m.selected].Info.Name
 		m.expanded[name] = !m.expanded[name]
+		m.dashboardScroll = 0
 		if m.expanded[name] {
 			return m, m.pollLogs(m.selected)
 		}
@@ -52,6 +59,7 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if len(m.instances) > 0 {
 			if m.selected < len(m.instances)-1 {
 				m.selected++
+				m.dashboardScroll = 0
 			}
 		}
 
@@ -65,6 +73,7 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if len(m.instances) > 0 {
 			if m.selected > 0 {
 				m.selected--
+				m.dashboardScroll = 0
 			}
 		}
 
@@ -90,6 +99,7 @@ func (m AppModel) updateDashboard(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.chipFocus = -1
 		} else if m.isExpanded() {
 			m.expanded[m.instances[m.selected].Info.Name] = false
+			m.dashboardScroll = 0
 		}
 
 	case "s":

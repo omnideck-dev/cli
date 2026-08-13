@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,42 @@ func TestSetupViewFitsAStandardTerminalAndKeepsItsFooter(t *testing.T) {
 	}
 	if !strings.Contains(plain, "working") || !strings.Contains(plain, "please wait") {
 		t.Fatalf("setup footer is missing primary actions:\n%s", plain)
+	}
+}
+
+func TestDashboardFitsTerminalSizeMatrix(t *testing.T) {
+	instances := make([]config.InstanceInfo, 4)
+	for i := range instances {
+		cfg := config.DefaultConfig()
+		cfg.ContainerName = fmt.Sprintf("omnideck-%d", i+1)
+		cfg.WebUIPort = fmt.Sprintf("%d", 2337+i)
+		instances[i] = config.InstanceInfo{Name: cfg.ContainerName, Config: cfg}
+	}
+
+	for _, size := range []struct{ width, height int }{
+		{40, 10},
+		{60, 16},
+		{80, 24},
+		{120, 40},
+	} {
+		t.Run(fmt.Sprintf("%dx%d", size.width, size.height), func(t *testing.T) {
+			m := NewAppModel(nil, instances)
+			m.width, m.height = size.width, size.height
+			m.selected = len(instances) - 1
+			view := m.View()
+
+			if got := strings.Count(view, "\n") + 1; got != size.height {
+				t.Fatalf("dashboard height = %d, want %d:\n%s", got, size.height, ansi.Strip(view))
+			}
+			for lineNumber, line := range strings.Split(view, "\n") {
+				if got := ansi.StringWidth(line); got > size.width {
+					t.Fatalf("line %d width = %d, want <= %d: %q", lineNumber+1, got, size.width, ansi.Strip(line))
+				}
+			}
+			if !strings.Contains(ansi.Strip(view), instances[len(instances)-1].Name) {
+				t.Fatalf("selected instance is outside the viewport:\n%s", ansi.Strip(view))
+			}
+		})
 	}
 }
 

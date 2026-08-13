@@ -19,7 +19,7 @@ func removalTestModel() RemovalModel {
 
 func TestRemovalDefaultsToKeepingSavedData(t *testing.T) {
 	m := removalTestModel()
-	view := m.TNView(80)
+	view := m.TUIView(80)
 	for _, want := range []string{
 		"Keep saved data — Recommended",
 		"your container runtime will stay installed.",
@@ -35,7 +35,7 @@ func TestRemovalDefaultsToKeepingSavedData(t *testing.T) {
 	if cmd != nil || m.Stage != RemovalStageReview || m.deleteData {
 		t.Fatalf("safe choice = stage %d delete data %v command %v", m.Stage, m.deleteData, cmd)
 	}
-	if !strings.Contains(m.TNView(80), "Keep its saved files and agent data") {
+	if !strings.Contains(m.TUIView(80), "Keep its saved files and agent data") {
 		t.Fatal("safe review does not explain that saved data will be kept")
 	}
 }

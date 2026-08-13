@@ -36,9 +36,9 @@ func (m AppModel) contentHeight() int {
 // --- Header ---
 
 func (m AppModel) renderHeader() string {
-	logo := styles.TNBoldBlue.Render("◆") + " " + styles.TNTextBold.Render("omnideck")
-	sep := styles.TNFaintText.Render(" │ ")
-	breadcrumb := styles.TNDimText.Render(m.breadcrumb())
+	logo := styles.BrandMark(styles.SignalSurface) + " " + styles.TUIPrimaryBold.Render("omnideck")
+	sep := styles.TUISubtleText.Render(" │ ")
+	breadcrumb := styles.TUISecondaryText.Render(m.breadcrumb())
 	left := logo + sep + breadcrumb
 
 	// Setup already explains the current task in its breadcrumb and screen. A
@@ -47,19 +47,19 @@ func (m AppModel) renderHeader() string {
 	right := ""
 	if m.router.Current() != RouteSetup {
 		label, tone := summarizeInstances(m.instances)
-		dot := styles.TNFaintText.Render("●")
+		dot := styles.TUISubtleText.Render("●")
 		switch tone {
 		case headerHealthy:
-			dot = styles.TNGreenTxt.Render("●")
+			dot = styles.TUISuccessText.Render("●")
 		case headerAttention:
-			dot = styles.TNYellowTxt.Render("●")
+			dot = styles.TUIWarningText.Render("●")
 		case headerError:
-			dot = styles.TNRedTxt.Render("●")
+			dot = styles.TUIDangerText.Render("●")
 		}
-		right = dot + styles.TNDimText.Render(" "+label)
+		right = dot + styles.TUISecondaryText.Render(" "+label)
 	}
 
-	innerWidth := max(1, m.width-styles.TNHeaderBar.GetHorizontalFrameSize())
+	innerWidth := max(1, m.width-styles.TUIHeaderBar.GetHorizontalFrameSize())
 	gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(right)
 	if gap < 1 {
 		gap = 1
@@ -67,7 +67,7 @@ func (m AppModel) renderHeader() string {
 	line := left + safeRepeat(" ", gap) + right
 	line = ansi.Truncate(line, innerWidth, "")
 	line += safeRepeat(" ", innerWidth-lipgloss.Width(line))
-	return styles.TNHeaderBar.Render(line) + "\n"
+	return styles.RenderOnBackground(styles.TUIHeaderBar.Render(line), styles.SignalSurface) + "\n"
 }
 
 type headerStatusTone int
@@ -175,8 +175,8 @@ func (m AppModel) breadcrumb() string {
 
 func (m AppModel) renderFooter() string {
 	hints := m.footerHints()
-	right := styles.TNFaintText.Render("omnideck tui")
-	innerWidth := max(1, m.width-styles.TNFooterBar.GetHorizontalFrameSize())
+	right := styles.TUISubtleText.Render("omnideck tui")
+	innerWidth := max(1, m.width-styles.TUIFooterBar.GetHorizontalFrameSize())
 	if lipgloss.Width(hints)+lipgloss.Width(right)+1 > innerWidth {
 		right = ""
 	}
@@ -188,7 +188,7 @@ func (m AppModel) renderFooter() string {
 	line := hints + safeRepeat(" ", gap) + right
 	line = ansi.Truncate(line, innerWidth, "")
 	line += safeRepeat(" ", innerWidth-lipgloss.Width(line))
-	return styles.TNFooterBar.Render(line)
+	return styles.RenderOnBackground(styles.TUIFooterBar.Render(line), styles.SignalSurface)
 }
 
 func (m AppModel) footerHints() string {
@@ -204,7 +204,7 @@ func (m AppModel) footerHints() string {
 		}
 		if m.isExpanded() {
 			return keyHints([][2]string{
-				{"↑↓", "move"}, {"tab", "actions"}, {"x", "remove"}, {"enter", "open/collapse"}, {"esc", "collapse"},
+				{"↑↓", "move"}, {"pg↑↓", "scroll"}, {"tab", "actions"}, {"x", "remove"}, {"esc", "collapse"},
 			})
 		}
 		return keyHints([][2]string{
@@ -301,9 +301,9 @@ func keyHints(pairs [][2]string) string {
 		if i > 0 {
 			sb.WriteString("  ")
 		}
-		sb.WriteString(styles.TNKeyChip.Render(p[0]))
+		sb.WriteString(styles.TUIKeyChip.Render(p[0]))
 		sb.WriteString(" ")
-		sb.WriteString(styles.TNDimText.Render(p[1]))
+		sb.WriteString(styles.TUISecondaryText.Render(p[1]))
 	}
 	return sb.String()
 }
@@ -333,10 +333,13 @@ func (m AppModel) renderBody() string {
 // renderScreen fills the application content area. Substantial journeys use a
 // full screen; short blocking decisions use the separate dialog layer.
 func (m AppModel) renderScreen(body string) string {
-	style := lipgloss.NewStyle().Background(styles.TNBgAlt).Padding(1, 2)
+	style := lipgloss.NewStyle().Padding(1, 2)
 	w := max(1, m.width)
 	h := max(1, m.contentHeight())
-	return style.Width(w).Height(h).MaxWidth(w).MaxHeight(h).Render(body)
+	return styles.RenderOnBackground(
+		style.Width(w).Height(h).MaxWidth(w).MaxHeight(h).Render(body),
+		styles.SignalCanvas,
+	)
 }
 
 // --- Helpers ---
@@ -393,14 +396,6 @@ func safeRepeat(s string, n int) string {
 	return strings.Repeat(s, n)
 }
 
-func padToHeight(s string, h int) string {
-	lines := strings.Count(s, "\n")
-	if lines >= h {
-		return s
-	}
-	return s + strings.Repeat("\n", h-lines)
-}
-
 func dashOr(s string) string {
 	if s == "" {
 		return "—"
@@ -411,10 +406,10 @@ func dashOr(s string) string {
 func healthStyle(health string) lipgloss.Style {
 	switch health {
 	case "healthy":
-		return styles.TNGreenTxt
+		return styles.TUISuccessText
 	case "degraded", "unhealthy":
-		return styles.TNYellowTxt
+		return styles.TUIWarningText
 	default:
-		return styles.TNDimText
+		return styles.TUISecondaryText
 	}
 }

@@ -216,26 +216,26 @@ func (m MaintenanceModel) failureText() string {
 	return "The update could not be completed"
 }
 
-// TNView renders maintenance inside the application screen.
-func (m MaintenanceModel) TNView(_ int) string {
+// TUIView renders maintenance inside the application screen.
+func (m MaintenanceModel) TUIView(_ int) string {
 	var sb strings.Builder
 	switch m.Stage {
 	case MaintenanceStageReview:
-		sb.WriteString("\n  " + styles.TNTextBold.Render(m.reviewText()) + "\n\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press Enter to "+m.actionVerb()+", or Esc to go back without changing anything.") + "\n")
+		sb.WriteString("\n  " + styles.TUIPrimaryBold.Render(m.reviewText()) + "\n\n")
+		sb.WriteString("  " + styles.TUISecondaryText.Render("Press Enter to "+m.actionVerb()+", or Esc to go back without changing anything.") + "\n")
 	case MaintenanceStageComplete:
-		sb.WriteString("\n  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render(m.completeText()) + "\n\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press any key to return to the previous screen.") + "\n")
+		sb.WriteString("\n  " + styles.TUISuccessText.Render("✓") + "  " + styles.TUIPrimaryBold.Render(m.completeText()) + "\n\n")
+		sb.WriteString("  " + styles.TUISecondaryText.Render("Press any key to return to the previous screen.") + "\n")
 	case MaintenanceStageFailed:
-		sb.WriteString("\n  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(m.failureText()) + "\n\n")
+		sb.WriteString("\n  " + styles.TUIDangerText.Render("✗") + "  " + styles.TUIDangerText.Render(m.failureText()) + "\n\n")
 		if m.errorMsg != "" {
-			sb.WriteString("     " + styles.TNDimText.Render(m.errorMsg) + "\n\n")
+			sb.WriteString("     " + styles.TUISecondaryText.Render(m.errorMsg) + "\n\n")
 		}
-		sb.WriteString("  " + styles.TNDimText.Render("Press r to try again, or Esc to return to the previous screen.") + "\n")
+		sb.WriteString("  " + styles.TUISecondaryText.Render("Press r to try again, or Esc to return to the previous screen.") + "\n")
 	case MaintenanceStageApplying:
 		sb.WriteString("\n")
 		for _, step := range m.spinnerModel.Steps {
-			sb.WriteString("  " + renderTNStep(step, m.spinnerModel) + "\n")
+			sb.WriteString("  " + renderTUIStep(step, m.spinnerModel) + "\n")
 		}
 	}
 	return sb.String()

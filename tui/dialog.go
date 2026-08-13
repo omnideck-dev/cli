@@ -63,22 +63,25 @@ func (d ConfirmDialog) Update(msg tea.Msg) (ConfirmDialog, tea.Cmd) {
 func (d ConfirmDialog) View(width int) string {
 	contentWidth := min(64, max(28, width-12))
 	message := strings.Join(wrapWords(d.Message, contentWidth-4, contentWidth-4), "\n")
-	confirmStyle := styles.TNDimText
-	cancelStyle := styles.TNBlueTxt
+	confirmStyle := styles.TUISecondaryText
+	cancelStyle := styles.TUIAccentText
 	confirmCursor, cancelCursor := "  ", "▸ "
 	if d.focusConfirm {
-		confirmStyle, cancelStyle = styles.TNRedTxt, styles.TNDimText
+		confirmStyle, cancelStyle = styles.TUIDangerText, styles.TUISecondaryText
 		confirmCursor, cancelCursor = "▸ ", "  "
 	}
-	body := styles.TNTextBold.Render(d.Title) + "\n\n" +
-		styles.TNDimText.Render(message) + "\n\n" +
+	body := styles.TUIPrimaryBold.Render(d.Title) + "\n\n" +
+		styles.TUISecondaryText.Render(message) + "\n\n" +
 		confirmStyle.Render(confirmCursor+d.ConfirmLabel) + "    " +
 		cancelStyle.Render(cancelCursor+d.CancelLabel)
-	return styles.TNPanelAccent.Width(contentWidth).Padding(1, 2).Render(body)
+	return styles.RenderOnBackground(
+		styles.TUIPanelAccent.Width(contentWidth).Padding(1, 2).Render(body),
+		styles.SignalElevated,
+	)
 }
 
 func renderDialogArea(dialog ConfirmDialog, width, height int) string {
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, dialog.View(width),
-		lipgloss.WithWhitespaceBackground(styles.TNBg),
-		lipgloss.WithWhitespaceForeground(styles.TNBg))
+		lipgloss.WithWhitespaceBackground(styles.SignalCanvas),
+		lipgloss.WithWhitespaceForeground(styles.SignalCanvas))
 }

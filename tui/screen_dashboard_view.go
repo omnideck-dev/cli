@@ -14,12 +14,11 @@ func (m AppModel) viewDashboard() string {
 	h := m.contentHeight()
 	w := m.width
 
-	var sb strings.Builder
-	sb.WriteString("\n")
+	headerLines := []string{""}
 
 	// Title row with status chips right-aligned.
-	title := styles.TNTextBold.Render("Decks")
-	sub := styles.TNFaintText.Render(" managed by this host")
+	title := styles.TUIPrimaryBold.Render("Decks")
+	sub := styles.TUISubtleText.Render(" managed by this host")
 	titleLeft := title + sub
 
 	counts := map[string]int{}
@@ -29,12 +28,11 @@ func (m AppModel) viewDashboard() string {
 	var chipParts []string
 	for _, s := range []string{"running", "paused", "stopped"} {
 		if n := counts[s]; n > 0 {
-			dot := lipgloss.NewStyle().Foreground(styles.TNStatusColor(s)).Render("●")
 			chip := lipgloss.NewStyle().
-				Background(lipgloss.Color("#1e2030")).
-				Foreground(styles.TNStatusColor(s)).
+				Background(styles.SignalElevated).
+				Foreground(styles.TUIStatusColor(s)).
 				Padding(0, 1).
-				Render(fmt.Sprintf("%s %d %s", dot, n, s))
+				Render(fmt.Sprintf("● %d %s", n, s))
 			chipParts = append(chipParts, chip)
 		}
 	}
@@ -43,12 +41,14 @@ func (m AppModel) viewDashboard() string {
 	if titleGap < 1 {
 		titleGap = 1
 	}
-	sb.WriteString("  " + titleLeft + safeRepeat(" ", titleGap) + chipsStr + "\n\n")
+	headerLines = append(headerLines, "  "+titleLeft+safeRepeat(" ", titleGap)+chipsStr, "")
 
 	if len(m.instances) == 0 {
-		sb.WriteString("  " + styles.TNDimText.Render("No Omnideck instances are set up yet.") + "\n")
-		sb.WriteString("  " + styles.TNDimText.Render("Press ") + styles.TNKeyChip.Render("n") + styles.TNDimText.Render(" to set one up.") + "\n")
-		return padToHeight(sb.String(), h)
+		lines := append(headerLines,
+			"  "+styles.TUISecondaryText.Render("No Omnideck instances are set up yet."),
+			"  "+styles.TUISecondaryText.Render("Press ")+styles.TUIKeyChip.Render("n")+styles.TUISecondaryText.Render(" to set one up."),
+		)
+		return m.renderDashboardLines(lines, h, w)
 	}
 
 	// cardW is the Lipgloss Width() arg. Lipgloss wraps at cardW-2 (subtracts
@@ -59,21 +59,54 @@ func (m AppModel) viewDashboard() string {
 		cardW = 20
 	}
 
+	var cardLines []string
+	selectedStart, selectedEnd := 0, 0
 	for i := range m.instances {
+		start := len(cardLines)
 		card := m.renderInstanceCard(i, cardW)
 		for _, line := range strings.Split(card, "\n") {
-			sb.WriteString("  " + line + "\n")
+			cardLines = append(cardLines, "  "+line)
 		}
-		sb.WriteString("\n")
+		cardLines = append(cardLines, "")
+		if i == m.selected {
+			selectedStart, selectedEnd = start, len(cardLines)
+		}
 	}
 
 	// Toast pinned at bottom.
 	if m.toast != "" {
-		toastLine := "  " + styles.TNBlueTxt.Render("  "+m.toast)
-		sb.WriteString(toastLine + "\n")
+		cardLines = append(cardLines, "  "+styles.TUIAccentText.Render("  "+m.toast))
 	}
 
-	return padToHeight(sb.String(), h)
+	viewportHeight := max(0, h-len(headerLines))
+	baseOffset := 0
+	selectedHeight := selectedEnd - selectedStart
+	if selectedHeight > viewportHeight {
+		baseOffset = selectedStart
+	} else if selectedEnd > viewportHeight {
+		baseOffset = selectedEnd - viewportHeight
+	}
+	offset := baseOffset + m.dashboardScroll
+	maxOffset := max(0, len(cardLines)-viewportHeight)
+	offset = min(max(0, offset), maxOffset)
+	end := min(len(cardLines), offset+viewportHeight)
+	lines := append(headerLines, cardLines[offset:end]...)
+	return m.renderDashboardLines(lines, h, w)
+}
+
+// renderDashboardLines gives the root screen an exact terminal-sized canvas.
+// Dashboard cards are already laid out at full width, so this path avoids the
+// padding used by workflow screens and clips any overflow before rendering.
+func (m AppModel) renderDashboardLines(lines []string, height, width int) string {
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+	for len(lines) < height {
+		lines = append(lines, "")
+	}
+	body := strings.Join(lines, "\n")
+	layout := lipgloss.NewStyle().Width(max(1, width)).Height(max(1, height)).MaxWidth(max(1, width)).MaxHeight(max(1, height))
+	return styles.RenderOnBackground(layout.Render(body), styles.SignalCanvas)
 }
 
 // renderInstanceCard renders one instance card. cardW is the inner content width.
@@ -87,35 +120,35 @@ func (m AppModel) renderInstanceCard(idx, cardW int) string {
 	if expanded {
 		caretCh = "▾"
 	}
-	caret := styles.TNBlueTxt.Render(caretCh)
+	caret := styles.TUIAccentText.Render(caretCh)
 	caretW := lipgloss.Width(caret)
 
 	// Status dot + name + port badge.
-	dot := styles.TNStatusDot(inst.Status)
-	name := styles.TNTextBold.Render(inst.Info.Name)
+	dot := styles.TUIStatusDot(inst.Status)
+	name := styles.TUIPrimaryBold.Render(inst.Info.Name)
 	portStr := ":" + inst.Info.Config.WebUIPortOrDefault()
 	portBadge := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1e2030")).
-		Foreground(styles.TNFgMid).
+		Background(styles.SignalElevated).
+		Foreground(styles.SignalTextSecondary).
 		Padding(0, 1).Render(portStr)
 	identity := caret + "  " + dot + " " + name + "  " + portBadge
 	identityW := lipgloss.Width(identity)
 
 	// Image path (line 2, below name).
 	imgIndent := caretW + 5 // caret + "  " + dot + " "
-	imageStr := styles.TNDimText.Render(tnTruncate(inst.Info.Config.Image, identityW+6))
+	imageStr := styles.TUISecondaryText.Render(tnTruncate(inst.Info.Config.Image, identityW+6))
 	imageLine := safeRepeat(" ", imgIndent) + imageStr
 
 	// CPU sparkline block.
 	cpuVal := dashOr(inst.CPU)
-	cpuLabel := styles.TNFaintText.Render("CPU") + " " + styles.TNBlueTxt.Bold(true).Render(cpuVal)
-	cpuSpark := renderSparkline(inst.CPUHistory, styles.TNBlue, 16)
+	cpuLabel := styles.TUISubtleText.Render("CPU") + " " + styles.TUIAccentText.Bold(true).Render(cpuVal)
+	cpuSpark := renderSparkline(inst.CPUHistory, styles.SignalAccent, 16)
 	cpuBlock := cpuLabel + "  " + cpuSpark
 
 	// MEM sparkline block.
 	ramVal := dashOr(inst.RAM)
-	memLabel := styles.TNFaintText.Render("MEM") + " " + styles.TNPurpleTxt.Bold(true).Render(ramVal)
-	memSpark := renderSparkline(inst.RAMHistory, styles.TNPurple, 16)
+	memLabel := styles.TUISubtleText.Render("MEM") + " " + styles.TUIAccentHoverText.Bold(true).Render(ramVal)
+	memSpark := renderSparkline(inst.RAMHistory, styles.SignalAccentHover, 16)
 	memBlock := memLabel + "  " + memSpark
 
 	stats := cpuBlock + "   " + memBlock
@@ -145,36 +178,36 @@ func (m AppModel) renderInstanceCard(idx, cardW int) string {
 
 	// Accordion section when expanded.
 	if expanded {
-		sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
+		sep := styles.TUISubtleText.Render(safeRepeat("─", contentW))
 		accordion := m.renderCardAccordion(inst, contentW)
 		removeAction := m.renderRemoveAction(idx, contentW)
 		content = content + "\n" + sep + "\n" + accordion + "\n" + sep + "\n" + removeAction
 	}
 
-	borderColor := styles.TNBorder
+	borderColor := styles.SignalBorder
 	if selected {
-		borderColor = styles.TNBlue
+		borderColor = styles.SignalAccent
 	}
 
-	return lipgloss.NewStyle().
+	card := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(borderColor).
-		Background(styles.TNBgAlt).
 		Padding(0, 1).
 		Width(cardW).
 		Render(content)
+	return styles.RenderOnBackground(card, styles.SignalElevated)
 }
 
 // renderActionChips renders the compact, non-destructive action row for a card.
 func (m AppModel) renderActionChips(inst *InstanceState, cardIdx int) string {
 	isSelected := cardIdx == m.selected
 	chipBase := lipgloss.NewStyle().
-		Background(lipgloss.Color("#1e2030")).
-		Foreground(styles.TNFgMid).
+		Background(styles.SignalElevated).
+		Foreground(styles.SignalTextSecondary).
 		Padding(0, 1)
 	chipFocused := lipgloss.NewStyle().
-		Background(styles.TNBlue).
-		Foreground(lipgloss.Color("#16161e")).
+		Background(styles.SignalAccent).
+		Foreground(styles.SignalCanvas).
 		Bold(true).
 		Padding(0, 1)
 
@@ -200,26 +233,26 @@ func (m AppModel) renderActionChips(inst *InstanceState, cardIdx int) string {
 		label := "■ Stop"
 		if isSelected && m.chipFocus == 3 {
 			toggleChip = lipgloss.NewStyle().
-				Background(styles.TNRed).
-				Foreground(lipgloss.Color("#16161e")).
+				Background(styles.SignalDanger).
+				Foreground(styles.SignalCanvas).
 				Bold(true).Padding(0, 1).Render(label)
 		} else {
 			toggleChip = lipgloss.NewStyle().
-				Background(lipgloss.Color("#3d1a25")).
-				Foreground(styles.TNRed).
+				Background(styles.SignalDangerMuted).
+				Foreground(styles.SignalDanger).
 				Padding(0, 1).Render(label)
 		}
 	} else {
 		label := "▶ Start"
 		if isSelected && m.chipFocus == 3 {
 			toggleChip = lipgloss.NewStyle().
-				Background(styles.TNGreen).
-				Foreground(lipgloss.Color("#16161e")).
+				Background(styles.SignalSuccess).
+				Foreground(styles.SignalCanvas).
 				Bold(true).Padding(0, 1).Render(label)
 		} else {
 			toggleChip = lipgloss.NewStyle().
-				Background(lipgloss.Color("#1a3020")).
-				Foreground(styles.TNGreen).
+				Background(styles.SignalSuccessMuted).
+				Foreground(styles.SignalSuccess).
 				Padding(0, 1).Render(label)
 		}
 	}
@@ -232,18 +265,18 @@ func (m AppModel) renderActionChips(inst *InstanceState, cardIdx int) string {
 func (m AppModel) renderRemoveAction(cardIdx, innerW int) string {
 	label := "✕ Remove instance"
 	chipStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#3d1a25")).
-		Foreground(styles.TNRed).
+		Background(styles.SignalDangerMuted).
+		Foreground(styles.SignalDanger).
 		Padding(0, 1)
 	if cardIdx == m.selected && m.chipFocus == 4 {
 		chipStyle = lipgloss.NewStyle().
-			Background(styles.TNRed).
-			Foreground(lipgloss.Color("#16161e")).
+			Background(styles.SignalDanger).
+			Foreground(styles.SignalCanvas).
 			Bold(true).
 			Padding(0, 1)
 	}
 	chip := chipStyle.Render(label)
-	title := styles.TNDimText.Render("INSTANCE ACTION")
+	title := styles.TUISecondaryText.Render("INSTANCE ACTION")
 	gap := innerW - lipgloss.Width(title) - lipgloss.Width(chip)
 	if gap < 1 {
 		gap = 1
@@ -261,21 +294,21 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 		colW = 12
 	}
 
-	colSep := styles.TNFaintText.Render(safeRepeat("─", colW))
+	colSep := styles.TUISubtleText.Render(safeRepeat("─", colW))
 
 	// --- Metadata column rows ---
 	mkv := func(k, v string, vstyle lipgloss.Style) string {
-		key := styles.TNDimText.Render(padRight(k, 9))
+		key := styles.TUISecondaryText.Render(padRight(k, 9))
 		val := vstyle.Render(tnTruncate(v, colW-10))
 		return key + val
 	}
 	metaRows := []string{
-		styles.TNDimText.Bold(true).Render("METADATA"),
+		styles.TUISecondaryText.Bold(true).Render("METADATA"),
 		colSep,
-		mkv("image", cfg.Image, styles.TNCyanTxt),
-		mkv("uptime", dashOr(inst.Uptime), styles.TNTextSub),
-		mkv("restarts", dashOr(inst.Restarts), styles.TNTextSub),
-		mkv("created", dashOr(inst.Created), styles.TNTextSub),
+		mkv("image", cfg.Image, styles.TUIAccentHoverText),
+		mkv("uptime", dashOr(inst.Uptime), styles.TUIPrimaryText),
+		mkv("restarts", dashOr(inst.Restarts), styles.TUIPrimaryText),
+		mkv("created", dashOr(inst.Created), styles.TUIPrimaryText),
 		mkv("health", dashOr(inst.Health), healthStyle(inst.Health)),
 	}
 
@@ -284,24 +317,24 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 	if barW < 4 {
 		barW = 4
 	}
-	cpuBar := styles.TNGradientBar(inst.CPUPct, barW, lipgloss.Color("#2b4fa0"), styles.TNBlue)
-	ramBar := styles.TNGradientBar(inst.RAMPct, barW, lipgloss.Color("#6b3aaf"), styles.TNPurple)
+	cpuBar := styles.TUIGradientBar(inst.CPUPct, barW, styles.SignalLogoDeep, styles.SignalAccent)
+	ramBar := styles.TUIGradientBar(inst.RAMPct, barW, styles.SignalAccent, styles.SignalAccentHover)
 	resRows := []string{
-		styles.TNDimText.Bold(true).Render("RESOURCES"),
+		styles.TUISecondaryText.Bold(true).Render("RESOURCES"),
 		colSep,
-		styles.TNTextMid.Render(padRight("CPU", 10)) + styles.TNBlueTxt.Bold(true).Render(dashOr(inst.CPU)) + "  " + styles.TNFaintText.Render("/ 100%"),
+		styles.TUISecondaryText.Render(padRight("CPU", 10)) + styles.TUIAccentText.Bold(true).Render(dashOr(inst.CPU)) + "  " + styles.TUISubtleText.Render("/ 100%"),
 		cpuBar,
 		"",
-		styles.TNTextMid.Render(padRight("Memory", 10)) + styles.TNPurpleTxt.Bold(true).Render(dashOr(inst.RAM)) + "  " + styles.TNFaintText.Render("/ "+dashOr(inst.RAMTotal)),
+		styles.TUISecondaryText.Render(padRight("Memory", 10)) + styles.TUIAccentHoverText.Bold(true).Render(dashOr(inst.RAM)) + "  " + styles.TUISubtleText.Render("/ "+dashOr(inst.RAMTotal)),
 		ramBar,
 		"",
-		styles.TNTextMid.Render("network") + "  " + styles.TNTextSub.Render("↑ "+dashOr(inst.NetUp)+"  ↓ "+dashOr(inst.NetDown)),
+		styles.TUISecondaryText.Render("network") + "  " + styles.TUIPrimaryText.Render("↑ "+dashOr(inst.NetUp)+"  ↓ "+dashOr(inst.NetDown)),
 	}
 	// Distinguish "the engine couldn't read stats for a running instance"
 	// (e.g. a stale container network namespace) from "stopped, so there's
 	// nothing to show" — both would otherwise render as identical dashes.
 	if inst.StatsUnavailable {
-		resRows = append(resRows, "", styles.TNYellowTxt.Render("⚠ resources unavailable"))
+		resRows = append(resRows, "", styles.TUIWarningText.Render("⚠ resources unavailable"))
 	}
 
 	// Pad columns to same height.
@@ -325,11 +358,11 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 	}
 
 	// Full-width separator before log tail.
-	sb.WriteString(styles.TNFaintText.Render(safeRepeat("─", innerW)) + "\n")
+	sb.WriteString(styles.TUISubtleText.Render(safeRepeat("─", innerW)) + "\n")
 
 	// Log tail — raw text, no nested panel.
-	logTitle := styles.TNDimText.Render("LOGS · TAIL")
-	logHint := styles.TNFaintText.Render("open full logs →")
+	logTitle := styles.TUISecondaryText.Render("LOGS · TAIL")
+	logHint := styles.TUISubtleText.Render("open full logs →")
 	logGap := innerW - lipgloss.Width(logTitle) - lipgloss.Width(logHint)
 	if logGap < 1 {
 		logGap = 1
@@ -351,7 +384,7 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 
 	nLogLines := 4
 	if len(inst.Logs) == 0 {
-		sb.WriteString("  " + styles.TNFaintText.Render("no logs yet") + "\n")
+		sb.WriteString("  " + styles.TUISubtleText.Render("no logs yet") + "\n")
 	} else {
 		start := len(inst.Logs) - nLogLines
 		if start < 0 {
@@ -361,15 +394,15 @@ func (m AppModel) renderCardAccordion(inst *InstanceState, innerW int) string {
 			if ll.Level != "" && i > 0 {
 				sb.WriteString("\n")
 			}
-			ts := styles.TNFaintText.Render(padRight(ll.Time, 19))
-			lvl := styles.TNLogLevel(ll.Level)
+			ts := styles.TUISubtleText.Render(padRight(ll.Time, 19))
+			lvl := styles.TUILogLevel(ll.Level)
 			prefix := "  " + ts + " " + lvl + "  "
 			parts := wrapWords(ll.Msg, msgAreaW, contAreaW)
 			for j, part := range parts {
 				if j == 0 {
-					sb.WriteString(prefix + styles.TNTextMid.Render(part) + "\n")
+					sb.WriteString(prefix + styles.TUISecondaryText.Render(part) + "\n")
 				} else {
-					sb.WriteString(contIndent + styles.TNTextMid.Render(part) + "\n")
+					sb.WriteString(contIndent + styles.TUISecondaryText.Render(part) + "\n")
 				}
 			}
 		}
@@ -388,7 +421,7 @@ func renderSparkline(history []float64, color lipgloss.Color, bars int) string {
 	}
 
 	activeStyle := lipgloss.NewStyle().Foreground(color)
-	dimStyle := lipgloss.NewStyle().Foreground(styles.TNFaint)
+	dimStyle := lipgloss.NewStyle().Foreground(styles.SignalTextTertiary)
 
 	var sb strings.Builder
 	dataStart := bars - len(history)

@@ -297,7 +297,7 @@ func (m SetupModel) exit(outcome WorkflowOutcome) (tea.Model, tea.Cmd) {
 
 // View satisfies tea.Model by using the same canonical renderer hosted by AppModel.
 func (m SetupModel) View() string {
-	return m.TNView(m.WindowWidth, m.WindowHeight)
+	return m.TUIView(m.WindowWidth, m.WindowHeight)
 }
 
 // isKeyMsg returns true if the message is any key press.

@@ -18,7 +18,7 @@ func TestUpdateStartsAtReviewWithoutChangingAnything(t *testing.T) {
 	if cmd := m.Init(); cmd != nil {
 		t.Fatal("Init must not start an update before user confirmation")
 	}
-	if view := m.TNView(80); !strings.Contains(view, "will not be deleted") || !strings.Contains(view, "without changing anything") {
+	if view := m.TUIView(80); !strings.Contains(view, "will not be deleted") || !strings.Contains(view, "without changing anything") {
 		t.Fatalf("review does not explain safety and cancellation:\n%s", view)
 	}
 }
@@ -34,7 +34,7 @@ func TestUpdateConfirmationAndRetryHaveExplicitTransitions(t *testing.T) {
 
 	model, _ = m.Update(StepFailedMsg{Index: 0, Err: errors.New("network unavailable")})
 	m = model.(MaintenanceModel)
-	if m.Stage != MaintenanceStageFailed || !strings.Contains(m.TNView(80), "try again") {
+	if m.Stage != MaintenanceStageFailed || !strings.Contains(m.TUIView(80), "try again") {
 		t.Fatalf("failure state is not retryable: stage=%d", m.Stage)
 	}
 

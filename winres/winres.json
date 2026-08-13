@@ -1,4 +1,9 @@
 {
+  "RT_GROUP_ICON": {
+    "APP": {
+      "0000": "../assets/omnideck.png"
+    }
+  },
   "RT_MANIFEST": {
     "#1": {
       "0409": {

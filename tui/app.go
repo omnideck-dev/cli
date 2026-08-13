@@ -46,8 +46,9 @@ const (
 
 // DashboardScreenState owns interaction state used only by the root screen.
 type DashboardScreenState struct {
-	expanded  map[string]bool
-	chipFocus int
+	expanded        map[string]bool
+	chipFocus       int
+	dashboardScroll int
 }
 
 // LogsScreenState owns navigation and filtering state used only by Logs.
@@ -221,7 +222,7 @@ func NewAppModelWithInventory(eng engine.Engine, instances []config.InstanceInfo
 	}
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = lipgloss.NewStyle().Foreground(styles.TNBlue)
+	sp.Style = lipgloss.NewStyle().Foreground(styles.SignalAccent)
 	return AppModel{
 		ControlPlaneSection: ControlPlaneSection{
 			eng:             eng,

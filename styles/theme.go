@@ -13,12 +13,12 @@ import (
 // so that the rendered colours are consistent regardless of terminal theme.
 
 var (
-	ColorPrimary = lipgloss.Color("#7C3AED") // violet  — buttons, borders, headings
-	ColorSuccess = lipgloss.Color("#10B981") // emerald — pass / running
-	ColorError   = lipgloss.Color("#EF4444") // red     — fail / stopped
-	ColorMuted   = lipgloss.Color("#6B7280") // grey    — secondary text, separators
-	ColorWarning = lipgloss.Color("#F59E0B") // amber   — warnings (not in spec, kept)
-	ColorWhite   = lipgloss.Color("#FFFFFF")
+	ColorPrimary = SignalAccent
+	ColorSuccess = SignalSuccess
+	ColorError   = SignalDanger
+	ColorMuted   = SignalTextSecondary
+	ColorWarning = SignalWarning
+	ColorWhite   = SignalTextPrimary
 )
 
 // ── Text styles ───────────────────────────────────────────────────────────────

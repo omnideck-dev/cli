@@ -20,8 +20,8 @@ func (m AppModel) viewDoctor() string {
 	if innerW < 20 {
 		innerW = 20
 	}
-	header := styles.TNCyanTxt.Render("✚") + "  " + styles.TNTextBold.Render("Doctor") + "  " + styles.TNFaintText.Render("checks what Omnideck needs")
-	sep := styles.TNFaintText.Render(strings.Repeat("─", innerW))
+	header := styles.TUIAccentHoverText.Render("✚") + "  " + styles.TUIPrimaryBold.Render("Doctor") + "  " + styles.TUISubtleText.Render("checks what Omnideck needs")
+	sep := styles.TUISubtleText.Render(strings.Repeat("─", innerW))
 
 	var bodyLines []string
 	if m.doctorStage != doctorStageResults {
@@ -29,7 +29,7 @@ func (m AppModel) viewDoctor() string {
 		if m.doctorMessage != "" {
 			message = m.doctorMessage
 		}
-		bodyLines = append(bodyLines, m.doctorSpinner.View()+" "+styles.TNDimText.Render(message))
+		bodyLines = append(bodyLines, m.doctorSpinner.View()+" "+styles.TUISecondaryText.Render(message))
 	} else {
 		problems, warnings := 0, 0
 		for _, result := range m.doctorResults {
@@ -40,13 +40,13 @@ func (m AppModel) viewDoctor() string {
 			}
 		}
 		summary := "Everything required is working"
-		summaryStyle := styles.TNGreenTxt
+		summaryStyle := styles.TUISuccessText
 		if problems == 1 {
 			summary = "1 problem needs attention"
-			summaryStyle = styles.TNRedTxt
+			summaryStyle = styles.TUIDangerText
 		} else if problems > 1 {
 			summary = fmt.Sprintf("%d problems need attention", problems)
-			summaryStyle = styles.TNRedTxt
+			summaryStyle = styles.TUIDangerText
 		} else if warnings == 1 {
 			summary += " · 1 helpful note"
 		} else if warnings > 1 {
@@ -56,23 +56,23 @@ func (m AppModel) viewDoctor() string {
 
 		for i, result := range m.doctorResults {
 			var icon string
-			lineStyle := styles.TNDimText
+			lineStyle := styles.TUISecondaryText
 			switch result.Status {
 			case CheckPass:
-				icon = styles.TNGreenTxt.Render("✓")
-				lineStyle = styles.TNTextMid
+				icon = styles.TUISuccessText.Render("✓")
+				lineStyle = styles.TUISecondaryText
 			case CheckFail:
-				icon = styles.TNRedTxt.Render("✗")
-				lineStyle = styles.TNRedTxt
+				icon = styles.TUIDangerText.Render("✗")
+				lineStyle = styles.TUIDangerText
 			case CheckWarn:
-				icon = styles.TNYellowTxt.Render("!")
-				lineStyle = styles.TNYellowTxt
+				icon = styles.TUIWarningText.Render("!")
+				lineStyle = styles.TUIWarningText
 			case CheckInfo:
-				icon = styles.TNFaintText.Render("·")
+				icon = styles.TUISubtleText.Render("·")
 			}
 			cursor := "  "
 			if i == m.doctorFocus {
-				cursor = styles.TNBlueTxt.Render("▸ ")
+				cursor = styles.TUIAccentText.Render("▸ ")
 			}
 			prefix := cursor + icon + "  "
 			continuation := "     "
@@ -85,17 +85,17 @@ func (m AppModel) viewDoctor() string {
 			}
 			if result.Hint != "" && (result.Status == CheckFail || result.Status == CheckWarn) {
 				for _, line := range wrapWords("What you can do: "+result.Hint, max(1, innerW-5), max(1, innerW-5)) {
-					bodyLines = append(bodyLines, "     "+styles.TNFaintText.Render(line))
+					bodyLines = append(bodyLines, "     "+styles.TUISubtleText.Render(line))
 				}
 			}
 			if i == m.doctorFocus && result.Action != DoctorActionNone {
 				for _, line := range wrapWords("Press Enter to "+strings.ToLower(result.ActionLabel)+".", max(1, innerW-5), max(1, innerW-5)) {
-					bodyLines = append(bodyLines, "     "+styles.TNGreenTxt.Render(line))
+					bodyLines = append(bodyLines, "     "+styles.TUISuccessText.Render(line))
 				}
 			}
 		}
 		if m.doctorMessage != "" {
-			bodyLines = append(bodyLines, "", styles.TNRedTxt.Render(m.doctorMessage))
+			bodyLines = append(bodyLines, "", styles.TUIDangerText.Render(m.doctorMessage))
 		}
 	}
 
