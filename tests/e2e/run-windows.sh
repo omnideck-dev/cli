@@ -4,7 +4,7 @@ set -Eeuo pipefail
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(cd "${script_dir}/../.." && pwd)"
-lab_dir="${OMNIDECK_VM_LAB_DIR:-}"
+source "${script_dir}/_common.sh"
 builder_image="${OMNIDECK_CLI_BUILDER_IMAGE:-omnideck-cli-builder:local}"
 assume_yes=0
 keep_vm=0
@@ -43,23 +43,33 @@ while (($#)); do
   esac
 done
 
-[[ -n "${lab_dir}" ]] || { printf 'Set OMNIDECK_VM_LAB_DIR to the external VM lab root.\n' >&2; exit 2; }
-[[ -x "${lab_dir}/lab.sh" ]] || { printf 'Missing executable lab.sh under %s\n' "${lab_dir}" >&2; exit 2; }
-lab_dir="$(cd "${lab_dir}" && pwd -P)"
-[[ "$("${lab_dir}/lab.sh" --version 2>/dev/null || true)" == "omnideck-vm-lab 2."* ]] || {
-  printf 'CLI VM E2E requires OmniDeck VM lab controller 2.x.\n' >&2
-  exit 2
-}
+require_lab
 for dependency in docker curl ssh python3 openssl socat zip unzip; do
   command -v "${dependency}" >/dev/null 2>&1 || { printf '%s is required by the Windows VM E2E lane.\n' "${dependency}" >&2; exit 2; }
 done
 
 if [[ "${OMNIDECK_VM_LAB_LEASED:-}" != "1" ]]; then
   lease_run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  lease_args=(lease windows cli "${lease_run_id}")
+  "${lab_dir}/lab.sh" preflight cli release-clean --lanes windows >/dev/null
+  source_state
+  prepare_output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-$("${lab_dir}/lab.sh" artifact-path cli e2e "${lease_run_id}")}"
+  mkdir -p "${prepare_output_dir}"
+  "${lab_dir}/lab.sh" evidence-init "${prepare_output_dir}" cli e2e "${lease_run_id}" \
+    "${source_short}" windows clean "phase=preparing" "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}"
+  trap '"${lab_dir}/lab.sh" evidence-finish "${prepare_output_dir}" failed || true' EXIT
+  prepare_cli_binaries windows
+  "${lab_dir}/lab.sh" evidence-set "${prepare_output_dir}" "phase=prepared" "buildCacheKey=${cli_build_key}"
+  lease_args=(lease windows cli "${lease_run_id}" --cleanup-baseline clean)
   [[ "${keep_vm}" != "1" ]] || lease_args+=(--keep-state)
-  lease_args+=(-- "$0" "${original_args[@]}")
-  exec "${lab_dir}/lab.sh" "${lease_args[@]}"
+  lease_args+=(-- env OMNIDECK_CLI_BUILD_CACHE="${cli_build_cache}" OMNIDECK_CLI_BUILD_KEY="${cli_build_key}" \
+    OMNIDECK_VM_E2E_OUTPUT_DIR="${prepare_output_dir}" "$0" "${original_args[@]}")
+  lease_status=0
+  "${lab_dir}/lab.sh" "${lease_args[@]}" || lease_status=$?
+  trap - EXIT
+  if [[ "${lease_status}" != "0" ]]; then
+    "${lab_dir}/lab.sh" evidence-finish "${prepare_output_dir}" failed || true
+  fi
+  exit "${lease_status}"
 fi
 eval "$("${lab_dir}/lab.sh" describe windows --shell)"
 ssh_port="${LAB_VM_SSH_PORT}"
@@ -84,9 +94,10 @@ fi
 
 run_id="${OMNIDECK_VM_LAB_RUN_ID}"
 safe_run_id="$(printf '%s' "${run_id}" | tr -cd '[:alnum:]_.-')"
-source_commit="$(git -C "${repo_root}" rev-parse --short=12 HEAD)"
-expected_version="vm-e2e-${source_commit}"
-output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-${lab_dir}/artifacts/cli/e2e/${safe_run_id}}"
+source_state
+source_commit="${source_short}"
+expected_version="vm-e2e-${source_short}"
+output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-$("${lab_dir}/lab.sh" artifact-path cli e2e "${safe_run_id}")}"
 build_dir="${output_dir}/build"
 evidence_dir="${output_dir}/evidence"
 remote_root="C:\\OmnideckE2E\\${safe_run_id}"
@@ -110,9 +121,18 @@ tls_pid=""
 fixture_host=""
 
 mkdir -p "${build_dir}" "${evidence_dir}" "${build_dir}/driver-config"
+cp -a "${OMNIDECK_CLI_BUILD_CACHE:?prepared build cache is required}/." "${build_dir}/"
+builder_image="$(<"${build_dir}/builder-image.txt")"
+write_source_metadata
 : > "${build_dir}/registries.conf"
-"${lab_dir}/lab.sh" evidence-init "${output_dir}" cli e2e "${safe_run_id}" \
-  "${source_commit}" windows clean "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}"
+if [[ -f "${output_dir}/run.json" ]]; then
+  "${lab_dir}/lab.sh" evidence-set "${output_dir}" "phase=executing" "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}"
+else
+  "${lab_dir}/lab.sh" evidence-init "${output_dir}" cli e2e "${safe_run_id}" \
+    "${source_commit}" windows clean "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}" \
+    "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}" \
+    "buildCacheKey=${OMNIDECK_CLI_BUILD_KEY}"
+fi
 
 cleanup() {
   local exit_code=$?
@@ -165,29 +185,11 @@ printf 'Resetting the leased Windows guest to its clean golden.\n'
 "${lab_dir}/lab.sh" reset windows clean
 initial_reset=1
 
-if ! docker image inspect "${builder_image}" >/dev/null 2>&1; then
-  printf 'Building the pinned Go builder image: %s\n' "${builder_image}"
-  docker build --tag "${builder_image}" --file "${repo_root}/.devcontainer/Dockerfile" "${repo_root}/.devcontainer"
-fi
-docker image inspect "${builder_image}" --format '{{.Id}}' > "${build_dir}/builder-image.txt"
-
-printf 'Building release-shaped Windows CLI archive for %s.\n' "${source_commit}"
-docker run --rm --entrypoint /bin/zsh \
-  --user "$(id -u):$(id -g)" \
-  --env GOCACHE=/tmp/omnideck-go-build \
-  --env GOPATH=/tmp/omnideck-go \
-  -v "${repo_root}:/workspace:ro" \
-  -v "${build_dir}:/out" \
-  -w /workspace "${builder_image}" \
-  -c "cp -a /workspace /tmp/omnideck-source && cd /tmp/omnideck-source && go tool go-winres make --arch amd64 --out rsrc --file-version 0.0.0.0 --product-version 0.0.0.0 && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags '-X main.version=${expected_version} -X main.commit=${source_commit} -X main.date=vm-e2e' -o /out/omnideck.exe . && GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -buildvcs=false -o /out/releasecontract.exe ./tests/releasecontract"
-(cd "${build_dir}" && zip -X -q omnideck-windows-amd64.zip omnideck.exe)
-tar --sort=name --owner=0 --group=0 --numeric-owner -czf "${build_dir}/contracts.tar.gz" -C "${repo_root}" contracts
-(cd "${build_dir}" && sha256sum omnideck-windows-amd64.zip > SHA256SUMS)
-sha256sum "${build_dir}/omnideck.exe" > "${build_dir}/omnideck.exe.sha256"
+printf 'Using prepared CLI build cache: %s\n' "${OMNIDECK_CLI_BUILD_KEY}"
 
 printf 'Starting a loopback-only TLS fixture registry.\n'
 docker build --tag "${fixture_local}" --file "${repo_root}/tests/hardware/fixture/Containerfile" "${repo_root}/tests/hardware/fixture"
-docker run -d --name "${registry_name}" --publish 127.0.0.1::5000 docker.io/library/registry:2.8.3 >/dev/null
+docker run -d --name "${registry_name}" --publish 127.0.0.1::5000 docker.io/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373 >/dev/null
 registry_started=1
 host_registry_port="$(docker port "${registry_name}" 5000/tcp | awk -F: 'NR == 1 {print $NF}')"
 [[ "${host_registry_port}" =~ ^[0-9]+$ ]] || { printf 'Could not resolve the fixture registry port.\n' >&2; exit 1; }

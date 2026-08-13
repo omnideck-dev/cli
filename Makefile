@@ -14,7 +14,7 @@ LDFLAGS := -ldflags "\
   -X main.date=$(DATE) \
 "
 
-.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test vm-e2e vm-e2e-purge
+.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test vm-e2e vm-e2e-matrix vm-e2e-purge vm-lab-cleanup
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -72,6 +72,15 @@ VM ?= appimage
 vm-e2e:
 	./tests/e2e/run.sh --vm $(VM)
 
+LANES ?= appimage,deb,rpm,windows
+
+vm-e2e-matrix:
+	./tests/e2e/matrix.sh --lanes $(LANES) $(if $(filter 1 true yes,$(YES)),--yes,)
+
 vm-e2e-purge:
-	@test -n "$(RUN)" || { echo "Set RUN to one artifacts/cli-e2e run directory"; exit 2; }
+	@test -n "$(RUN)" || { echo "Set RUN to one artifacts/cli/e2e run directory"; exit 2; }
 	./tests/e2e/purge.sh "$(RUN)"
+
+vm-lab-cleanup:
+	@test -n "$(OMNIDECK_VM_LAB_DIR)" || { echo "Set OMNIDECK_VM_LAB_DIR"; exit 2; }
+	"$(OMNIDECK_VM_LAB_DIR)/lab.sh" cleanup $(if $(filter 1 true yes,$(ALL)),--all-generated,) $(if $(filter 1 true yes,$(APPLY)),--apply $(if $(filter 1 true yes,$(ALL)),--yes,),--dry-run)

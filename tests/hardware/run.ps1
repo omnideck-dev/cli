@@ -165,7 +165,7 @@ try {
         $FixtureImage = "localhost:${RegistryPort}/omnideck-hardware-fixture:$SafeRunId"
         Invoke-External $Engine @("build", "--file", (Join-Path $ScriptDirectory "fixture/Containerfile"), "--tag", $LocalFixtureImage, (Join-Path $ScriptDirectory "fixture"))
         $BuiltFixture = $true
-        Invoke-External $Engine @("run", "-d", "--name", $RegistryContainer, "-p", "127.0.0.1:${RegistryPort}:5000", "docker.io/library/registry:2.8.3")
+        Invoke-External $Engine @("run", "-d", "--name", $RegistryContainer, "-p", "127.0.0.1:${RegistryPort}:5000", "docker.io/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373")
         Wait-Registry
         Invoke-External $Engine @("tag", $LocalFixtureImage, $FixtureImage)
         Invoke-External $Engine @("push", $FixtureImage)

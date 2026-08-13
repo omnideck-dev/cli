@@ -6,7 +6,7 @@ the assertions describe the behavior a person sees, while the implementation
 is free to change behind that boundary.
 
 The controller is maintained in the standalone `omnideck-vm-lab` repository,
-not the CLI repository. Install controller 2.x into the external lab before
+not the CLI repository. Install controller 2.1 or newer into the external lab before
 running this suite.
 
 Visible wording, capitalization, and punctuation are part of that boundary.
@@ -60,6 +60,7 @@ The external lab path stays machine-local:
 ```sh
 export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
 make vm-e2e
+make vm-e2e-matrix YES=1
 ```
 
 The default lane is the Ubuntu `appimage` guest. The command requires that guest
@@ -72,6 +73,12 @@ make vm-e2e VM=deb
 make vm-e2e VM=rpm
 make vm-e2e VM=windows
 ```
+
+`vm-e2e-matrix` is the canonical complete command. Override its deterministic
+order with `LANES=appimage,windows`. Every lane runs the `release-clean`
+preflight. The pinned dev-container image builds reproducible archives into a
+content-addressed lab cache before a VM lease is requested, so repeated source
+states reuse byte-identical inputs and do not occupy a guest while compiling.
 
 The Windows lane starts from a Windows 11 golden without WSL or Podman. It
 drives the real Windows Security/UAC prompt through the QEMU console, captures
@@ -112,7 +119,16 @@ make vm-e2e-purge RUN="$OMNIDECK_VM_LAB_DIR/artifacts/cli/e2e/<run>"
 The purge command delegates to the lab's marked-run API, shows disk usage, and
 requires the exact run directory name before deleting anything. Pass `--yes`
 directly to `tests/e2e/purge.sh` only in trusted local automation. Routine
-`lab.sh gc` removes unpinned evidence after the short retention window.
+`lab.sh cleanup` removes unpinned evidence after the short retention window and
+prepared build caches after seven unused days. Preview or apply the shared
+policy from this repository with:
+
+```sh
+make vm-lab-cleanup
+make vm-lab-cleanup APPLY=1
+make vm-lab-cleanup ALL=1
+make vm-lab-cleanup ALL=1 APPLY=1
+```
 
 ## Scope
 
