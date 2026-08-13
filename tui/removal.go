@@ -63,6 +63,12 @@ func NewRemovalModel(req RemovalRequest) RemovalModel {
 	input.Prompt = "> "
 	input.CharLimit = 128
 	input.Width = 40
+	// The TUI paints its own dark canvas, so give the confirmation field an
+	// explicit light surface instead of inheriting either terminal color.
+	input.PromptStyle = styles.TUITextInput
+	input.TextStyle = styles.TUITextInput
+	input.Cursor.Style = styles.TUITextInputCursor
+	input.Cursor.TextStyle = styles.TUITextInput
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
