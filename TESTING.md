@@ -153,9 +153,9 @@ OMNIDECK_HARDWARE_ENGINE=podman ./tests/hardware/run.sh
 ./tests/hardware/run.ps1 -Engine podman
 ```
 
-The `Hardware lifecycle tests` workflow is manual and targets hardened
-self-hosted Linux x64, Windows x64, and macOS ARM64 runners. It is not part of
-`release.yml` and does not run when those runners are unavailable.
+There is no GitHub Actions workflow for this harness. Hardware lifecycle tests
+run through the external disposable VM lab so GitHub never queues work for
+self-hosted runners.
 
 ## Local disposable VM lab
 

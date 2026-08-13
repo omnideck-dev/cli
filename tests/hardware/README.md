@@ -1,8 +1,9 @@
 # Hardware test harness
 
 This harness exercises the compiled CLI against a real Docker or Podman runtime.
-It is intended for dedicated macOS, Windows, and Linux test machines. It can be
-run manually before self-hosted GitHub runners are available.
+It is intended for dedicated macOS, Windows, and Linux test machines and for
+the external disposable VM lab. It is not dispatched through self-hosted
+GitHub Actions runners.
 
 Podman is the release-gating runtime. Docker mode remains available only for
 legacy and coexistence diagnostics and must not be used as evidence that the
@@ -99,20 +100,11 @@ the generated `omnideck-hw-*` application and registry containers, volumes,
 image, and configuration.
 
 Only trusted commits from the canonical repository should run on the hardware
-machines. Do not expose these runners to arbitrary pull-request code, especially
-once runtime-install scenarios can request administrator access.
+machines. Do not expose these machines to arbitrary pull-request code,
+especially once runtime-install scenarios can request administrator access.
 
-## GitHub runner labels
+## Execution environment
 
-The manual workflow expects these labels in addition to `self-hosted`:
-
-| Machine | Labels |
-|---|---|
-| Apple Silicon Mac | `omnideck-hardware`, `macos`, `arm64` |
-| Windows 11 x64 | `omnideck-hardware`, `windows`, `x64` |
-| Linux x64 | `omnideck-hardware`, `linux`, `x64` |
-
-The workflow has no schedule and requires an explicit confirmation checkbox, so
-it will not queue jobs while no runners exist. Once all three machines are
-online and hardened, add a nightly `schedule` trigger and restrict the workflow
-to the protected `main` branch.
+Run this harness directly or through the external disposable VM lab. Do not add
+self-hosted GitHub Actions jobs for physical machines or lab guests; the lab's
+lease and cleanup model owns those resources and records the release evidence.
