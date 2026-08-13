@@ -20,17 +20,21 @@ cd "$OMNIDECK_VM_LAB_DIR"
 ./lab.sh status
 ```
 
-Start only the guest you own for the current run. The `flock` lease is
-intentional: QEMU inherits the lock descriptor, so the lock remains held while
-the guest is running and a second operator cannot start the same lane:
+Start only the guest you own for the current run. Manual and automated callers
+use the same lab-owned lease, transaction, and owner metadata:
 
 ```sh
-flock -n /tmp/omnideck-cli-atomic-lease.lock bash -c \
-  'cd "$OMNIDECK_VM_LAB_DIR" && ./lab.sh start atomic && ./lab.sh wait atomic && ./lab.sh verify atomic'
-fuser -v /tmp/omnideck-cli-atomic-lease.lock
+./lab.sh lease silverblue cli-manual -- bash
+./lab.sh start silverblue
+./lab.sh wait silverblue
+./lab.sh verify silverblue
+# Run the manual procedure, then stop and reset before exiting this shell.
+./lab.sh stop silverblue
+./lab.sh reset silverblue clean
+exit
 ```
 
-If the lease is already held, inspect the owner before doing anything. Never
+If the lease is already held, `lab.sh status` reports its owner. Never
 stop, reset, or snapshot a guest owned by another run. Keep the Windows guest
 stopped when it is reserved for desktop testing.
 
@@ -97,8 +101,9 @@ CLI guest run and restore its disposable overlay:
 ./lab.sh status atomic
 ```
 
-`reset` archives and replaces the active overlay. It is destructive to that
-guest's test state and must not be used as a generic cleanup command.
+`reset` archives and replaces the active overlay inside the current lease
+transaction. Successful automation discards it immediately; failed state and
+compact evidence expire after 48 hours unless explicitly pinned.
 
 For Linux desktop candidates launched from an AppImage, verify the packaged
 host path as well as the CLI lifecycle. The CLI removes AppImage loader

@@ -178,7 +178,7 @@ cd "$OMNIDECK_VM_LAB_DIR"
 
 For the repeatable containerized CLI lifecycle, including the Go builder and
 guest staging/cleanup, use [`tests/manual/local-vm-lab.md`](tests/manual/local-vm-lab.md).
-It also records the exact `flock` ownership and graphical-viewer commands for
+It also records the lab-owned lease and graphical-viewer commands for
 steps that cannot be automated safely.
 
 The currently provisioned x64 guests are:
@@ -191,7 +191,8 @@ The currently provisioned x64 guests are:
 | `atomic` | Fedora Silverblue 44 | Immutable-host compatibility; Podman is part of the stock image |
 | `windows` | Windows 11 x64 | Windows clean-host, WSL/Podman, restart/resume, lifecycle, and upgrade tests |
 
-The identifiers describe the VMs' original desktop-package roles. They do not
+The canonical identifiers are now `ubuntu`, `debian`, `fedora`, `silverblue`,
+and `windows`; the historical names in the table remain accepted aliases. They do not
 mean that the CLI release publishes AppImage, DEB, or RPM packages; CLI release
 inputs remain the archives in the packaged target matrix. The lab has no
 macOS guest, so it cannot satisfy required native macOS manual coverage. It
@@ -224,11 +225,10 @@ restart later, verifies a complete controlled reboot, installs Podman, and
 continues setup. The Windows restart-now RunOnce auto-reopen, macOS prompts,
 and subjective visual checks remain manual requirements.
 
-Each run lives under one `artifacts/cli-e2e/<run>/` directory. Successful runs
-automatically delete only the large discarded overlays they created, including
-Windows disk and TPM state. Failed runs list retained paths in that directory;
-`make vm-e2e-purge RUN=...` removes the exact listed paths and the compact run
-folder after confirmation.
+Each run lives under one `artifacts/cli/e2e/<run>/` directory. Successful reset
+transactions are deleted immediately. Failed state and compact evidence expire
+after 48 hours unless pinned; `make vm-e2e-purge RUN=...` delegates exact-run
+validation and removal to the lab controller.
 
 ### Normal VM workflow
 
