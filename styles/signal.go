@@ -58,6 +58,10 @@ var (
 	TUISuccessText     = lipgloss.NewStyle().Foreground(SignalSuccess)
 	TUIWarningText     = lipgloss.NewStyle().Foreground(SignalWarning)
 	TUIDangerText      = lipgloss.NewStyle().Foreground(SignalDanger)
+	TUITextInput       = lipgloss.NewStyle().Foreground(SignalCanvas).Background(SignalTextPrimary)
+	// Bubbles renders the active cursor with reverse video, so these source
+	// colors intentionally render as light text on an accent background.
+	TUITextInputCursor = lipgloss.NewStyle().Foreground(SignalAccent).Background(SignalTextPrimary)
 
 	TUIBoldAccent  = lipgloss.NewStyle().Foreground(SignalAccent).Bold(true)
 	TUIBoldSuccess = lipgloss.NewStyle().Foreground(SignalSuccess).Bold(true)

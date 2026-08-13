@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/styles"
 )
 
 func removalTestModel() RemovalModel {
@@ -69,6 +70,29 @@ func TestRemovalRequiresExactNameBeforeDeletingData(t *testing.T) {
 	m = model.(RemovalModel)
 	if m.Stage != RemovalStageApplying || cmd == nil {
 		t.Fatalf("exact confirmation = stage %d command %v", m.Stage, cmd)
+	}
+}
+
+func TestRemovalConfirmationUsesExplicitLightInputColors(t *testing.T) {
+	m := removalTestModel()
+
+	if got := m.confirmation.PromptStyle.GetForeground(); got != styles.SignalCanvas {
+		t.Fatalf("confirmation prompt foreground = %v, want %v", got, styles.SignalCanvas)
+	}
+	if got := m.confirmation.PromptStyle.GetBackground(); got != styles.SignalTextPrimary {
+		t.Fatalf("confirmation prompt background = %v, want %v", got, styles.SignalTextPrimary)
+	}
+	if got := m.confirmation.TextStyle.GetForeground(); got != styles.SignalCanvas {
+		t.Fatalf("confirmation text foreground = %v, want %v", got, styles.SignalCanvas)
+	}
+	if got := m.confirmation.TextStyle.GetBackground(); got != styles.SignalTextPrimary {
+		t.Fatalf("confirmation text background = %v, want %v", got, styles.SignalTextPrimary)
+	}
+	if got := m.confirmation.Cursor.Style.GetForeground(); got != styles.SignalAccent {
+		t.Fatalf("confirmation cursor source foreground = %v, want %v", got, styles.SignalAccent)
+	}
+	if got := m.confirmation.Cursor.Style.GetBackground(); got != styles.SignalTextPrimary {
+		t.Fatalf("confirmation cursor source background = %v, want %v", got, styles.SignalTextPrimary)
 	}
 }
 
