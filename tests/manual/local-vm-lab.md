@@ -1,15 +1,10 @@
 # Local VM lab workflow
 
-This is the repeatable CLI hardware workflow for the external OmniDeck release
-lab. It keeps Go off the developer host by building inside the repository's
-`.devcontainer/Dockerfile` image, and it keeps guest state on disposable lab
-overlays.
+This is the CLI workflow for the external OmniDeck release lab. Prefer the
+automated E2E matrix for every deterministic Linux and Windows check. Open a
+graphical viewer only for behavior listed as manual in the applicable procedure.
 
-The helper runs the non-visual Podman lifecycle suite. It does not claim the
-interactive runtime-install, elevation, reboot, or desktop-window procedures.
-Those require the commands below and a graphical viewer.
-
-## Safety and ownership
+## Preflight and ownership
 
 Set the lab path without committing its machine-specific value:
 
@@ -17,102 +12,113 @@ Set the lab path without committing its machine-specific value:
 export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
 test -x "$OMNIDECK_VM_LAB_DIR/lab.sh"
 cd "$OMNIDECK_VM_LAB_DIR"
-./lab.sh status
+./lab.sh doctor --strict
+./lab.sh preflight cli release-clean --lanes appimage,deb,rpm,windows
 ```
 
-Start only the guest you own for the current run. Manual and automated callers
-use the same lab-owned lease, transaction, and owner metadata:
+Every command that changes a guest must run inside the lab-owned lease. The
+cleanup baseline restores the clean checkpoint when the shell exits normally,
+fails, or is interrupted:
 
 ```sh
-./lab.sh lease silverblue cli-manual -- bash
+./lab.sh lease silverblue cli-manual --cleanup-baseline clean -- bash
 ./lab.sh start silverblue
 ./lab.sh wait silverblue
 ./lab.sh verify silverblue
-# Run the manual procedure, then stop and reset before exiting this shell.
-./lab.sh stop silverblue
-./lab.sh reset silverblue clean
+./lab.sh viewer silverblue
+# Perform only the remaining manual observations, then exit the shell.
 exit
 ```
 
-If the lease is already held, `lab.sh status` reports its owner. Never
-stop, reset, or snapshot a guest owned by another run. Keep the Windows guest
-stopped when it is reserved for desktop testing.
+If the lease is already held, `lab.sh status` reports its owner. Never stop,
+reset, or snapshot a guest owned by another run. Do not issue a second reset at
+the end of a lease that already has `--cleanup-baseline clean`.
 
-## Repeated CLI lifecycle test
+## Canonical automated regression
 
-Build the reusable Go builder image once from the CLI worktree:
-
-```sh
-cd /path/to/omnideck-cli
-docker build --tag omnideck-cli-builder:local \
-  --file .devcontainer/Dockerfile .devcontainer
-```
-
-Run the helper from this worktree after the selected guest reports ready:
+Run the complete deterministic matrix from the CLI worktree:
 
 ```sh
 cd /path/to/omnideck-cli
 export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
-OMNIDECK_VM_LAB_VM=atomic \
-OMNIDECK_HARDWARE_ENGINE=podman \
-./tests/manual/run-local-hardware.sh
+make vm-e2e-matrix YES=1
 ```
 
-The helper builds the current checkout in the container, records the binary
-checksum, copies the binary and hardware harness into the guest, runs the
-unique `omnideck-hw-*` lifecycle, copies back `summary.json`, `junit.xml`, and
-diagnostic logs, and removes only its generated guest staging directory. The
-generated host artifacts are under the external lab's `artifacts/` directory.
+Override `LANES=appimage,windows` only when intentionally running a subset. The
+matrix preflights the selected profile, prepares one content-addressed CLI build
+before acquiring a guest, leases each lane in deterministic order, restores the
+clean baseline, and writes a single aggregate record under
+`$OMNIDECK_VM_LAB_DIR/artifacts/cli/matrix/`.
 
-To compare a pristine branch, run the same helper from a clean worktree. A
-baseline run is useful when a harness assertion is stale or when a refactor is
-intended to preserve behavior.
-
-## Non-scriptable desktop and cleanup commands
-
-Use the graphical console for setup prompts, visible terminal behavior,
-restart/resume, and any visual result:
+For a single mutable lane, use `make vm-e2e VM=appimage` or the compatibility
+wrapper:
 
 ```sh
+OMNIDECK_VM_LAB_VM=appimage ./tests/manual/run-local-hardware.sh --yes
+```
+
+The wrapper delegates to the same E2E lane; it no longer maintains separate
+SSH, builder-image, artifact-path, or cleanup logic. Each lane runs the packaged
+first-run/TUI journey, portable contract, and Podman hardware lifecycle against
+the same cached release-shaped binary.
+
+## Remaining manual CLI checks
+
+The automated mutable-Linux lanes cover first run, returning behavior, TUI
+management, and the unattended lifecycle. The Windows lane covers real UAC,
+restart-later, a controlled reboot, Podman installation, TUI behavior, and the
+same lifecycle. Keep these checks manual:
+
+- the Windows **Restart now** RunOnce auto-reopen path;
+- native macOS prompts and behavior;
+- graphical PolicyKit presentation and subjective terminal/visual quality; and
+- stable-to-candidate production-image upgrade, backup, and restore.
+
+Create a marked evidence directory before a manual viewer run so all generated
+records land under the lab root:
+
+```sh
+cli_root=/path/to/omnideck-cli
+source_commit="$(git -C "$cli_root" rev-parse HEAD)"
 cd "$OMNIDECK_VM_LAB_DIR"
-./lab.sh viewer atomic
-./lab.sh viewer windows
-```
-
-The exact Windows lane is:
-
-```sh
+run_id="cli-manual-$(date -u +%Y%m%dT%H%M%SZ)"
+evidence_dir="$(./lab.sh artifact-path cli manual "$run_id")"
+export evidence_dir
+./lab.sh evidence-init "$evidence_dir" cli manual "$run_id" \
+  "$source_commit" windows clean
+./lab.sh lease windows cli-manual "$run_id" --cleanup-baseline clean -- bash
 ./lab.sh start windows
 ./lab.sh wait windows
 ./lab.sh verify windows
 ./lab.sh viewer windows
-# Perform the published desktop clean-first-run procedure in the viewer.
-./lab.sh stop windows
-./lab.sh reset windows
-./lab.sh status windows
+# Perform only the applicable manual procedure and write compact results to:
+printf '%s\n' "$evidence_dir"
+exit
+./lab.sh evidence-finish "$evidence_dir" passed
 ```
 
-Only after confirming the copied evidence contains everything needed, end a
-CLI guest run and restore its disposable overlay:
+If the manual assertion fails, finish it as `failed`. Record the source commit,
+candidate checksum, guest inventory, exact observations, timestamps, and final
+result. Do not copy candidates or raw VM state into the repository.
+
+## Evidence cleanup
+
+Successful reset transactions disappear immediately. Unpinned evidence and
+failed state expire after 48 hours; unused content-addressed caches expire after
+seven days. Preview or apply that shared policy from the CLI worktree:
 
 ```sh
-./lab.sh stop atomic
-./lab.sh reset atomic
-./lab.sh status atomic
+make vm-lab-cleanup
+make vm-lab-cleanup APPLY=1
 ```
 
-`reset` archives and replaces the active overlay inside the current lease
-transaction. Successful automation discards it immediately; failed state and
-compact evidence expire after 48 hours unless explicitly pinned.
+For an intentional complete removal of generated evidence, caches, and retained
+reset state:
 
-For Linux desktop candidates launched from an AppImage, verify the packaged
-host path as well as the CLI lifecycle. The CLI removes AppImage loader
-variables from host subprocesses so Podman's `conmon` uses the guest's native
-GLib libraries.
+```sh
+make vm-lab-cleanup ALL=1
+make vm-lab-cleanup ALL=1 APPLY=1
+```
 
-## Evidence record
-
-For each run retain the source commit, builder image tag/digest, CLI checksum,
-guest identifier, guest OS/version, Podman version, exact helper or manual
-commands, start/end timestamps, result, artifact paths, and any blocked
-visual/manual steps. Redact credentials and personal home-directory details.
+Cleanup never targets golden images, named checkpoints, base images, automation,
+or keys.

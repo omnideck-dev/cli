@@ -193,7 +193,7 @@ if [[ -z "${fixture_image}" ]]; then
   fixture_image="localhost:${registry_port}/omnideck-hardware-fixture:${safe_run_id}"
   "${engine}" build --file "${script_dir}/fixture/Containerfile" --tag "${local_fixture_image}" "${script_dir}/fixture"
   built_fixture=1
-  "${engine}" run -d --name "${registry_container}" -p "127.0.0.1:${registry_port}:5000" docker.io/library/registry:2.8.3
+  "${engine}" run -d --name "${registry_container}" -p "127.0.0.1:${registry_port}:5000" docker.io/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
   wait_for_registry
   "${engine}" tag "${local_fixture_image}" "${fixture_image}"
   "${engine}" push "${fixture_image}"

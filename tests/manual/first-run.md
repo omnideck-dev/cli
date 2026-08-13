@@ -6,6 +6,15 @@ Verify the actual terminal-first setup journey by invoking the released binary
 with no arguments. This is a semantic and visual test; it is not replaced by
 `omnideck setup`, JSON mode, or model-level TUI unit tests.
 
+## Automation boundary
+
+`make vm-e2e-matrix YES=1` drives this journey and its exact semantic copy on
+the mutable Linux guests and Windows 11, then verifies returning behavior and
+resource cleanup. Repeat this manual procedure only for a published artifact,
+native macOS, graphical permission presentation, subjective visual review, or a
+target without an available automation lane. Do not record duplicated automated
+steps as independent manual coverage.
+
 ## Starting state and safety
 
 - Use a disposable VM or dedicated machine with a ready Podman installation.

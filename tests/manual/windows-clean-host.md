@@ -1,5 +1,14 @@
 # Windows clean-host and restart/resume test
 
+## Automation boundary
+
+The Windows VM E2E lane already covers the real UAC prompt, cancellation and
+approval, **Restart later**, a controlled reboot, Podman MSI installation, setup
+continuation, returning behavior, Doctor routing, and lifecycle cleanup. Use
+this procedure for the exact published artifact and the remaining **Restart
+now** RunOnce auto-reopen path. Re-run an automated assertion manually only when
+diagnosing a failure or reviewing its subjective presentation.
+
 ## Starting state and safety
 
 Use a revertible Windows VM snapshot with no OmniDeck configuration, Podman,

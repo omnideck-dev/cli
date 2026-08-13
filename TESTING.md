@@ -213,36 +213,52 @@ substitutes the fixture result for a production-image upgrade test.
 
 ```sh
 export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
-make vm-e2e                 # Ubuntu lane; confirms the clean reset interactively
-make vm-e2e VM=deb          # Debian package-family variant
-make vm-e2e VM=rpm          # Fedora package-family variant
-make vm-e2e VM=windows      # Windows UAC, reboot, Podman MSI, TUI, and CLI
+make vm-e2e-matrix YES=1    # Canonical complete, deterministic regression
+make vm-e2e                 # Single Ubuntu lane; confirms reset interactively
+make vm-e2e VM=windows      # Single Windows UAC/reboot/Podman/TUI lane
 ```
 
-The suite requires a stopped, exclusively leased guest and restores its clean
-golden after the run. The Windows lane exercises the real UAC prompt, selects
-restart later, verifies a complete controlled reboot, installs Podman, and
-continues setup. The Windows restart-now RunOnce auto-reopen, macOS prompts,
-and subjective visual checks remain manual requirements.
+The matrix is the canonical release-regression command. It preflights the
+`release-clean` profile, prepares one content-addressed build before requesting
+a guest, leases lanes in deterministic order, and restores every clean golden.
+The Windows lane exercises the real UAC prompt, selects restart later, verifies
+a complete controlled reboot, installs Podman, and continues setup. The Windows
+restart-now RunOnce auto-reopen, macOS prompts, subjective visual checks, and
+stable-to-candidate production upgrades remain manual requirements.
 
-Each run lives under one `artifacts/cli/e2e/<run>/` directory. Successful reset
-transactions are deleted immediately. Failed state and compact evidence expire
-after 48 hours unless pinned; `make vm-e2e-purge RUN=...` delegates exact-run
-validation and removal to the lab controller.
+Aggregate runs live under `artifacts/cli/matrix/<run>/`; individual lane records
+live under `artifacts/cli/e2e/<run>/`. Successful reset transactions are deleted
+immediately. Failed state and compact evidence expire after 48 hours unless
+pinned; `make vm-e2e-purge RUN=...` delegates exact-run validation and removal
+to the lab controller.
 
 ### Normal VM workflow
 
-Choose the guest required by the checked-in manual procedure. Start only the
-VMs needed for the current run unless host capacity has been checked.
+Choose the guest required by the checked-in manual procedure. Run strict health
+and profile preflight first, then acquire a cleanup-owning lease. Start only the
+guest owned by that lease:
 
 ```sh
-./lab.sh status deb
+cli_root=/path/to/omnideck-cli
+source_commit="$(git -C "$cli_root" rev-parse HEAD)"
+cd "$OMNIDECK_VM_LAB_DIR"
+./lab.sh doctor --strict
+./lab.sh preflight cli release-clean --lanes deb
+run_id="cli-manual-$(date -u +%Y%m%dT%H%M%SZ)"
+evidence_dir="$(./lab.sh artifact-path cli manual "$run_id")"
+export evidence_dir
+./lab.sh evidence-init "$evidence_dir" cli manual "$run_id" \
+  "$source_commit" deb clean
+./lab.sh lease deb cli-manual "$run_id" --cleanup-baseline clean -- bash
 ./lab.sh start deb
 ./lab.sh wait deb
 ./lab.sh verify deb
 ./lab.sh viewer deb
 # Or, for non-visual work:
 ./lab.sh ssh deb
+# Exit after the procedure; the lease restores the clean baseline.
+exit
+./lab.sh evidence-finish "$evidence_dir" passed
 ```
 
 `wait` checks initial cloud-image or Windows provisioning. The installed
@@ -258,38 +274,29 @@ actual supported previous-stable asset. Verify their checksums, provenance,
 embedded versions, and architecture before mutating the guest. Do not bake a
 candidate binary, runtime, or application state into a clean golden.
 
-At the end of the run, copy out the compact report, stop the guest, and restore
-its disposable disk:
-
-```sh
-./lab.sh stop deb
-./lab.sh reset deb
-./lab.sh status deb
-```
-
-`reset` is destructive to the active guest state and archives the old overlay
-under the lab's `discarded/` directory before recreating it from the golden.
-Confirm the report has everything needed before resetting, do not reset an
-unknown active run, and remove known-stale discarded overlays after they are no
-longer needed. Repeating `reset` unnecessarily consumes disk. `snapshot`
-replaces the trusted golden state and is reserved for deliberate lab
-maintenance; never run it as release-test cleanup. Likewise,
-`install-windows` and `install-atomic` are rebuild operations, not normal test
-commands.
+The evidence directory is controller-created rather than hand-invented. Use
+`failed` instead of `passed` when an assertion fails. The lease's cleanup
+baseline owns the destructive reset and retained-state transaction; do not reset
+again afterward. `snapshot`, `install-windows`, and `install-atomic` are lab
+maintenance operations, never release-test cleanup commands.
 
 ### Lab evidence and privacy
 
-Store local results outside the repository, normally beneath the lab's
-`artifacts/<candidate>/<guest>/` directory. A result should contain a compact
-Markdown summary, exact hashes, commands and exit codes, relevant configuration
-and inventory, small diagnostic excerpts, and the cleanup result. Prefer
-immutable GitHub Actions and release URLs over local copies of public assets.
+Store local results outside the repository at the path returned by
+`lab.sh artifact-path`. A result should contain a compact Markdown summary,
+exact hashes, commands and exit codes, relevant configuration and inventory,
+small diagnostic excerpts, and the cleanup result. Prefer immutable GitHub
+Actions and release URLs over local copies of public assets.
 
 Do not retain test-created or discarded VM overlays, copied release payloads,
 extracted binaries, package caches, full console recordings, large screenshots,
 application images, or backup archives after their required assertions have
 been summarized. Keep a minimal screenshot only when it is needed to explain a
 visual failure or issue.
+
+Preview routine retention with `make vm-lab-cleanup`; apply it with
+`make vm-lab-cleanup APPLY=1`. Use `ALL=1` to preview, and `ALL=1 APPLY=1` to
+confirm, removal of all generated artifacts, caches, and retained reset state.
 
 Before sharing or committing any report, remove personal usernames, home
 directories, hostnames, external IP addresses, tokens, personal SSH material,

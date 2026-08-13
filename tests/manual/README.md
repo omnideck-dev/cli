@@ -22,6 +22,7 @@ tokens, personal SSH material, and machine-specific paths.
 
 Available procedures:
 
+- [Local VM lab controls and automated boundary](local-vm-lab.md)
 - [First run with bare `omnideck`](first-run.md)
 - [Windows clean-host installation and restart/resume](windows-clean-host.md)
 - [Stable upgrade, backup, restore, and removal](upgrade-backup-restore.md), run
@@ -41,8 +42,11 @@ without changing the development host. The VM identifiers are lab roles, not
 CLI package formats. The lab does not provide macOS coverage, and Silverblue's
 stock Podman installation does not satisfy a Podman-absent starting condition.
 
-Use the lab only to provide the host described by a procedure; the steps and
-pass criteria in these checked-in files remain authoritative. End each run by
-copying out its compact result, stopping the guest, and resetting its disposable
-overlay. Do not use the lab's `snapshot` or installer commands during an
-ordinary release test.
+Use the automated VM matrix for covered Linux and Windows behavior, and use the
+lab only to provide the host for a remaining manual procedure. Create evidence
+with `lab.sh artifact-path`/`evidence-init`, run every mutating command inside a
+lease with `--cleanup-baseline clean`, and let that lease restore the disposable
+overlay. Never use `snapshot`, `install-windows`, or `install-atomic` during an
+ordinary release test. Routine `lab.sh cleanup` enforces retention; the
+intentional `cleanup --all-generated --yes --apply` removes all generated lab
+artifacts, caches, and retained reset state.
