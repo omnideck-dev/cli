@@ -12,6 +12,10 @@ type mockEngine struct {
 	containerExists bool
 	containerNames  map[string]bool
 	containerStatus string
+	statusCalls     int
+	inspectData     engine.InspectData
+	inspectErr      error
+	inspectCalls    int
 	startErr        error
 	stopErr         error
 	removeErr       error
@@ -107,6 +111,7 @@ func (m *mockEngine) StopContainer(string) error {
 	return m.stopErr
 }
 func (m *mockEngine) ContainerStatus(string) (string, error) {
+	m.statusCalls++
 	return m.containerStatus, nil
 }
 func (m *mockEngine) ContainerStats(string) (string, float64, string, string, float64, error) {
@@ -120,5 +125,13 @@ func (m *mockEngine) FetchLogs(string, int) ([]string, error) {
 	return m.fetchLines, m.fetchErr
 }
 func (m *mockEngine) ContainerInspect(string) (engine.InspectData, error) {
-	return engine.InspectData{}, nil
+	m.inspectCalls++
+	if m.inspectErr != nil {
+		return engine.InspectData{}, m.inspectErr
+	}
+	inspect := m.inspectData
+	if inspect.Status == "" {
+		inspect.Status = m.containerStatus
+	}
+	return inspect, nil
 }

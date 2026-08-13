@@ -11,6 +11,8 @@ import (
 )
 
 // fetchStats calls the engine synchronously and returns an instanceStatsMsg.
+// One inspect supplies both status and metadata; active containers need only
+// one additional process for their live CPU and memory sample.
 //
 // CPU/RAM are only fetched while the container is in an active state (see
 // workflow.IsActiveContainerStatus): Podman reports 0%/0B for
@@ -24,7 +26,8 @@ import (
 // statsUnavailable is set instead of silently leaving the same blank fields
 // a "not polled yet" state would show.
 func fetchStats(eng engine.Engine, name string, idx, generation int) tea.Msg {
-	status, _ := eng.ContainerStatus(name)
+	inspect, inspectErr := eng.ContainerInspect(name)
+	status := inspect.Status
 	if status == "" {
 		status = "unknown"
 	}
@@ -40,7 +43,7 @@ func fetchStats(eng engine.Engine, name string, idx, generation int) tea.Msg {
 			msg.sampleOK = true
 		}
 	}
-	if inspect, err := eng.ContainerInspect(name); err == nil {
+	if inspectErr == nil {
 		msg.health = inspect.HealthStatus
 		msg.restarts = strconv.Itoa(inspect.RestartCount)
 		if !inspect.CreatedAt.IsZero() {

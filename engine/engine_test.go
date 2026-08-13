@@ -371,13 +371,16 @@ func TestParseMemBytesInvalid(t *testing.T) {
 // --- parseInspectLine ---
 
 func TestParseInspectLineValid(t *testing.T) {
-	line := "2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|3|healthy"
+	line := "running|2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|3|healthy"
 	d, err := parseInspectLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if d.RestartCount != 3 {
 		t.Errorf("RestartCount: got %d, want 3", d.RestartCount)
+	}
+	if d.Status != "running" {
+		t.Errorf("Status: got %q, want 'running'", d.Status)
 	}
 	if d.HealthStatus != "healthy" {
 		t.Errorf("HealthStatus: got %q, want 'healthy'", d.HealthStatus)
@@ -388,7 +391,7 @@ func TestParseInspectLineValid(t *testing.T) {
 }
 
 func TestParseInspectLineHealthNone(t *testing.T) {
-	line := "2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|0|none"
+	line := "exited|2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|0|none"
 	d, err := parseInspectLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -399,7 +402,7 @@ func TestParseInspectLineHealthNone(t *testing.T) {
 }
 
 func TestParseInspectLineNoValue(t *testing.T) {
-	line := "2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|0|<no value>"
+	line := "paused|2024-01-15T12:00:00Z|2024-01-15T11:00:00Z|0|<no value>"
 	d, err := parseInspectLine(line)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -412,7 +415,7 @@ func TestParseInspectLineNoValue(t *testing.T) {
 func TestParseInspectLineTooFewFields(t *testing.T) {
 	_, err := parseInspectLine("only|two|fields")
 	if err == nil {
-		t.Fatal("expected error for < 4 pipe-separated fields")
+		t.Fatal("expected error for < 5 pipe-separated fields")
 	}
 }
 

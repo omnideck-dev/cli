@@ -26,8 +26,9 @@ type RunOptions struct {
 	Platform    string // runtime.GOOS
 }
 
-// InspectData holds container inspection metadata.
+// InspectData holds container status and inspection metadata.
 type InspectData struct {
+	Status       string
 	StartedAt    time.Time
 	CreatedAt    time.Time
 	RestartCount int
@@ -71,7 +72,7 @@ type Engine interface {
 	ContainerStats(name string) (cpu string, cpuPct float64, ram, ramTotal string, ramPct float64, err error)
 	// FetchLogs returns the last tail lines of container log output.
 	FetchLogs(name string, tail int) ([]string, error)
-	// ContainerInspect returns metadata about a container (started time, restarts, health).
+	// ContainerInspect returns status and metadata about a container.
 	ContainerInspect(name string) (InspectData, error)
 }
 
@@ -174,15 +175,16 @@ func parseInspectTime(s string) time.Time {
 
 // parseInspectLine parses the pipe-delimited output produced by ContainerInspect format strings.
 func parseInspectLine(s string) (InspectData, error) {
-	parts := strings.SplitN(s, "|", 4)
-	if len(parts) < 4 {
+	parts := strings.SplitN(s, "|", 5)
+	if len(parts) < 5 {
 		return InspectData{}, fmt.Errorf("unexpected inspect output: %q", s)
 	}
 	var d InspectData
-	d.StartedAt = parseInspectTime(parts[0])
-	d.CreatedAt = parseInspectTime(parts[1])
-	d.RestartCount, _ = strconv.Atoi(parts[2])
-	d.HealthStatus = parts[3]
+	d.Status = parts[0]
+	d.StartedAt = parseInspectTime(parts[1])
+	d.CreatedAt = parseInspectTime(parts[2])
+	d.RestartCount, _ = strconv.Atoi(parts[3])
+	d.HealthStatus = parts[4]
 	if d.HealthStatus == "none" || d.HealthStatus == "<no value>" {
 		d.HealthStatus = ""
 	}

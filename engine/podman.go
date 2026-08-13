@@ -369,9 +369,10 @@ func (e *PodmanEngine) ContainerStats(name string) (cpu string, cpuPct float64, 
 	return cpu, cpuPct, ram, ramTotal, ramPct, nil
 }
 
-// ContainerInspect returns metadata about a container.
+// ContainerInspect returns status and metadata about a container in one
+// Podman process so live dashboards do not need a separate status probe.
 func (e *PodmanEngine) ContainerInspect(name string) (InspectData, error) {
-	format := `{{.State.StartedAt}}|{{.Created}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}`
+	format := `{{.State.Status}}|{{.State.StartedAt}}|{{.Created}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}`
 	cmd := buildCmd("podman", "inspect", "--format", format, name)
 	out, err := cmd.Output()
 	if err != nil {

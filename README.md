@@ -86,7 +86,7 @@ steps; local AI remains optional and online AI continues to work.
 
 ### Build from source
 
-Requires Go 1.25.12+. A missing Podman installation can be handled by the
+Requires Go 1.25.13+. A missing Podman installation can be handled by the
 guided setup after the CLI is built. In the example below, the computer
 asks for a password only while copying the finished CLI into a shared apps
 folder. Run `omnideck` itself as the normal user.
