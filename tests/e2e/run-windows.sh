@@ -9,7 +9,7 @@ builder_image="${OMNIDECK_CLI_BUILDER_IMAGE:-omnideck-cli-builder:local}"
 assume_yes=0
 keep_vm=0
 vm=windows
-ssh_port=2225
+original_args=("$@")
 
 usage() {
   cat <<'EOF'
@@ -46,9 +46,23 @@ done
 [[ -n "${lab_dir}" ]] || { printf 'Set OMNIDECK_VM_LAB_DIR to the external VM lab root.\n' >&2; exit 2; }
 [[ -x "${lab_dir}/lab.sh" ]] || { printf 'Missing executable lab.sh under %s\n' "${lab_dir}" >&2; exit 2; }
 lab_dir="$(cd "${lab_dir}" && pwd -P)"
-for dependency in docker flock curl ssh python3 openssl socat zip unzip; do
+[[ "$("${lab_dir}/lab.sh" --version 2>/dev/null || true)" == "omnideck-vm-lab 2."* ]] || {
+  printf 'CLI VM E2E requires OmniDeck VM lab controller 2.x.\n' >&2
+  exit 2
+}
+for dependency in docker curl ssh python3 openssl socat zip unzip; do
   command -v "${dependency}" >/dev/null 2>&1 || { printf '%s is required by the Windows VM E2E lane.\n' "${dependency}" >&2; exit 2; }
 done
+
+if [[ "${OMNIDECK_VM_LAB_LEASED:-}" != "1" ]]; then
+  lease_run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  lease_args=(lease windows cli "${lease_run_id}")
+  [[ "${keep_vm}" != "1" ]] || lease_args+=(--keep-state)
+  lease_args+=(-- "$0" "${original_args[@]}")
+  exec "${lab_dir}/lab.sh" "${lease_args[@]}"
+fi
+eval "$("${lab_dir}/lab.sh" describe windows --shell)"
+ssh_port="${LAB_VM_SSH_PORT}"
 
 status="$("${lab_dir}/lab.sh" status windows)"
 printf '%s\n' "${status}"
@@ -68,15 +82,11 @@ if [[ "${assume_yes}" != "1" ]]; then
   [[ "${confirmation}" == "windows" ]] || { printf 'Canceled.\n'; exit 1; }
 fi
 
-lease_file="${TMPDIR:-/tmp}/omnideck-cli-vm-e2e-windows.lock"
-exec 9>"${lease_file}"
-flock -n 9 || { printf 'The Windows E2E lane is already leased: %s\n' "${lease_file}" >&2; exit 1; }
-
-run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+run_id="${OMNIDECK_VM_LAB_RUN_ID}"
 safe_run_id="$(printf '%s' "${run_id}" | tr -cd '[:alnum:]_.-')"
 source_commit="$(git -C "${repo_root}" rev-parse --short=12 HEAD)"
 expected_version="vm-e2e-${source_commit}"
-output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-${lab_dir}/artifacts/cli-e2e/${safe_run_id}}"
+output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-${lab_dir}/artifacts/cli/e2e/${safe_run_id}}"
 build_dir="${output_dir}/build"
 evidence_dir="${output_dir}/evidence"
 remote_root="C:\\OmnideckE2E\\${safe_run_id}"
@@ -90,11 +100,8 @@ bridge_port="$((50000 + ($$ % 800)))"
 firewall_rule="OmnideckE2E-${safe_run_id}"
 registry_authority="host.containers.internal:${bridge_port}"
 fixture_guest="${registry_authority}/${fixture_repository}:${safe_run_id}"
-key_file="${lab_dir}/keys/id_ed25519"
-known_hosts="${lab_dir}/runtime/known_hosts"
-discarded_before="${output_dir}/discarded-before.txt"
-discarded_after="${output_dir}/discarded-after.txt"
-discarded_created="${output_dir}/discarded-created.txt"
+key_file="${LAB_VM_KEY}"
+known_hosts="${LAB_VM_KNOWN_HOSTS}"
 vm_started=0
 initial_reset=0
 registry_started=0
@@ -104,11 +111,8 @@ fixture_host=""
 
 mkdir -p "${build_dir}" "${evidence_dir}" "${build_dir}/driver-config"
 : > "${build_dir}/registries.conf"
-printf '{\n  "runId": "%s",\n  "vm": "windows",\n  "sourceCommit": "%s",\n  "expectedVersion": "%s",\n  "fixtureImage": "%s"\n}\n' \
-  "${safe_run_id}" "${source_commit}" "${expected_version}" "${fixture_guest}" > "${output_dir}/run.json"
-find "${lab_dir}/discarded" -maxdepth 1 \
-  \( -type f -name 'windows.qcow2.*' -o -type d -name 'windows-tpm.*' \) \
-  -print | sort > "${discarded_before}"
+"${lab_dir}/lab.sh" evidence-init "${output_dir}" cli e2e "${safe_run_id}" \
+  "${source_commit}" windows clean "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}"
 
 cleanup() {
   local exit_code=$?
@@ -147,37 +151,10 @@ cleanup() {
     printf 'Windows guest kept stopped for debugging.\n'
   fi
 
-  find "${lab_dir}/discarded" -maxdepth 1 \
-    \( -type f -name 'windows.qcow2.*' -o -type d -name 'windows-tpm.*' \) \
-    -print | sort > "${discarded_after}"
-  comm -13 "${discarded_before}" "${discarded_after}" > "${discarded_created}"
-  if [[ "${exit_code}" == "0" && "${keep_vm}" != "1" ]]; then
-    while IFS= read -r discarded_path; do
-      [[ -n "${discarded_path}" ]] || continue
-      discarded_parent="$(dirname "${discarded_path}")"
-      discarded_name="$(basename "${discarded_path}")"
-      if [[ "${discarded_parent}" != "${lab_dir}/discarded" ]]; then
-        printf 'Refusing to purge unexpected discarded path: %s\n' "${discarded_path}" >&2
-        exit_code=1
-        continue
-      fi
-      case "${discarded_name}" in
-        windows.qcow2.*)
-          [[ -f "${discarded_path}" ]] && unlink "${discarded_path}"
-          ;;
-        windows-tpm.*)
-          [[ -d "${discarded_path}" ]] && rm -r -- "${discarded_path}"
-          ;;
-        *)
-          printf 'Refusing to purge unexpected discarded name: %s\n' "${discarded_path}" >&2
-          exit_code=1
-          ;;
-      esac
-    done < "${discarded_created}"
-    printf 'Windows disk and TPM state created by this successful run were purged.\n'
-  elif [[ -s "${discarded_created}" ]]; then
-    printf 'Debug disk/TPM state retained. Purge it with: %s %s\n' \
-      "${script_dir}/purge.sh" "${output_dir}"
+  if [[ "${exit_code}" == "0" ]]; then
+    "${lab_dir}/lab.sh" evidence-finish "${output_dir}" passed || exit_code=1
+  else
+    "${lab_dir}/lab.sh" evidence-finish "${output_dir}" failed || true
   fi
   printf 'E2E artifacts: %s\n' "${output_dir}"
   exit "${exit_code}"

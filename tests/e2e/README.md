@@ -5,6 +5,10 @@ lab guest. It is the terminal counterpart to the application browser E2E suite:
 the assertions describe the behavior a person sees, while the implementation
 is free to change behind that boundary.
 
+The controller is maintained in the standalone `omnideck-vm-lab` repository,
+not the CLI repository. Install controller 2.x into the external lab before
+running this suite.
+
 Visible wording, capitalization, and punctuation are part of that boundary.
 The PTY matcher ignores only terminal layout whitespace, since Bubble Tea may
 pad the same key label differently at different widths; copy changes fail the
@@ -90,28 +94,25 @@ a later normal run will still require an explicit clean reset. Never use the
 flag as a reason to stop or reset a VM owned by another session.
 
 Artifacts are written outside the repository in exactly one directory per run:
-`$OMNIDECK_VM_LAB_DIR/artifacts/cli-e2e/<run>/`. The compact evidence
+`$OMNIDECK_VM_LAB_DIR/artifacts/cli/e2e/<run>/`. The compact evidence
 includes raw PTY output, readable transcripts, semantic checkpoint events,
 guest logs, before/after inventories, CLI/runtime inspection, `summary.json`,
 and `junit.xml`.
 
-The lab archives an overlay whenever it resets a guest. On a successful E2E
-run, the harness resolves and deletes only the large discarded overlays that
-appeared during that run; the clean active overlay and compact run evidence
-remain. The Windows lane treats its disk and TPM-state archives the same way.
-On a failure, those exact paths are retained for reproduction and listed in
-`discarded-created.txt`.
+The lab archives reset state inside the run transaction. Successful transaction
+state is deleted immediately. Failed state and compact evidence expire after 48
+hours unless explicitly pinned.
 
 Purge a run—including any retained overlays named by its manifest—with:
 
 ```sh
-make vm-e2e-purge RUN="$OMNIDECK_VM_LAB_DIR/artifacts/cli-e2e/<run>"
+make vm-e2e-purge RUN="$OMNIDECK_VM_LAB_DIR/artifacts/cli/e2e/<run>"
 ```
 
-The purge command accepts only a marked direct child of `artifacts/cli-e2e`,
-shows its disk usage, and requires the exact run directory name before deleting
-anything. Pass `--yes` directly to `tests/e2e/purge.sh` only in trusted local
-automation.
+The purge command delegates to the lab's marked-run API, shows disk usage, and
+requires the exact run directory name before deleting anything. Pass `--yes`
+directly to `tests/e2e/purge.sh` only in trusted local automation. Routine
+`lab.sh gc` removes unpinned evidence after the short retention window.
 
 ## Scope
 
