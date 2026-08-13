@@ -231,36 +231,36 @@ func (m SpinnerModel) View() string {
 // IsDone returns true when all steps have completed.
 func (m SpinnerModel) IsDone() bool { return m.done }
 
-// renderTNStep renders one workflow step in Tokyo Night style.
+// renderTUIStep renders one workflow step in SIGNAL dark-theme style.
 // Pending steps are shown dim so the user can see what is coming.
-func renderTNStep(step Step, sm SpinnerModel) string {
+func renderTUIStep(step Step, sm SpinnerModel) string {
 	switch step.Status {
 	case StepDone:
-		label := styles.TNDimText.Render(step.Label)
+		label := styles.TUISecondaryText.Render(step.Label)
 		detail := ""
 		if step.Detail != "" {
-			detail = "  " + styles.TNFaintText.Render(step.Detail)
+			detail = "  " + styles.TUISubtleText.Render(step.Detail)
 		}
-		return styles.TNGreenTxt.Render("✓") + "  " + label + detail
+		return styles.TUISuccessText.Render("✓") + "  " + label + detail
 	case StepWarning:
-		label := styles.TNYellowTxt.Render(step.Label)
+		label := styles.TUIWarningText.Render(step.Label)
 		detail := ""
 		if step.Detail != "" {
-			detail = "  " + styles.TNYellowTxt.Render(step.Detail)
+			detail = "  " + styles.TUIWarningText.Render(step.Detail)
 		}
-		return styles.TNYellowTxt.Render("!") + "  " + label + detail
+		return styles.TUIWarningText.Render("!") + "  " + label + detail
 	case StepFailed:
 		errStr := ""
 		if step.Err != nil {
 			errStr = "  " + step.Err.Error()
 		}
-		return styles.TNRedTxt.Render("✗") + "  " + styles.TNRedTxt.Render(step.Label+errStr)
+		return styles.TUIDangerText.Render("✗") + "  " + styles.TUIDangerText.Render(step.Label+errStr)
 	case StepActive:
 		wave := progressWaveFrames[sm.progressIndex%len(progressWaveFrames)]
-		return sm.spinner.View() + "  " + styles.TNBlueTxt.Render(step.Label) + "\n" +
-			"     " + styles.TNBlueTxt.Render(wave)
+		return sm.spinner.View() + "  " + styles.TUIAccentText.Render(step.Label) + "\n" +
+			"     " + styles.TUIAccentText.Render(wave)
 	default: // StepPending
-		return styles.TNFaintText.Render("○  " + step.Label)
+		return styles.TUISubtleText.Render("○  " + step.Label)
 	}
 }
 

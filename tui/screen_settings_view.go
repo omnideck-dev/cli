@@ -23,18 +23,18 @@ func (m AppModel) viewSettings() string {
 
 	var hdrRight string
 	if inst != nil {
-		hdrRight = styles.TNFaintText.Render(inst.Info.Name + ".yaml")
+		hdrRight = styles.TUISubtleText.Render(inst.Info.Name + ".yaml")
 	}
-	hdrLeft := styles.TNPurpleTxt.Render("⚙") + "  " + styles.TNTextBold.Render("Settings")
+	hdrLeft := styles.TUIAccentHoverText.Render("⚙") + "  " + styles.TUIPrimaryBold.Render("Settings")
 	hdrGap := contentW - lipgloss.Width(hdrLeft) - lipgloss.Width(hdrRight) - 2
 	if hdrGap < 1 {
 		hdrGap = 1
 	}
 	header := hdrLeft + safeRepeat(" ", hdrGap) + hdrRight
-	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
+	sep := styles.TUISubtleText.Render(safeRepeat("─", contentW))
 	if m.settingsStage == settingsStageApplying {
-		message := styles.TNTextBold.Render("Applying settings") + "\n\n" +
-			styles.TNDimText.Render("Omnideck is restarting this installation with the new settings. If it cannot start, the previous settings will be restored automatically.")
+		message := styles.TUIPrimaryBold.Render("Applying settings") + "\n\n" +
+			styles.TUISecondaryText.Render("Omnideck is restarting this installation with the new settings. If it cannot start, the previous settings will be restored automatically.")
 		body := header + "\n" + sep + "\n\n" + message
 		return m.renderScreen(body)
 	}
@@ -42,40 +42,40 @@ func (m AppModel) viewSettings() string {
 	var rows []string
 	for i, f := range m.settingFields {
 		selected := i == m.settingFocus
-		keyS := styles.TNTextSub
+		keyS := styles.TUIPrimaryText
 		if selected {
-			keyS = styles.TNBlueTxt
+			keyS = styles.TUIAccentText
 		}
-		typeS := styles.TNFaintText.Render(f.Type)
+		typeS := styles.TUISubtleText.Render(f.Type)
 
 		var valStr string
 		if selected && m.settingEditing {
-			valStr = styles.TNText.Render(m.settingBuffer) + styles.TNBlueTxt.Render("█")
+			valStr = styles.TUIPrimaryText.Render(m.settingBuffer) + styles.TUIAccentText.Render("█")
 		} else {
-			valS := styles.TNTextSub
+			valS := styles.TUIPrimaryText
 			if f.Changed {
-				valS = styles.TNGreenTxt
+				valS = styles.TUISuccessText
 			}
 			valStr = valS.Render(tnTruncate(f.Value, contentW-30))
 			if f.Changed {
-				valStr += "  " + styles.TNGreenTxt.Render("●")
+				valStr += "  " + styles.TUISuccessText.Render("●")
 			}
 		}
 
 		caret := " "
 		if selected {
-			caret = styles.TNBlueTxt.Render("▸")
+			caret = styles.TUIAccentText.Render("▸")
 		}
 		row := caret + " " + keyS.Render(padRight(f.Label, 16)) + typeS + "  " + valStr
 		rows = append(rows, row)
 	}
 
-	legend := styles.TNGreenTxt.Render("●") + styles.TNFaintText.Render(" changed since last save")
+	legend := styles.TUISuccessText.Render("●") + styles.TUISubtleText.Render(" changed since last save")
 	if m.settingsMessage != "" {
-		legend = styles.TNRedTxt.Render(m.settingsMessage) + "\n" + legend
+		legend = styles.TUIDangerText.Render(m.settingsMessage) + "\n" + legend
 	}
-	keyhints := styles.TNFaintText.Render("ctrl+s") + styles.TNDimText.Render("  apply    ") +
-		styles.TNFaintText.Render("esc") + styles.TNDimText.Render("  back")
+	keyhints := styles.TUISubtleText.Render("ctrl+s") + styles.TUISecondaryText.Render("  apply    ") +
+		styles.TUISubtleText.Render("esc") + styles.TUISecondaryText.Render("  back")
 	body := header + "\n" + sep + "\n" + strings.Join(rows, "\n") + "\n" + sep + "\n" + legend + "\n" + keyhints
 	return m.renderScreen(body)
 }

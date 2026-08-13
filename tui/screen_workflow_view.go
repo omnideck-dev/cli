@@ -11,7 +11,7 @@ func (m AppModel) viewSetup() string {
 		contentW = 20
 	}
 
-	return m.renderScreen(m.setupModel.TNView(contentW, m.contentHeight()-2))
+	return m.renderScreen(m.setupModel.TUIView(contentW, m.contentHeight()-2))
 }
 
 // --- Maintenance screen ---
@@ -25,7 +25,7 @@ func (m AppModel) viewMaintenance() string {
 		contentW = 20
 	}
 
-	return m.renderScreen(m.maintenanceModel.TNView(contentW))
+	return m.renderScreen(m.maintenanceModel.TUIView(contentW))
 }
 
 // --- Remove instance screen ---
@@ -39,5 +39,5 @@ func (m AppModel) viewRemoval() string {
 		contentW = 20
 	}
 
-	return m.renderScreen(m.removalModel.TNView(contentW))
+	return m.renderScreen(m.removalModel.TUIView(contentW))
 }

@@ -27,22 +27,22 @@ func (m AppModel) viewLogs() string {
 		totalLines = len(inst.Logs)
 	}
 
-	hdrLeft := styles.TNTextBold.Render(instName) + " " + styles.TNFaintText.Render("stdout + stderr")
+	hdrLeft := styles.TUIPrimaryBold.Render(instName) + " " + styles.TUISubtleText.Render("stdout + stderr")
 	var hdrRight string
 	switch {
 	case m.logCopied:
-		hdrRight = styles.TNGreenTxt.Render("✓ copied!")
+		hdrRight = styles.TUISuccessText.Render("✓ copied!")
 	case m.logSearchQuery != "":
-		hdrRight = styles.TNBlueTxt.Render(fmt.Sprintf("%d", len(filtered))) +
-			styles.TNFaintText.Render(fmt.Sprintf(" of %d", totalLines))
+		hdrRight = styles.TUIAccentText.Render(fmt.Sprintf("%d", len(filtered))) +
+			styles.TUISubtleText.Render(fmt.Sprintf(" of %d", totalLines))
 	default:
-		hdrRight = styles.TNFaintText.Render(fmt.Sprintf("%d lines", totalLines))
+		hdrRight = styles.TUISubtleText.Render(fmt.Sprintf("%d lines", totalLines))
 	}
-	hdrRight += "  " + styles.TNFaintText.Render("following")
+	hdrRight += "  " + styles.TUISubtleText.Render("following")
 
 	hdrGap := max(1, contentW-lipgloss.Width(hdrLeft)-lipgloss.Width(hdrRight)-2)
 	hdrLine := hdrLeft + safeRepeat(" ", hdrGap) + hdrRight
-	sep := styles.TNFaintText.Render(safeRepeat("─", contentW))
+	sep := styles.TUISubtleText.Render(safeRepeat("─", contentW))
 
 	// Log lines with word-wrap. prefix = "  " + num(4) + "  " + ts(9) + "  " + lvl(5) + "  " = 26
 	// logViewPrefixW: "  "(2) + num(4) + "  "(2) + ts(19) + "  "(2) + lvl(5) + "  "(2) = 36
@@ -77,27 +77,27 @@ func (m AppModel) viewLogs() string {
 		if rendered >= visibleH {
 			break
 		}
-		num := styles.TNFaintText.Render(fmt.Sprintf("%4d", start+entryNum+1))
-		ts := styles.TNFaintText.Render(padRight(ll.Time, 19))
-		lvl := styles.TNLogLevel(ll.Level)
+		num := styles.TUISubtleText.Render(fmt.Sprintf("%4d", start+entryNum+1))
+		ts := styles.TUISubtleText.Render(padRight(ll.Time, 19))
+		lvl := styles.TUILogLevel(ll.Level)
 		prefix := "  " + num + "  " + ts + "  " + lvl + "  "
 		for i, part := range wrapWords(ll.Msg, msgW, msgContW) {
 			if rendered >= visibleH {
 				break
 			}
 			if i == 0 {
-				logSb.WriteString(prefix + styles.TNTextMid.Render(part) + "\n")
+				logSb.WriteString(prefix + styles.TUISecondaryText.Render(part) + "\n")
 			} else {
-				logSb.WriteString(logContIndent + styles.TNTextMid.Render(part) + "\n")
+				logSb.WriteString(logContIndent + styles.TUISecondaryText.Render(part) + "\n")
 			}
 			rendered++
 		}
 	}
 	if start >= len(filtered) {
 		if m.logSearchQuery != "" {
-			logSb.WriteString("  " + styles.TNFaintText.Render("no matching lines") + "\n")
+			logSb.WriteString("  " + styles.TUISubtleText.Render("no matching lines") + "\n")
 		} else {
-			logSb.WriteString("  " + styles.TNFaintText.Render("no logs available") + "\n")
+			logSb.WriteString("  " + styles.TUISubtleText.Render("no logs available") + "\n")
 		}
 	}
 
@@ -105,18 +105,18 @@ func (m AppModel) viewLogs() string {
 
 	// Search bar below log content.
 	if m.logSearchMode || m.logSearchQuery != "" {
-		prefix := styles.TNBlueTxt.Render("/  ")
+		prefix := styles.TUIAccentText.Render("/  ")
 		queryStr := m.logSearchQuery
 		if m.logSearchMode {
 			queryStr += "█"
 		}
 		var searchRight string
 		if m.logSearchQuery != "" {
-			searchRight = styles.TNFaintText.Render(fmt.Sprintf("%d of %d", len(filtered), totalLines))
+			searchRight = styles.TUISubtleText.Render(fmt.Sprintf("%d of %d", len(filtered), totalLines))
 		} else {
-			searchRight = styles.TNFaintText.Render("type to filter…")
+			searchRight = styles.TUISubtleText.Render("type to filter…")
 		}
-		queryRender := styles.TNTextSub.Render(queryStr)
+		queryRender := styles.TUIPrimaryText.Render(queryStr)
 		searchGap := max(1, contentW-lipgloss.Width(prefix)-lipgloss.Width(queryRender)-lipgloss.Width(searchRight)-2)
 		searchLine := sep + "\n" + prefix + queryRender + safeRepeat(" ", searchGap) + searchRight
 		body += searchLine

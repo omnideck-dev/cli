@@ -66,7 +66,7 @@ func NewRemovalModel(req RemovalRequest) RemovalModel {
 
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
-	sp.Style = styles.TNBlueTxt
+	sp.Style = styles.TUIAccentText
 
 	return RemovalModel{
 		Stage:        RemovalStageDataChoice,
@@ -209,44 +209,44 @@ func (m RemovalModel) instanceName() string {
 	return "Omnideck"
 }
 
-func (m RemovalModel) TNView(width int) string {
+func (m RemovalModel) TUIView(width int) string {
 	var sb strings.Builder
 	name := m.instanceName()
 	sb.WriteString("\n")
 	switch m.Stage {
 	case RemovalStageDataChoice:
-		writeTNWrapped(&sb, width, "  ", "  ", "Remove "+name, styles.TNTextBold)
-		writeTNWrapped(&sb, width, "  ", "  ", "Omnideck will stop and remove this instance and forget its settings. The Omnideck CLI and your container runtime will stay installed.", styles.TNDimText)
-		sb.WriteString("\n  " + styles.TNTextSub.Render("What should happen to its saved data?") + "\n")
+		writeTUIWrapped(&sb, width, "  ", "  ", "Remove "+name, styles.TUIPrimaryBold)
+		writeTUIWrapped(&sb, width, "  ", "  ", "Omnideck will stop and remove this instance and forget its settings. The Omnideck CLI and your container runtime will stay installed.", styles.TUISecondaryText)
+		sb.WriteString("\n  " + styles.TUIPrimaryText.Render("What should happen to its saved data?") + "\n")
 		m.writeChoice(&sb, width, 0, "Keep saved data — Recommended", "You can reconnect it later by setting up an instance with the same name.", false)
 		m.writeChoice(&sb, width, 1, "Permanently delete saved data", "Files and agent data in this instance's two data volumes will be deleted.", true)
 	case RemovalStageReview:
-		writeTNWrapped(&sb, width, "  ", "  ", "Ready to remove "+name, styles.TNTextBold)
+		writeTUIWrapped(&sb, width, "  ", "  ", "Ready to remove "+name, styles.TUIPrimaryBold)
 		sb.WriteString("\n")
-		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Stop and remove the instance container.", styles.TNDimText)
-		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Remove this instance from the Decks screen.", styles.TNDimText)
-		writeTNWrapped(&sb, width, "  ✓ ", "    ", "Keep its saved files and agent data.", styles.TNGreenTxt)
+		writeTUIWrapped(&sb, width, "  ✓ ", "    ", "Stop and remove the instance container.", styles.TUISecondaryText)
+		writeTUIWrapped(&sb, width, "  ✓ ", "    ", "Remove this instance from the Decks screen.", styles.TUISecondaryText)
+		writeTUIWrapped(&sb, width, "  ✓ ", "    ", "Keep its saved files and agent data.", styles.TUISuccessText)
 		sb.WriteString("\n")
-		writeTNWrapped(&sb, width, "  ", "  ", "Press Enter to remove the instance, or Esc to go back without changing anything.", styles.TNTextSub)
+		writeTUIWrapped(&sb, width, "  ", "  ", "Press Enter to remove the instance, or Esc to go back without changing anything.", styles.TUIPrimaryText)
 	case RemovalStageBackupChoice:
-		writeTNWrapped(&sb, width, "  ", "  ", "Protect your data before deleting it", styles.TNTextBold)
-		writeTNWrapped(&sb, width, "  ", "  ", "Permanent deletion cannot be undone. A backup gives you one last copy outside the container runtime.", styles.TNDimText)
-		sb.WriteString("\n  " + styles.TNTextSub.Render("Create a backup first?") + "\n")
+		writeTUIWrapped(&sb, width, "  ", "  ", "Protect your data before deleting it", styles.TUIPrimaryBold)
+		writeTUIWrapped(&sb, width, "  ", "  ", "Permanent deletion cannot be undone. A backup gives you one last copy outside the container runtime.", styles.TUISecondaryText)
+		sb.WriteString("\n  " + styles.TUIPrimaryText.Render("Create a backup first?") + "\n")
 		m.writeBackupChoice(&sb, width, 0, "Create a backup — Recommended", "Save one backup file in your home folder, then delete the data.", false)
 		m.writeBackupChoice(&sb, width, 1, "Delete without a backup", "Permanently delete the data without making a copy.", true)
 	case RemovalStageDeleteConfirm:
-		writeTNWrapped(&sb, width, "  ", "  ", "Confirm permanent data deletion", styles.TNRedTxt)
-		writeTNWrapped(&sb, width, "  ", "  ", "This removes the instance and permanently deletes its saved files and agent data.", styles.TNDimText)
+		writeTUIWrapped(&sb, width, "  ", "  ", "Confirm permanent data deletion", styles.TUIDangerText)
+		writeTUIWrapped(&sb, width, "  ", "  ", "This removes the instance and permanently deletes its saved files and agent data.", styles.TUISecondaryText)
 		if m.backupData {
-			writeTNWrapped(&sb, width, "  ", "  ", "Omnideck will create a backup in your home folder before deleting the data.", styles.TNGreenTxt)
+			writeTUIWrapped(&sb, width, "  ", "  ", "Omnideck will create a backup in your home folder before deleting the data.", styles.TUISuccessText)
 		} else {
-			writeTNWrapped(&sb, width, "  ", "  ", "No backup will be created.", styles.TNYellowTxt)
+			writeTUIWrapped(&sb, width, "  ", "  ", "No backup will be created.", styles.TUIWarningText)
 		}
 		sb.WriteString("\n")
-		writeTNWrapped(&sb, width, "  ", "  ", fmt.Sprintf("Type %s below to confirm. This prevents accidental deletion.", name), styles.TNTextSub)
+		writeTUIWrapped(&sb, width, "  ", "  ", fmt.Sprintf("Type %s below to confirm. This prevents accidental deletion.", name), styles.TUIPrimaryText)
 		sb.WriteString("  " + m.confirmation.View() + "\n")
 		if m.inputError != "" {
-			writeTNWrapped(&sb, width, "  ", "  ", m.inputError, styles.TNRedTxt)
+			writeTUIWrapped(&sb, width, "  ", "  ", m.inputError, styles.TUIDangerText)
 		}
 	case RemovalStageApplying:
 		message := "Removing the instance safely…"
@@ -255,29 +255,29 @@ func (m RemovalModel) TNView(width int) string {
 		} else if m.deleteData {
 			message = "Removing the instance and permanently deleting its data…"
 		}
-		sb.WriteString("  " + m.spinner.View() + " " + styles.TNTextBold.Render(message) + "\n\n")
-		writeTNWrapped(&sb, width, "  ", "  ", "Keep this window open until the operation finishes.", styles.TNDimText)
+		sb.WriteString("  " + m.spinner.View() + " " + styles.TUIPrimaryBold.Render(message) + "\n\n")
+		writeTUIWrapped(&sb, width, "  ", "  ", "Keep this window open until the operation finishes.", styles.TUISecondaryText)
 	case RemovalStageComplete:
-		sb.WriteString("  " + styles.TNGreenTxt.Render("✓") + "  " + styles.TNTextBold.Render(name+" was removed") + "\n\n")
+		sb.WriteString("  " + styles.TUISuccessText.Render("✓") + "  " + styles.TUIPrimaryBold.Render(name+" was removed") + "\n\n")
 		if m.deleteData {
-			writeTNWrapped(&sb, width, "  ", "  ", "Its saved data was permanently deleted.", styles.TNDimText)
+			writeTUIWrapped(&sb, width, "  ", "  ", "Its saved data was permanently deleted.", styles.TUISecondaryText)
 			if m.result.BackupPath != "" {
-				writeTNWrapped(&sb, width, "  ", "  ", "Backup: "+m.result.BackupPath, styles.TNGreenTxt)
+				writeTUIWrapped(&sb, width, "  ", "  ", "Backup: "+m.result.BackupPath, styles.TUISuccessText)
 			}
 		} else {
-			writeTNWrapped(&sb, width, "  ", "  ", "Its saved files and agent data were kept.", styles.TNGreenTxt)
+			writeTUIWrapped(&sb, width, "  ", "  ", "Its saved files and agent data were kept.", styles.TUISuccessText)
 		}
-		writeTNWrapped(&sb, width, "  ", "  ", "The Omnideck CLI and container runtime are still installed. Press any key to return to Decks.", styles.TNDimText)
+		writeTUIWrapped(&sb, width, "  ", "  ", "The Omnideck CLI and container runtime are still installed. Press any key to return to Decks.", styles.TUISecondaryText)
 	case RemovalStageFailed:
-		sb.WriteString("  " + styles.TNRedTxt.Render("✗") + "  " + styles.TNTextBold.Render("The instance could not be fully removed") + "\n\n")
-		writeTNWrapped(&sb, width, "  ", "  ", "Omnideck kept the saved instance settings so the operation remains visible and can be retried. Some requested steps may already have finished.", styles.TNDimText)
+		sb.WriteString("  " + styles.TUIDangerText.Render("✗") + "  " + styles.TUIPrimaryBold.Render("The instance could not be fully removed") + "\n\n")
+		writeTUIWrapped(&sb, width, "  ", "  ", "Omnideck kept the saved instance settings so the operation remains visible and can be retried. Some requested steps may already have finished.", styles.TUISecondaryText)
 		if m.result.BackupPath != "" {
-			writeTNWrapped(&sb, width, "  ", "  ", "Backup created before the problem occurred: "+m.result.BackupPath, styles.TNGreenTxt)
+			writeTUIWrapped(&sb, width, "  ", "  ", "Backup created before the problem occurred: "+m.result.BackupPath, styles.TUISuccessText)
 		}
 		if m.errorMsg != "" {
-			writeTNWrapped(&sb, width, "  ", "  ", m.errorMsg, styles.TNRedTxt)
+			writeTUIWrapped(&sb, width, "  ", "  ", m.errorMsg, styles.TUIDangerText)
 		}
-		writeTNWrapped(&sb, width, "  ", "  ", "Press r to try again, or Esc to return to Decks.", styles.TNTextSub)
+		writeTUIWrapped(&sb, width, "  ", "  ", "Press r to try again, or Esc to return to Decks.", styles.TUIPrimaryText)
 	}
 	return sb.String()
 }
@@ -294,18 +294,18 @@ func (m RemovalModel) writeBackupChoice(sb *strings.Builder, width, index int, l
 
 func writeRemovalChoice(sb *strings.Builder, width int, selected bool, label, detail string, dangerous bool) {
 	prefix := "    "
-	labelStyle := styles.TNDimText
+	labelStyle := styles.TUISecondaryText
 	if selected {
-		prefix = "  " + styles.TNBlueTxt.Render("▸ ")
-		labelStyle = styles.TNTextBold
+		prefix = "  " + styles.TUIAccentText.Render("▸ ")
+		labelStyle = styles.TUIPrimaryBold
 		if dangerous {
-			labelStyle = styles.TNRedTxt
+			labelStyle = styles.TUIDangerText
 		}
 	}
-	writeTNWrapped(sb, width, prefix, "    ", label, labelStyle)
+	writeTUIWrapped(sb, width, prefix, "    ", label, labelStyle)
 	if selected {
-		writeTNWrapped(sb, width, "      ", "      ", detail, styles.TNDimText)
+		writeTUIWrapped(sb, width, "      ", "      ", detail, styles.TUISecondaryText)
 	}
 }
 
-func (m RemovalModel) View() string { return m.TNView(m.WindowWidth) }
+func (m RemovalModel) View() string { return m.TUIView(m.WindowWidth) }

@@ -408,7 +408,7 @@ func TestFirstRunStartsFromDesktopWelcome(t *testing.T) {
 	if m.Stage != SetupStageWelcome {
 		t.Fatalf("first-run stage = %d, want welcome", m.Stage)
 	}
-	view := m.TNView(88, 28)
+	view := m.TUIView(88, 28)
 	for _, want := range []string{
 		"Welcome to omnideck",
 		"A one-time setup will prepare everything omnideck needs on this computer.",

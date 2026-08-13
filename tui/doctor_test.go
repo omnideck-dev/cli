@@ -247,7 +247,7 @@ func TestDoctorDashboardOpensRepairReviewForMissingContainer(t *testing.T) {
 	if cmd != nil || nm.router.Current() != RouteMaintenance || nm.maintenanceModel.Mode != MaintenanceRepair || nm.maintenanceModel.Stage != MaintenanceStageReview {
 		t.Fatalf("repair action = route %d mode %d stage %d cmd %v", nm.router.Current(), nm.maintenanceModel.Mode, nm.maintenanceModel.Stage, cmd)
 	}
-	if !strings.Contains(nm.maintenanceModel.TNView(80), "same saved file and app-data volumes") {
+	if !strings.Contains(nm.maintenanceModel.TUIView(80), "same saved file and app-data volumes") {
 		t.Fatal("repair review must explain that saved data is reconnected")
 	}
 }
