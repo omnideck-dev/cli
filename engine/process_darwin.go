@@ -7,12 +7,13 @@ import (
 	"syscall"
 )
 
-// prepareHiddenConsoleCommand keeps non-interactive helpers out of the TUI's
-// foreground process group. Terminal.app includes every process in that group
-// in its title, so the dashboard's frequent Podman probes would otherwise make
-// the title alternate between "podman — omnideck" and "omnideck".
+// prepareHiddenConsoleCommand starts non-interactive helpers in a new session.
+// A separate process group is not enough: the child still belongs to the TUI's
+// terminal session, so Terminal.app can expose its name as the active process
+// while the dashboard polls Podman. A new session has no controlling terminal
+// and therefore cannot replace Omnideck in the terminal title.
 func prepareHiddenConsoleCommand(command *exec.Cmd) {
-	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 }
 
 func prepareVisibleCommand(command *exec.Cmd) {
