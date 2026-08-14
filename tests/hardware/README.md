@@ -63,6 +63,25 @@ macOS or Linux:
 OMNIDECK_HARDWARE_ENGINE=auto ./tests/hardware/run.sh
 ```
 
+The external release lab can lease its configured Apple Silicon host, cross-
+build the exact current CLI source with the pinned builder, run this lifecycle
+against the product-managed Podman machine, and copy marked evidence back:
+
+```sh
+export OMNIDECK_VM_LAB_DIR=/mnt/data/VMs/omnideck-release-lab
+make macos-lab-test
+```
+
+The macOS lab target is disposable at the application layer. The controller
+resets it, installs the cross-built CLI into `~/.omnideck-lab/bin`, runs the
+ARM64 container lifecycle, collects evidence, and removes only the lab-managed
+CLI and namespaced state/resources as the lease exits. The user's normal CLI,
+config, and resources are preserved. Podman remains installed and warm;
+compilation and fixture-image construction stay on the Linux controller.
+
+This lane uses unique container, registry, volume, profile, and port names. It
+does not reset the physical Mac or claim a clean-host installation test.
+
 Windows PowerShell:
 
 ```powershell

@@ -53,6 +53,14 @@ passes the original command and arguments to `/usr/bin/sudo`. The `pkexec` file
 is restored by the evidence trap even on failure. A real desktop session
 remains the appropriate test for the graphical PolicyKit dialog itself.
 
+The physical Apple Silicon lane runs the same release-shaped portable contract,
+attended PTY dashboard/management journey, and unattended lifecycle on native
+Darwin ARM64. It begins from the lab's already-ready `omnideck-runtime` Podman
+machine, so it deliberately fails if the CLI enters Podman installation or
+machine-creation screens. The ARM64 CLI and fixture image are built on the
+Linux controller and copied to the Mac; only execution and native Podman work
+consume the resource-constrained host.
+
 ## Run before a release
 
 The external lab path stays machine-local:
@@ -61,6 +69,7 @@ The external lab path stays machine-local:
 export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
 make vm-e2e
 make vm-e2e-matrix YES=1
+make macos-e2e
 ```
 
 The default lane is the Ubuntu `appimage` guest. The command requires that guest
@@ -73,6 +82,12 @@ make vm-e2e VM=deb
 make vm-e2e VM=rpm
 make vm-e2e VM=windows
 ```
+
+`make macos-e2e` leases `macos-arm64`, selects unused `omnideckN` and loopback
+ports at runtime, and records evidence under `artifacts/cli/macos-e2e/`. Its
+`runtime-ready` reset removes only resources named by the lab ownership marker;
+the user's normal CLI, config, container, volumes, and warm Podman machine are
+preserved.
 
 `vm-e2e-matrix` is the canonical complete command. Override its deterministic
 order with `LANES=appimage,windows`. Every lane runs the `release-clean`
@@ -132,15 +147,18 @@ make vm-lab-cleanup ALL=1 APPLY=1
 
 ## Scope
 
-The automated lanes cover mutable x64 Linux guests and the local Windows 11 x64
-guest. They do not claim stable-to-candidate production-image upgrades,
-backup/restore, macOS installation prompts, subjective visual quality, or the
-Windows **restart now** auto-reopen path. Run the checked-in manual procedures
-for those release-candidate behaviors.
+The automated lanes cover mutable x64 Linux guests, the local Windows 11 x64
+guest, and native CLI/TUI execution on the physical Apple Silicon host. They do
+not claim stable-to-candidate production-image upgrades, backup/restore, macOS
+Podman installation prompts, subjective visual quality, or the Windows
+**restart now** auto-reopen path. Run the checked-in manual procedures for
+those release-candidate behaviors.
 
 The terminal driver's dependency-free parser has a fast host check:
 
 ```sh
 python3 -m unittest tests/e2e/test_terminal_driver.py
-bash -n tests/e2e/run.sh tests/e2e/run-windows.sh tests/e2e/guest.sh
+python3 -m unittest tests/e2e/test_lab_contract.py
+bash -n tests/e2e/run.sh tests/e2e/run-windows.sh tests/e2e/guest.sh \
+  tests/e2e/run-macos-lab.sh tests/e2e/macos_guest.sh
 ```

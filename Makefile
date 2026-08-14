@@ -14,7 +14,7 @@ LDFLAGS := -ldflags "\
   -X main.date=$(DATE) \
 "
 
-.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test vm-e2e vm-e2e-matrix vm-e2e-purge vm-lab-cleanup
+.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test macos-lab-test macos-e2e vm-e2e vm-e2e-matrix vm-e2e-purge vm-lab-cleanup
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -66,6 +66,12 @@ release:
 
 hardware-test:
 	./tests/hardware/run.sh
+
+macos-lab-test:
+	./tests/hardware/run-macos-lab.sh
+
+macos-e2e:
+	./tests/e2e/run-macos-lab.sh
 
 VM ?= appimage
 

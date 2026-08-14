@@ -37,6 +37,21 @@ class LabHarnessContractTests(unittest.TestCase):
         self.assertIn('OMNIDECK_VM_E2E_OUTPUT_DIR="$lane_dir"', script)
         self.assertIn("lane-status.tsv", script)
 
+    def test_macos_harness_uses_physical_host_contract_and_ready_runtime(self) -> None:
+        script = (ROOT / "tests/e2e/run-macos-lab.sh").read_text(encoding="utf-8")
+        guest = (ROOT / "tests/e2e/macos_guest.sh").read_text(encoding="utf-8")
+        self.assertIn('lease "$target" cli-e2e', script)
+        self.assertIn("artifact-path cli macos-e2e", script)
+        self.assertIn("GOOS=darwin", script)
+        self.assertIn("GOARCH=arm64", script)
+        self.assertIn("--cleanup-baseline runtime-ready", script)
+        self.assertIn("podmanSetup=excluded-ready-runtime", script)
+        self.assertIn("terminal_driver.py\" macos-install", guest)
+        self.assertIn("terminal_driver.py\" manage", guest)
+        self.assertIn("ownership_marker", guest)
+        self.assertNotIn("podman machine init", guest)
+        self.assertNotIn("podman machine start", guest)
+
     def test_legacy_manual_helper_delegates_to_canonical_lane(self) -> None:
         script = (ROOT / "tests/manual/run-local-hardware.sh").read_text(
             encoding="utf-8"

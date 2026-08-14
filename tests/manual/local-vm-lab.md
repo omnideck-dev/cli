@@ -4,6 +4,22 @@ This is the CLI workflow for the external OmniDeck release lab. Prefer the
 automated E2E matrix for every deterministic Linux and Windows check. Open a
 graphical viewer only for behavior listed as manual in the applicable procedure.
 
+The lab's leased physical Apple Silicon host has a separate automated source
+lane:
+
+```sh
+export OMNIDECK_VM_LAB_DIR=/mnt/data/VMs/omnideck-release-lab
+make macos-lab-test
+```
+
+This lane installs the prepared CLI under `~/.omnideck-lab` on the dedicated
+Mac and owns a `runtime-ready` cleanup baseline. It removes the lab-managed
+binary and namespaced resources after every run while retaining the user's
+normal CLI/config/resources and the costly Podman installation and machine.
+
+It runs isolated CLI/container lifecycle coverage and copies evidence back to
+the lab without treating the physical Mac as a resettable VM.
+
 ## Preflight and ownership
 
 Set the lab path without committing its machine-specific value:
