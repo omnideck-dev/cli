@@ -286,13 +286,75 @@ def install_scenario(args: argparse.Namespace) -> None:
             raise AssertionError("install journey did not exit successfully")
 
 
+def macos_install_scenario(args: argparse.Namespace) -> None:
+    """Drive first-run setup with an already-bootstrapped macOS Podman machine."""
+
+    env = base_environment(args)
+    command = scenario_command(args, [args.binary, "install", "--image", args.fixture_image])
+    with TerminalSession(command, env=env, artifact_dir=args.artifact_dir, name="install") as terminal:
+        terminal.expect_all(
+            ["Welcome to omnideck", "Press Enter to set up omnideck.", "enter set up omnideck"],
+            timeout=30,
+            checkpoint="welcome",
+        )
+        mark = terminal.send(ENTER, label="enter")
+        terminal.expect_all(
+            [
+                "Preparing your environment",
+                "Setting omnideck up on this computer. This usually takes a few minutes.",
+                "Computer setup",
+                "Application files",
+                "Final checks",
+            ],
+            timeout=45,
+            since=mark,
+            checkpoint="ready-runtime-check",
+        )
+        terminal.expect_all(
+            [
+                "omnideck is ready",
+                "Everything is prepared. Open omnideck whenever you’re ready.",
+                "Open Omnideck in your browser:",
+                f"http://localhost:{args.web_port}",
+                "Your files and settings will be kept when Omnideck updates.",
+                "Press any key to return to the dashboard.",
+            ],
+            timeout=args.install_timeout,
+            since=mark,
+            checkpoint="ready",
+            fail_phrases=("The download didn’t finish", "Setup couldn’t finish"),
+        )
+        transcript = strip_terminal_controls(bytes(terminal.raw[mark:]))
+        unexpected_runtime_setup = [
+            phrase for phrase in ("Waiting for your permission", "Installing Podman", "Downloading Podman")
+            if contains_rendered_phrase(transcript, phrase)
+        ]
+        if unexpected_runtime_setup:
+            raise AssertionError(
+                f"macOS ready-runtime journey unexpectedly entered Podman setup: {unexpected_runtime_setup!r}"
+            )
+        terminal.record("checkpoint", name="podman-setup-skipped")
+        mark = terminal.send(ENTER, label="enter")
+        terminal.expect_all(
+            ["Decks", args.instance_name, f":{args.web_port}", "running", "Open UI", "Logs", "Update", "Stop"],
+            timeout=45,
+            since=mark,
+            checkpoint="first-dashboard",
+        )
+        terminal.send(b"q", label="q")
+        if terminal.wait() != 0:
+            raise AssertionError("macOS install journey did not exit successfully")
+
+
 def manage_scenario(args: argparse.Namespace) -> None:
     env = base_environment(args)
     command = scenario_command(args, [args.binary, "tui"])
     log_match_counter = f"{args.expected_log_count} of {args.expected_log_count}"
+    instance = args.instance_name
+    web_port = args.web_port
     with TerminalSession(command, env=env, artifact_dir=args.artifact_dir, name="manage") as terminal:
         terminal.expect_all(
-            ["Decks", "omnideck", ":2337", "running", "Open UI", "Logs", "Update", "Stop"],
+            ["Decks", instance, f":{web_port}", "running", "Open UI", "Logs", "Update", "Stop"],
             timeout=45,
             checkpoint="dashboard",
         )
@@ -307,7 +369,7 @@ def manage_scenario(args: argparse.Namespace) -> None:
 
         mark = terminal.send(b"l", label="l")
         terminal.expect_all(
-            ["Decks › omnideck › Logs", "omnideck stdout + stderr", "omnideck-hardware-fixture-started", "/ search"],
+            [f"Decks › {instance} › Logs", f"{instance} stdout + stderr", "omnideck-hardware-fixture-started", "/ search"],
             timeout=30,
             since=mark,
             checkpoint="logs",
@@ -335,44 +397,44 @@ def manage_scenario(args: argparse.Namespace) -> None:
         )
         mark = terminal.send(ESCAPE, label="esc")
         terminal.expect_all(
-            ["omnideck stdout + stderr", "esc back", "/ search"],
+            [f"{instance} stdout + stderr", "esc back", "/ search"],
             timeout=15,
             since=mark,
             checkpoint="log-filter-cleared",
         )
         mark = terminal.send(ESCAPE, label="esc")
-        terminal.expect_all(["Decks", "omnideck", "running"], timeout=20, since=mark, checkpoint="logs-back")
+        terminal.expect_all(["Decks", instance, "running"], timeout=20, since=mark, checkpoint="logs-back")
 
         mark = terminal.send(b"c", label="c")
         terminal.expect_all(
-            ["Decks › omnideck › Settings", "File storage", "App storage", "Memory limit", "Browser port", "Container image"],
+            [f"Decks › {instance} › Settings", "File storage", "App storage", "Memory limit", "Browser port", "Container image"],
             timeout=20,
             since=mark,
             checkpoint="settings",
         )
         mark = terminal.send(ESCAPE, label="esc")
-        terminal.expect_all(["Decks", "omnideck", "running"], timeout=20, since=mark, checkpoint="settings-back")
+        terminal.expect_all(["Decks", instance, "running"], timeout=20, since=mark, checkpoint="settings-back")
 
         mark = terminal.send(b"u", label="u")
         terminal.expect_all(
-            ["Decks › omnideck › Update", "Update omnideck", "files and agent data are kept", "enter update"],
+            [f"Decks › {instance} › Update", f"Update {instance}", "files and agent data are kept", "enter update"],
             timeout=20,
             since=mark,
             checkpoint="update-review",
         )
         mark = terminal.send(ESCAPE, label="esc")
-        terminal.expect_all(["Decks", "omnideck", "running"], timeout=20, since=mark, checkpoint="update-canceled")
+        terminal.expect_all(["Decks", instance, "running"], timeout=20, since=mark, checkpoint="update-canceled")
 
         mark = terminal.send(b"s", label="s")
         terminal.expect_all(
-            ["Stopped omnideck", "Start"], timeout=45, since=mark, checkpoint="stopped"
+            [f"Stopped {instance}", "Start"], timeout=45, since=mark, checkpoint="stopped"
         )
         mark = terminal.send(b"d", label="d")
         terminal.expect_all(
             [
                 "Doctor",
                 "1 problem needs attention",
-                "Omnideck instance — omnideck is stopped",
+                f"Omnideck instance — {instance} is stopped",
                 "Press Enter to start omnideck.",
             ],
             timeout=45,
@@ -381,34 +443,34 @@ def manage_scenario(args: argparse.Namespace) -> None:
         )
         mark = terminal.send(ENTER, label="enter")
         terminal.expect_all(
-            ["Everything required is working", "Omnideck instance — omnideck is running", "Browser — http://localhost:2337 is responding"],
+            ["Everything required is working", f"Omnideck instance — {instance} is running", f"Browser — http://localhost:{web_port} is responding"],
             timeout=60,
             since=mark,
             checkpoint="doctor-recovered",
         )
         mark = terminal.send(ESCAPE, label="esc")
-        terminal.expect_all(["Decks", "omnideck", "running"], timeout=20, since=mark, checkpoint="doctor-back")
+        terminal.expect_all(["Decks", instance, "running"], timeout=20, since=mark, checkpoint="doctor-back")
 
         mark = terminal.send(b"n", label="n")
         terminal.expect_all(
-            ["Setup · Settings", "Recommended settings are ready", "omnideck2", "http://localhost:2338"],
+            ["Setup · Settings", "Recommended settings are ready", args.additional_name, f"http://localhost:{args.additional_port}"],
             timeout=45,
             since=mark,
             checkpoint="additional-instance-defaults",
         )
         mark = terminal.send(ENTER, label="enter")
         terminal.expect_all(
-            ["Setup · Review", "Ready to set up Omnideck", "Name", "omnideck2", "Press Enter to start setup"],
+            ["Setup · Review", "Ready to set up Omnideck", "Name", args.additional_name, "Press Enter to start setup"],
             timeout=20,
             since=mark,
             checkpoint="additional-instance-review",
         )
         mark = terminal.send(b"q", label="q")
-        terminal.expect_all(["Decks", "omnideck", "running"], timeout=20, since=mark, checkpoint="additional-instance-canceled")
+        terminal.expect_all(["Decks", instance, "running"], timeout=20, since=mark, checkpoint="additional-instance-canceled")
 
         mark = terminal.send(b"x", label="x")
         terminal.expect_all(
-            ["Remove omnideck", "Keep saved data — Recommended", "Permanently delete saved data"],
+            [f"Remove {instance}", "Keep saved data — Recommended", "Permanently delete saved data"],
             timeout=20,
             since=mark,
             checkpoint="removal-data-choice",
@@ -424,15 +486,15 @@ def manage_scenario(args: argparse.Namespace) -> None:
         terminal.send(DOWN, label="down")
         mark = terminal.send(ENTER, label="enter")
         terminal.expect_all(
-            ["Confirm permanent data deletion", "Type omnideck below to confirm", "No backup will be created"],
+            ["Confirm permanent data deletion", f"Type {instance} below to confirm", "No backup will be created"],
             timeout=20,
             since=mark,
             checkpoint="removal-confirmation",
         )
-        terminal.send(b"omnideck", label="omnideck")
+        terminal.send(instance.encode(), label=instance)
         mark = terminal.send(ENTER, label="enter")
         terminal.expect_all(
-            ["omnideck was removed", "saved data was permanently deleted", "Press any key to return to Decks"],
+            [f"{instance} was removed", "saved data was permanently deleted", "Press any key to return to Decks"],
             timeout=60,
             since=mark,
             checkpoint="removal-complete",
@@ -558,7 +620,7 @@ def windows_install_scenario(args: argparse.Namespace) -> None:
 
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("scenario", choices=("install", "manage", "windows-bootstrap", "windows-install"))
+    parser.add_argument("scenario", choices=("install", "macos-install", "manage", "windows-bootstrap", "windows-install"))
     parser.add_argument("--binary", required=True)
     parser.add_argument("--config-dir", required=True)
     parser.add_argument("--registries-conf", required=True)
@@ -566,6 +628,10 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser.add_argument("--artifact-dir", required=True, type=Path)
     parser.add_argument("--install-timeout", type=float, default=1200)
     parser.add_argument("--expected-log-count", type=int, default=1)
+    parser.add_argument("--instance-name", default="omnideck")
+    parser.add_argument("--web-port", default="2337")
+    parser.add_argument("--additional-name", default="omnideck2")
+    parser.add_argument("--additional-port", default="2338")
     parser.add_argument("--command-json")
     parser.add_argument("--hook-command-json")
     return parser.parse_args(argv)
@@ -577,6 +643,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.scenario == "install":
             install_scenario(args)
+        elif args.scenario == "macos-install":
+            macos_install_scenario(args)
         elif args.scenario == "manage":
             manage_scenario(args)
         elif args.scenario == "windows-bootstrap":

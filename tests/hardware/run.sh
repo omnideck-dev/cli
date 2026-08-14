@@ -24,6 +24,8 @@ junit_file="${output_dir}/junit.xml"
 config_path=""
 engine=""
 fixture_image="${OMNIDECK_HARDWARE_TEST_IMAGE:-}"
+fixture_archive="${OMNIDECK_HARDWARE_TEST_IMAGE_ARCHIVE:-}"
+fixture_archive_image="${OMNIDECK_HARDWARE_ARCHIVE_IMAGE:-}"
 local_fixture_image=""
 registry_container="${instance}-registry"
 built_fixture=0
@@ -150,6 +152,11 @@ fi
 if [[ -z "${provided_cli}" ]]; then
   command -v go >/dev/null 2>&1 || fail "Go is required to build the CLI. Set OMNIDECK_HARDWARE_CLI to test a prebuilt binary instead."
 fi
+if [[ -n "${fixture_archive}" ]]; then
+  [[ -f "${fixture_archive}" ]] || fail "OMNIDECK_HARDWARE_TEST_IMAGE_ARCHIVE does not exist."
+  [[ "${fixture_archive_image}" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/:@-]*$ ]] || fail "OMNIDECK_HARDWARE_ARCHIVE_IMAGE is required and must be a safe image reference."
+  [[ -z "${fixture_image}" ]] || fail "Use either a fixture image or an image archive, not both."
+fi
 command -v curl >/dev/null 2>&1 || fail "curl is required to verify the fixture web UI."
 
 select_engine
@@ -191,12 +198,21 @@ current_step="build fixture image"
 if [[ -z "${fixture_image}" ]]; then
   local_fixture_image="localhost/omnideck-hardware-fixture:${safe_run_id}"
   fixture_image="localhost:${registry_port}/omnideck-hardware-fixture:${safe_run_id}"
-  "${engine}" build --file "${script_dir}/fixture/Containerfile" --tag "${local_fixture_image}" "${script_dir}/fixture"
+  if [[ -n "${fixture_archive}" ]]; then
+    "${engine}" load --input "${fixture_archive}"
+    "${engine}" tag "${fixture_archive_image}" "${local_fixture_image}"
+  else
+    "${engine}" build --file "${script_dir}/fixture/Containerfile" --tag "${local_fixture_image}" "${script_dir}/fixture"
+  fi
   built_fixture=1
   "${engine}" run -d --name "${registry_container}" -p "127.0.0.1:${registry_port}:5000" docker.io/library/registry:2.8.3@sha256:a3d8aaa63ed8681a604f1dea0aa03f100d5895b6a58ace528858a7b332415373
   wait_for_registry
   "${engine}" tag "${local_fixture_image}" "${fixture_image}"
-  "${engine}" push "${fixture_image}"
+  if [[ "${engine}" == podman ]]; then
+    "${engine}" push --tls-verify=false "${fixture_image}"
+  else
+    "${engine}" push "${fixture_image}"
+  fi
 fi
 
 current_step="setup"
