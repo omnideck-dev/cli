@@ -332,6 +332,10 @@ func buildPodmanRunArgs(opts RunOptions, windowsHostAddress ...string) []string 
 
 // ContainerStats returns live CPU and memory stats for a running container.
 func (e *PodmanEngine) ContainerStats(name string) (cpu string, cpuPct float64, ram, ramTotal string, ramPct float64, err error) {
+	if service, ok := hostPodmanServiceClient(); ok {
+		return service.containerStats(name)
+	}
+
 	cmd := buildCmd("podman", "stats", "--no-stream",
 		"--format", "{{.CPUPerc}}\t{{.MemUsage}}\t{{.MemPerc}}", name)
 	out, runErr := cmd.Output()
@@ -370,8 +374,12 @@ func (e *PodmanEngine) ContainerStats(name string) (cpu string, cpuPct float64, 
 }
 
 // ContainerInspect returns status and metadata about a container in one
-// Podman process so live dashboards do not need a separate status probe.
+// request so live dashboards do not need a separate status probe.
 func (e *PodmanEngine) ContainerInspect(name string) (InspectData, error) {
+	if service, ok := hostPodmanServiceClient(); ok {
+		return service.containerInspect(name)
+	}
+
 	format := `{{.State.Status}}|{{.State.StartedAt}}|{{.Created}}|{{.RestartCount}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}`
 	cmd := buildCmd("podman", "inspect", "--format", format, name)
 	out, err := cmd.Output()
