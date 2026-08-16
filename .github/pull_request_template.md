@@ -6,6 +6,19 @@
 
 <!-- List automated tests and any manual OS/runtime scenarios exercised. -->
 
+## Release note
+
+<!--
+Required: choose exactly one.
+
+User-visible change:
+  Add one or more release-notes.d/*.md fragments.
+
+No user-visible change:
+  Apply the release-note:none label and write:
+  None: <specific reason>
+-->
+
 ## Release and security check
 
 - [ ] I considered whether this changes permissions, downloaded software, executed commands, dependencies, configuration files, or release artifacts.

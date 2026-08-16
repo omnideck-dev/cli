@@ -5,6 +5,7 @@ on:
     branches: ["main"]
   pull_request:
     branches: ["main"]
+  merge_group:
   schedule:
     - cron: "17 8 * * 1"
   workflow_dispatch:
@@ -35,7 +36,22 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
+          fetch-depth: 0
           persist-credentials: false
+
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 24
+
+      - name: Test release-note tooling
+        run: node --test tests/release-notes.test.mjs
+
+      - name: Validate stored fragments
+        run: node scripts/release-notes.mjs validate-fragments
+
+      - name: Validate pull request release-note metadata
+        if: github.event_name == 'pull_request'
+        run: node scripts/release-notes.mjs validate-pr
 
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:

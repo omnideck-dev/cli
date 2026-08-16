@@ -23,12 +23,26 @@ the default release.
 
 ## Publish a preview
 
-1. Run `make verify` locally.
-2. Merge the intended changes to `main` and ensure every required CI and CodeQL
+1. Choose the next version, then generate its checked-in release draft from
+   the outstanding fragments:
+
+   ```sh
+   VERSION=v0.8.0-alpha.1
+   node scripts/release-notes.mjs generate \
+     --version "${VERSION}" \
+     --output "docs/releases/${VERSION}.md"
+   ```
+
+   Curate the generated file for user-visible outcomes, upgrade guidance, known
+   limitations, and preview feedback. Remove the fragments incorporated into
+   that file. The release pull request uses `release-note:none` with a reason
+   explaining that it only aggregates previously reviewed fragments.
+2. Run `make verify` locally.
+3. Merge the release change to `main` and ensure every required CI and CodeQL
    check is green.
-3. Choose the next prerelease identifier. Increment the final number for every
-   new build; never move or replace a published tag.
-4. Create and push an annotated tag:
+4. Increment the final prerelease number for every new build; never move or
+   replace a published tag.
+5. Create and push an annotated tag:
 
    ```sh
    git switch main
@@ -36,7 +50,7 @@ the default release.
    git tag -a v0.8.0-alpha.1 -m "Omnideck CLI v0.8.0-alpha.1"
    git push origin v0.8.0-alpha.1
    ```
-5. Open the release workflow. Confirm that the source checks, vulnerability
+6. Open the release workflow. Confirm that the source checks, vulnerability
    scan, builds, SBOM generation, and provenance attestations passed. Approve
    the protected `release` environment only after reviewing those results.
 
@@ -95,6 +109,6 @@ provenance, embedded version, and portable contract.
 If any RC check fails after publication, fix forward on `main` and publish the
 next RC number. Do not replace the failed RC.
 
-GitHub-generated notes are a useful baseline. Curate the release description for
-user-visible changes, upgrade notes, known limitations, and a short request for
-preview feedback.
+The tag workflow publishes the exact checked-in
+`docs/releases/<version>.md` body. It does not generate a release description
+from raw commit or pull request titles.
