@@ -303,3 +303,7 @@ Report suspected vulnerabilities privately using the instructions in
 ## License
 
 MIT © [rlnorthcutt](https://github.com/rlnorthcutt)
+
+## Roadmap
+
+See the public [Omnideck Roadmap](https://github.com/orgs/omnideck-dev/projects/1) board for what's planned, in progress, and recently shipped.
