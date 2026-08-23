@@ -3,7 +3,6 @@ package engine
 import (
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/exec"
 	"strings"
@@ -158,60 +157,13 @@ func newAnonymousRegistryAuthFile() (string, func(), error) {
 }
 
 func (e *PodmanEngine) RunContainer(opts RunOptions) error {
-	windowsHostAddress := ""
-	if opts.Platform == "windows" && usesPodmanHostAlias(opts.OllamaHost, opts.Platform) {
-		address, err := resolveWindowsPodmanHostAddress()
-		if err != nil {
-			return err
-		}
-		windowsHostAddress = address
-	}
-
-	args := buildPodmanRunArgs(opts, windowsHostAddress)
+	args := buildPodmanRunArgs(opts)
 	cmd := buildCmd("podman", args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return runtimeCommandError("podman run", err, out)
 	}
 	return nil
-}
-
-// resolveWindowsPodmanHostAddress asks the shared WSL-backed Podman machine
-// for the default-route gateway it uses to reach Windows. A stock Podman 6 WSL
-// machine does not define host.containers.internal, and rootless pasta assigns
-// that name a container-local address, so Windows containers need this
-// explicit gateway mapping.
-func resolveWindowsPodmanHostAddress() (string, error) {
-	cmd := buildCmd(
-		"podman",
-		"machine", "ssh", OmnideckMachineName,
-		"ip", "-4", "route", "show", "default",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf(
-			"Omnideck could not determine how the application container reaches Windows. Restart the %s Podman machine, then try again: %w",
-			OmnideckMachineName,
-			runtimeCommandError("Windows host address", err, out),
-		)
-	}
-	address := parseWindowsPodmanHostAddress(string(out))
-	if address == "" {
-		return "", fmt.Errorf(
-			"Omnideck could not determine how the application container reaches Windows. Restart the %s Podman machine, then try again",
-			OmnideckMachineName,
-		)
-	}
-	return address, nil
-}
-
-func parseWindowsPodmanHostAddress(output string) string {
-	for _, field := range strings.Fields(output) {
-		if address := net.ParseIP(field); address != nil && address.To4() != nil {
-			return address.String()
-		}
-	}
-	return ""
 }
 
 func (e *PodmanEngine) CheckOllamaConnection(name string) error {
@@ -279,7 +231,7 @@ func (e *PodmanEngine) ImageDigest(image string) string {
 
 // buildPodmanRunArgs builds args for `podman run`. It deliberately avoids
 // --replace so a name collision can never remove an unrelated container.
-func buildPodmanRunArgs(opts RunOptions, windowsHostAddress ...string) []string {
+func buildPodmanRunArgs(opts RunOptions) []string {
 	restart := opts.Restart
 	if restart == "" {
 		restart = "always"
@@ -300,10 +252,6 @@ func buildPodmanRunArgs(opts RunOptions, windowsHostAddress ...string) []string 
 	if opts.Memory != "" {
 		args = append(args, "--memory="+opts.Memory)
 	}
-	if opts.Platform == "windows" && len(windowsHostAddress) > 0 && windowsHostAddress[0] != "" {
-		args = append(args, "--add-host", podmanHostAlias+":"+windowsHostAddress[0])
-	}
-
 	// The web UI is private to this computer. Desktop embeds this address and
 	// the CLI prints it for a local browser; neither use case should expose the
 	// agent on the LAN merely because Podman's default bind is 0.0.0.0.

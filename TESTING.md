@@ -203,8 +203,10 @@ because Silverblue includes Podman in its base deployment.
 
 The repo-owned [VM end-to-end suite](tests/e2e/README.md) is the canonical
 pre-release regression pass for mutable Linux and Windows 11 guests. It builds
-a release-shaped archive from the current checkout, installs it in a clean
-guest, drives guided setup and the management TUI through a real
+a release-shaped archive from the current checkout and supports two tiers. The
+default product tier starts from a certified warm runtime and focuses on
+management and lifecycle behavior. The onboarding tier starts without mutable
+runtime prerequisites and drives guided setup through a real
 pseudo-terminal, and then runs the portable contract and unattended hardware
 lifecycle against the same binary. It records exact visible wording at
 semantic checkpoints plus JSON and JUnit evidence. It uses the tiny hardware
@@ -213,14 +215,19 @@ substitutes the fixture result for a production-image upgrade test.
 
 ```sh
 export OMNIDECK_VM_LAB_DIR=/absolute/path/to/omnideck-release-lab
-make vm-e2e-matrix YES=1    # Canonical complete, deterministic regression
-make vm-e2e                 # Single Ubuntu lane; confirms reset interactively
-make vm-e2e VM=windows      # Single Windows UAC/reboot/Podman/TUI lane
+./tests/e2e/matrix.sh --suite product --yes     # Fast default product regression
+./tests/e2e/matrix.sh --suite onboarding --yes  # Prerequisite/UAC/reboot coverage
+./tests/e2e/matrix.sh --suite all --yes         # Complete release qualification
+./tests/e2e/run.sh --suite product --vm appimage
+./tests/e2e/run.sh --suite onboarding --vm windows --yes
 ```
 
-The matrix is the canonical release-regression command. It preflights the
-`release-clean` profile, prepares one content-addressed build before requesting
-a guest, leases lanes in deterministic order, and restores every clean golden.
+The matrix prepares one content-addressed build before requesting a guest,
+leases lanes in deterministic order, transfers one verified payload bundle per
+lane, and restores the selected certified baseline. Product uses
+`product-ready`; onboarding uses `onboarding-clean`. Ctrl-C or termination
+stops the active lane, waits for lease cleanup, records that lane as canceled,
+and does not continue into another guest.
 The Windows lane exercises the real UAC prompt, selects restart later, verifies
 a complete controlled reboot, installs Podman, and continues setup. The Windows
 restart-now RunOnce auto-reopen, macOS prompts, subjective visual checks, and

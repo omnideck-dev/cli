@@ -242,7 +242,6 @@ def install_scenario(args: argparse.Namespace) -> None:
             [
                 "Preparing your environment",
                 "Setting omnideck up on this computer. This usually takes a few minutes.",
-                "Getting your computer ready…",
                 "Computer setup",
                 "Application files",
                 "Final checks",
@@ -259,6 +258,13 @@ def install_scenario(args: argparse.Namespace) -> None:
             timeout=60,
             since=mark,
             checkpoint="runtime-permission",
+        )
+        terminal.expect_all(
+            ["Getting your computer ready…"],
+            timeout=args.install_timeout,
+            since=mark,
+            checkpoint="computer-ready",
+            fail_phrases=("The download didn’t finish", "Setup couldn’t finish"),
         )
         terminal.expect_all(
             [

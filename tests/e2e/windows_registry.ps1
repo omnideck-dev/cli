@@ -3,28 +3,30 @@ param(
     [string]$CertificatePath,
     [Parameter(Mandatory = $true)]
     [string]$RegistryAuthority,
-    [int]$TimeoutSeconds = 300
+    [int]$TimeoutSeconds = 90
 )
 
 $ErrorActionPreference = "Stop"
 $Distro = "podman-omnideck-runtime"
 $ResolvedCertificate = (Resolve-Path -Path $CertificatePath).Path
-if ($ResolvedCertificate -notmatch '^([A-Za-z]):\\(.*)$') {
-    throw "The registry certificate must be on a Windows drive: $ResolvedCertificate"
-}
-$Drive = $Matches[1].ToLowerInvariant()
-$Tail = $Matches[2] -replace '\\', '/'
-$LinuxCertificate = "/mnt/$Drive/$Tail"
+$EncodedCertificate = [Convert]::ToBase64String([IO.File]::ReadAllBytes($ResolvedCertificate))
+$LinuxCertificate = "/tmp/omnideck-e2e-registry.crt"
 $Deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
 
-Write-Host "Waiting for the Podman machine filesystem so the local fixture CA can be installed."
+Write-Host "Waiting for the Podman machine so the local fixture CA can be installed."
 while ([DateTime]::UtcNow -lt $Deadline) {
-    & wsl.exe -d $Distro -u root -- sh -c "test -r '$LinuxCertificate'" *> $null
+    & wsl.exe -d $Distro -u root -- true *> $null
     if ($LASTEXITCODE -eq 0) { break }
     Start-Sleep -Seconds 1
 }
 if ($LASTEXITCODE -ne 0) {
-    throw "The $Distro filesystem did not become available within $TimeoutSeconds seconds."
+    throw "The $Distro machine did not become available within $TimeoutSeconds seconds."
+}
+
+$StageScript = "umask 077; printf '%s' '$EncodedCertificate' | base64 -d > '$LinuxCertificate'"
+& wsl.exe -d $Distro -u root -- sh -c $StageScript
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not stage the local fixture registry CA in $Distro."
 }
 
 $InstallScript = @"
@@ -40,17 +42,13 @@ if ($LASTEXITCODE -ne 0) {
 
 $Successes = 0
 for ($Attempt = 1; $Attempt -le 240; $Attempt++) {
-    $Route = (& wsl.exe -d $Distro -u root -- ip -4 route show default 2>$null) -join " "
-    if ($Route -match 'default via ([0-9.]+)') {
-        $Gateway = $Matches[1]
-        $NetworkScript = "grep -v 'host\.containers\.internal' /etc/hosts > /tmp/omnideck-e2e-hosts; cat /tmp/omnideck-e2e-hosts > /etc/hosts; printf '%s host.containers.internal\n' '$Gateway' >> /etc/hosts; curl --fail --silent --max-time 2 --cacert '$LinuxCertificate' 'https://$RegistryAuthority/v2/' >/dev/null 2>&1"
-        & wsl.exe -d $Distro -u root -- sh -c $NetworkScript
-        if ($LASTEXITCODE -eq 0) {
-            $Successes++
-            if ($Successes -ge 10) { break }
-        } else {
-            $Successes = 0
-        }
+    $NetworkScript = "curl --fail --silent --max-time 2 --cacert '$LinuxCertificate' 'https://$RegistryAuthority/v2/' >/dev/null 2>&1"
+    & wsl.exe -d $Distro -u root -- sh -c $NetworkScript
+    if ($LASTEXITCODE -eq 0) {
+        $Successes++
+        if ($Successes -ge 10) { break }
+    } else {
+        $Successes = 0
     }
     Start-Sleep -Milliseconds 250
 }
