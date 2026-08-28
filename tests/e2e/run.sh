@@ -9,11 +9,12 @@ vm="${OMNIDECK_VM_E2E_VM:-appimage}"
 builder_image="${OMNIDECK_CLI_BUILDER_IMAGE:-omnideck-cli-builder:local}"
 assume_yes=0
 keep_vm=0
+suite="${OMNIDECK_VM_E2E_SUITE:-product}"
 original_args=("$@")
 
 usage() {
   cat <<'EOF'
-Usage: ./tests/e2e/run.sh [--vm appimage|deb|rpm|windows] [--yes] [--keep-vm]
+Usage: ./tests/e2e/run.sh [--suite product|onboarding] [--vm appimage|deb|rpm|windows] [--yes] [--keep-vm]
 
 Build and install the current CLI in one clean disposable VM, then drive the
 guided install and management TUI through a real pseudo-terminal.
@@ -29,6 +30,10 @@ while (($#)); do
   case "$1" in
     --vm)
       vm="${2:?--vm requires a value}"
+      shift 2
+      ;;
+    --suite)
+      suite="${2:?--suite requires a value}"
       shift 2
       ;;
     --yes)
@@ -51,8 +56,14 @@ while (($#)); do
   esac
 done
 
+case "$suite" in
+  product) profile=product-ready ;;
+  onboarding) profile=onboarding-clean ;;
+  *) printf 'Unsupported suite: %s\n' "$suite" >&2; exit 2 ;;
+esac
+
 if [[ "${vm}" == "windows" ]]; then
-  windows_args=()
+  windows_args=(--suite "$suite")
   [[ "${assume_yes}" == "1" ]] && windows_args+=(--yes)
   [[ "${keep_vm}" == "1" ]] && windows_args+=(--keep-vm)
   exec "${script_dir}/run-windows.sh" "${windows_args[@]}"
@@ -69,22 +80,23 @@ case "${vm}" in
 esac
 
 require_lab
+baseline="$("${lab_dir}/lab.sh" profile "$profile" "$vm")"
 command -v docker >/dev/null 2>&1 || { printf 'Docker is required for the pinned builder and fixture registry.\n' >&2; exit 2; }
 command -v curl >/dev/null 2>&1 || { printf 'curl is required to check the fixture registry.\n' >&2; exit 2; }
 command -v ssh >/dev/null 2>&1 || { printf 'ssh is required to run the guest through the lab connection.\n' >&2; exit 2; }
 
 if [[ "${OMNIDECK_VM_LAB_LEASED:-}" != "1" ]]; then
   lease_run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  "${lab_dir}/lab.sh" preflight cli release-clean --lanes "${vm}" >/dev/null
+  "${lab_dir}/lab.sh" preflight cli "$profile" --lanes "${vm}" >/dev/null
   source_state
   prepare_output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-$("${lab_dir}/lab.sh" artifact-path cli e2e "${lease_run_id}")}"
   mkdir -p "${prepare_output_dir}"
   "${lab_dir}/lab.sh" evidence-init "${prepare_output_dir}" cli e2e "${lease_run_id}" \
-    "${source_short}" "${vm}" clean "phase=preparing" "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}"
+    "${source_short}" "${vm}" "$baseline" "phase=preparing" "testTier=${suite}" "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}"
   trap '"${lab_dir}/lab.sh" evidence-finish "${prepare_output_dir}" failed || true' EXIT
   prepare_cli_binaries linux
   "${lab_dir}/lab.sh" evidence-set "${prepare_output_dir}" "phase=prepared" "buildCacheKey=${cli_build_key}"
-  lease_args=(lease "${vm}" cli "${lease_run_id}" --cleanup-baseline clean)
+  lease_args=(lease "${vm}" cli "${lease_run_id}" --cleanup-baseline "$baseline")
   [[ "${keep_vm}" != "1" ]] || lease_args+=(--keep-state)
   lease_args+=(-- env OMNIDECK_CLI_BUILD_CACHE="${cli_build_cache}" OMNIDECK_CLI_BUILD_KEY="${cli_build_key}" \
     OMNIDECK_VM_E2E_OUTPUT_DIR="${prepare_output_dir}" "$0" "${original_args[@]}")
@@ -145,7 +157,7 @@ if [[ -f "${output_dir}/run.json" ]]; then
   "${lab_dir}/lab.sh" evidence-set "${output_dir}" "phase=executing" "expectedVersion=${expected_version}"
 else
   "${lab_dir}/lab.sh" evidence-init "${output_dir}" cli e2e "${safe_run_id}" \
-    "${source_commit}" "${vm}" clean "expectedVersion=${expected_version}" \
+    "${source_commit}" "${vm}" "$baseline" "expectedVersion=${expected_version}" "testTier=${suite}" \
     "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}" \
     "buildCacheKey=${OMNIDECK_CLI_BUILD_KEY}"
 fi
@@ -168,7 +180,7 @@ cleanup() {
     vm_started=0
   fi
   if [[ "${keep_vm}" != "1" ]]; then
-    "${lab_dir}/lab.sh" reset "${vm}" clean || exit_code=1
+    "${lab_dir}/lab.sh" reset "${vm}" "$baseline" || exit_code=1
   else
     printf 'Guest kept stopped for debugging: %s\n' "${vm}"
   fi
@@ -182,8 +194,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'Resetting the leased %s guest to its clean golden.\n' "${vm}"
-"${lab_dir}/lab.sh" reset "${vm}" clean
+printf 'Resetting the leased %s guest to its %s baseline.\n' "${vm}" "$baseline"
+"${lab_dir}/lab.sh" reset "${vm}" "$baseline"
 
 printf 'Using prepared CLI build cache: %s\n' "${OMNIDECK_CLI_BUILD_KEY}"
 
@@ -203,24 +215,31 @@ docker tag "${fixture_local}" "${fixture_host}"
 docker push "${fixture_host}" >/dev/null
 fixture_guest="localhost:${reverse_port}/${fixture_repository}:${safe_run_id}"
 
-printf 'Starting and verifying the clean %s guest.\n' "${vm}"
+printf 'Starting and verifying the %s %s guest.\n' "$suite" "${vm}"
 "${lab_dir}/lab.sh" start "${vm}"
 vm_started=1
 "${lab_dir}/lab.sh" wait "${vm}"
 "${lab_dir}/lab.sh" verify "${vm}" | tee "${output_dir}/guest-verify.txt"
-grep -Fq 'podman=absent' "${output_dir}/guest-verify.txt"
+if [[ "$suite" == onboarding ]]; then
+  grep -Fq 'podman=absent' "${output_dir}/guest-verify.txt"
+else
+  grep -Fq 'podman=/' "${output_dir}/guest-verify.txt"
+  "${lab_dir}/lab.sh" run "${vm}" 'podman info >/dev/null'
+fi
 "${lab_dir}/lab.sh" run "${vm}" "if ss -ltn | grep -q ':${reverse_port} '; then exit 1; fi"
 
-"${lab_dir}/lab.sh" run "${vm}" "mkdir -p '${remote_root}/elevation-bin'"
+payload_dir="${build_dir}/payload"
+mkdir -p "${payload_dir}/elevation-bin"
+install -m 0644 "${build_dir}/omnideck-linux-amd64.tar.gz" "${payload_dir}/omnideck-linux-amd64.tar.gz"
+install -m 0644 "${build_dir}/SHA256SUMS" "${payload_dir}/SHA256SUMS"
+install -m 0755 "${build_dir}/releasecontract" "${payload_dir}/releasecontract"
+install -m 0644 "${build_dir}/contracts.tar.gz" "${payload_dir}/contracts.tar.gz"
+install -m 0755 "${script_dir}/guest.sh" "${payload_dir}/guest.sh"
+install -m 0755 "${script_dir}/terminal_driver.py" "${payload_dir}/terminal_driver.py"
+install -m 0755 "${script_dir}/fixtures/sudo" "${payload_dir}/elevation-bin/sudo"
+install -m 0755 "${repo_root}/tests/hardware/run.sh" "${payload_dir}/hardware-run.sh"
+"${lab_dir}/lab.sh" stage "${vm}" "${payload_dir}" "${remote_root}" | tee "${output_dir}/payload-stage.txt"
 remote_staged=1
-"${lab_dir}/lab.sh" copy-to "${vm}" "${build_dir}/omnideck-linux-amd64.tar.gz" "${remote_root}/omnideck-linux-amd64.tar.gz"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${build_dir}/SHA256SUMS" "${remote_root}/SHA256SUMS"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${build_dir}/releasecontract" "${remote_root}/releasecontract"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${build_dir}/contracts.tar.gz" "${remote_root}/contracts.tar.gz"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${script_dir}/guest.sh" "${remote_root}/guest.sh"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${script_dir}/terminal_driver.py" "${remote_root}/terminal_driver.py"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${script_dir}/fixtures/sudo" "${remote_root}/elevation-bin/sudo"
-"${lab_dir}/lab.sh" copy-to "${vm}" "${repo_root}/tests/hardware/run.sh" "${remote_root}/hardware-run.sh"
 
 ssh_options=(
   -i "${key_file}"
@@ -234,7 +253,7 @@ ssh_options=(
 
 set +e
 ssh "${ssh_options[@]}" tester@127.0.0.1 \
-  "chmod +x '${remote_root}/guest.sh' '${remote_root}/terminal_driver.py' '${remote_root}/releasecontract' '${remote_root}/hardware-run.sh' '${remote_root}/elevation-bin/sudo' && OMNIDECK_E2E_KEEP_GUEST_STATE='${keep_vm}' '${remote_root}/guest.sh' '${remote_root}' '${expected_version}' '${fixture_guest}'"
+  "OMNIDECK_E2E_KEEP_GUEST_STATE='${keep_vm}' '${remote_root}/guest.sh' '${remote_root}' '${expected_version}' '${fixture_guest}' '${suite}'"
 test_status=$?
 set -e
 

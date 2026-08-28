@@ -14,7 +14,7 @@ class LabHarnessContractTests(unittest.TestCase):
         self.assertIn('evidence-finish', script)
         self.assertIn('prepare_cli_binaries linux', script)
         self.assertIn('artifact-path cli e2e', script)
-        self.assertIn('--cleanup-baseline clean', script)
+        self.assertIn('--cleanup-baseline "$baseline"', script)
         self.assertNotIn("omnideck-cli-vm-e2e", script)
         self.assertNotIn("discarded-before", script)
 
@@ -26,14 +26,16 @@ class LabHarnessContractTests(unittest.TestCase):
         self.assertIn('evidence-finish', script)
         self.assertIn('prepare_cli_binaries windows', script)
         self.assertIn('artifact-path cli e2e', script)
-        self.assertIn('--cleanup-baseline clean', script)
+        self.assertIn('--cleanup-baseline "$baseline"', script)
         self.assertNotIn("omnideck-cli-vm-e2e", script)
         self.assertNotIn("windows-tpm.*", script)
 
     def test_matrix_preflights_and_groups_lane_evidence(self) -> None:
         script = (ROOT / "tests/e2e/matrix.sh").read_text(encoding="utf-8")
-        self.assertIn("preflight cli release-clean", script)
+        self.assertIn('preflight cli "$profile"', script)
         self.assertIn("artifact-path cli matrix", script)
+        self.assertIn("interrupt_matrix 130 INT", script)
+        self.assertIn('wait "$active_lane_pid"', script)
         self.assertIn('OMNIDECK_VM_E2E_OUTPUT_DIR="$lane_dir"', script)
         self.assertIn("lane-status.tsv", script)
 

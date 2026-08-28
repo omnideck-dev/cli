@@ -5,6 +5,8 @@ set -Eeuo pipefail
 work_dir="${1:?guest work directory is required}"
 expected_version="${2:?expected version is required}"
 fixture_image="${3:?fixture image is required}"
+test_tier="${4:?test tier is required}"
+case "$test_tier" in product|onboarding) ;; *) printf 'Unknown test tier: %s\n' "$test_tier" >&2; exit 2 ;; esac
 result_dir="${work_dir}/results"
 archive="${work_dir}/omnideck-linux-amd64.tar.gz"
 checksum_file="${work_dir}/SHA256SUMS"
@@ -83,9 +85,13 @@ trap write_evidence EXIT
 
 current_step="clean-host precondition"
 inventory before
-if command -v podman >/dev/null 2>&1; then
+if [[ "$test_tier" == onboarding ]] && command -v podman >/dev/null 2>&1; then
   printf 'The install scenario requires a clean mutable guest with Podman absent.\n' >&2
   exit 1
+fi
+if [[ "$test_tier" == product ]]; then
+  command -v podman >/dev/null 2>&1 || { printf 'The product scenario requires Podman in the certified baseline.\n' >&2; exit 1; }
+  podman info >/dev/null
 fi
 [[ ! -e "${config_dir}/instances/omnideck.yaml" ]] || {
   printf 'The isolated test configuration unexpectedly contains an existing instance.\n' >&2
@@ -121,25 +127,31 @@ location = "${fixture_image%%/*}"
 insecure = true
 EOF
 
-current_step="guided install journey"
+current_step="${test_tier} install journey"
 # SSH does not have a graphical PolicyKit agent. Hide pkexec only for this
 # disposable terminal journey so the CLI takes its documented sudo fallback;
 # the trap restores the exact file before the guest is inventoried or reset.
-pkexec_path="$(command -v pkexec || true)"
-if [[ -n "${pkexec_path}" ]]; then
-  pkexec_backup="${pkexec_path}.omnideck-e2e-disabled"
-  [[ ! -e "${pkexec_backup}" ]]
-  sudo mv -- "${pkexec_path}" "${pkexec_backup}"
-  printf 'Temporarily hid %s to exercise terminal sudo fallback.\n' "${pkexec_path}" \
-    > "${result_dir}/terminal-elevation.txt"
+if [[ "$test_tier" == onboarding ]]; then
+  pkexec_path="$(command -v pkexec || true)"
+  if [[ -n "${pkexec_path}" ]]; then
+    pkexec_backup="${pkexec_path}.omnideck-e2e-disabled"
+    [[ ! -e "${pkexec_backup}" ]]
+    sudo mv -- "${pkexec_path}" "${pkexec_backup}"
+    printf 'Temporarily hid %s to exercise terminal sudo fallback.\n' "${pkexec_path}" \
+      > "${result_dir}/terminal-elevation.txt"
+  fi
+  env PATH="${work_dir}/elevation-bin:${PATH}" python3 "${work_dir}/terminal_driver.py" install \
+    --binary "${binary}" \
+    --config-dir "${config_dir}" \
+    --registries-conf "${registries_conf}" \
+    --fixture-image "${fixture_image}" \
+    --artifact-dir "${result_dir}"
+  restore_pkexec
+else
+  env OMNIDECK_CONFIG_DIR="${config_dir}" CONTAINERS_REGISTRIES_CONF="${registries_conf}" \
+    "${binary}" --no-color install --plain --name omnideck --image "${fixture_image}" \
+    | tee "${result_dir}/install-plain.txt"
 fi
-env PATH="${work_dir}/elevation-bin:${PATH}" python3 "${work_dir}/terminal_driver.py" install \
-  --binary "${binary}" \
-  --config-dir "${config_dir}" \
-  --registries-conf "${registries_conf}" \
-  --fixture-image "${fixture_image}" \
-  --artifact-dir "${result_dir}"
-restore_pkexec
 
 current_step="installed behavior"
 env OMNIDECK_CONFIG_DIR="${config_dir}" CONTAINERS_REGISTRIES_CONF="${registries_conf}" \

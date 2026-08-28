@@ -1,13 +1,17 @@
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Prepare", "Installed", "Final")]
+    [ValidateSet("Prepare", "ProductSetup", "Installed", "Final")]
     [string]$Phase,
     [Parameter(Mandatory = $true)]
     [string]$WorkDir,
     [Parameter(Mandatory = $true)]
     [string]$ExpectedVersion,
     [Parameter(Mandatory = $true)]
-    [string]$FixtureImage
+    [string]$FixtureImage,
+    [ValidateSet("product", "onboarding")]
+    [string]$TestTier = "product",
+    [string]$CertificatePath = "",
+    [string]$RegistryAuthority = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +41,33 @@ function Invoke-Cli([string[]]$Arguments) {
     & $Binary --no-color --name omnideck @Arguments
     if ($LASTEXITCODE -ne 0) {
         throw "Omnideck command failed with exit code $LASTEXITCODE`: $($Arguments -join ' ')"
+    }
+}
+
+function Start-PodmanMachineReady {
+    $PreviousPreference = $ErrorActionPreference
+    $Ready = $false
+    try {
+        # Podman writes recoverable notices, including automatic SSH-port
+        # reassignment, to stderr. Judge native commands by their exit codes.
+        $ErrorActionPreference = "Continue"
+        for ($Attempt = 1; $Attempt -le 3; $Attempt++) {
+            & wsl.exe --shutdown *> $null
+            & podman.exe machine start omnideck-runtime 2>&1 | Write-Host
+            if ($LASTEXITCODE -eq 0) {
+                & podman.exe info *> $null
+                if ($LASTEXITCODE -eq 0) {
+                    $Ready = $true
+                    break
+                }
+            }
+            Start-Sleep -Seconds (3 * $Attempt)
+        }
+    } finally {
+        $ErrorActionPreference = $PreviousPreference
+    }
+    if (-not $Ready) {
+        throw "The omnideck-runtime Podman machine did not become ready after three attempts."
     }
 }
 
@@ -115,10 +146,16 @@ try {
     switch ($Phase) {
         "Prepare" {
             $CurrentStep = "clean-host precondition"
-            Write-Inventory "before"
-            if (Get-Command podman.exe -ErrorAction SilentlyContinue) {
+            if ($TestTier -eq "onboarding" -and (Get-Command podman.exe -ErrorAction SilentlyContinue)) {
                 throw "The Windows install scenario requires a clean guest with Podman absent."
             }
+            if ($TestTier -eq "product" -and -not (Get-Command podman.exe -ErrorAction SilentlyContinue)) {
+                throw "The Windows product scenario requires Podman in the certified baseline."
+            }
+            if ($TestTier -eq "product") {
+                Start-PodmanMachineReady
+            }
+            Write-Inventory "before"
             if (Test-Path (Join-Path $ConfigDir "instances\omnideck.yaml")) {
                 throw "The isolated test configuration unexpectedly contains an existing instance."
             }
@@ -156,7 +193,24 @@ try {
             )
         }
 
+        "ProductSetup" {
+            if ($TestTier -ne "product") { throw "ProductSetup is only valid for the product tier." }
+            if (-not $CertificatePath -or -not $RegistryAuthority) { throw "ProductSetup requires the registry certificate and authority." }
+            $CurrentStep = "product baseline setup"
+            Start-PodmanMachineReady
+            Invoke-External "powershell.exe" @(
+                "-NoLogo", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                "-File", (Join-Path $WorkDir "windows_registry.ps1"),
+                "-CertificatePath", $CertificatePath,
+                "-RegistryAuthority", $RegistryAuthority
+            )
+            $env:OMNIDECK_CONFIG_DIR = $ConfigDir
+            Invoke-Cli @("install", "--plain", "--image", $FixtureImage)
+        }
+
         "Installed" {
+            Start-PodmanMachineReady
+            Invoke-External "podman.exe" @("start", "omnideck")
             $env:OMNIDECK_CONFIG_DIR = $ConfigDir
             $CurrentStep = "installed behavior"
             (& podman.exe info 2>&1) | Set-Content -Encoding UTF8 -Path (Join-Path $ResultDir "podman-info.txt")
@@ -200,6 +254,7 @@ try {
         }
 
         "Final" {
+            Start-PodmanMachineReady
             $env:OMNIDECK_CONFIG_DIR = $ConfigDir
             $CurrentStep = "removal cleanup contract"
             if (-not (Test-PodmanObjectAbsent @("container", "inspect", "omnideck"))) { throw "The TUI removal left the primary container behind." }

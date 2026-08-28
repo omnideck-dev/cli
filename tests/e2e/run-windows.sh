@@ -8,12 +8,13 @@ source "${script_dir}/_common.sh"
 builder_image="${OMNIDECK_CLI_BUILDER_IMAGE:-omnideck-cli-builder:local}"
 assume_yes=0
 keep_vm=0
+suite="${OMNIDECK_VM_E2E_SUITE:-product}"
 vm=windows
 original_args=("$@")
 
 usage() {
   cat <<'EOF'
-Usage: ./tests/e2e/run-windows.sh [--yes] [--keep-vm]
+Usage: ./tests/e2e/run-windows.sh [--suite product|onboarding] [--yes] [--keep-vm]
 
 Build the release-shaped Windows CLI ZIP, reset and boot only the disposable
 Windows lab guest, approve its real UAC prompt, exercise the required reboot,
@@ -26,6 +27,10 @@ while (($#)); do
     --yes)
       assume_yes=1
       shift
+      ;;
+    --suite)
+      suite="${2:?--suite requires a value}"
+      shift 2
       ;;
     --keep-vm)
       keep_vm=1
@@ -42,24 +47,26 @@ while (($#)); do
       ;;
   esac
 done
+case "$suite" in product) profile=product-ready ;; onboarding) profile=onboarding-clean ;; *) printf 'Unsupported suite: %s\n' "$suite" >&2; exit 2 ;; esac
 
 require_lab
+baseline="$("${lab_dir}/lab.sh" profile "$profile" windows)"
 for dependency in docker curl ssh python3 openssl socat zip unzip; do
   command -v "${dependency}" >/dev/null 2>&1 || { printf '%s is required by the Windows VM E2E lane.\n' "${dependency}" >&2; exit 2; }
 done
 
 if [[ "${OMNIDECK_VM_LAB_LEASED:-}" != "1" ]]; then
   lease_run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-  "${lab_dir}/lab.sh" preflight cli release-clean --lanes windows >/dev/null
+  "${lab_dir}/lab.sh" preflight cli "$profile" --lanes windows >/dev/null
   source_state
   prepare_output_dir="${OMNIDECK_VM_E2E_OUTPUT_DIR:-$("${lab_dir}/lab.sh" artifact-path cli e2e "${lease_run_id}")}"
   mkdir -p "${prepare_output_dir}"
   "${lab_dir}/lab.sh" evidence-init "${prepare_output_dir}" cli e2e "${lease_run_id}" \
-    "${source_short}" windows clean "phase=preparing" "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}"
+    "${source_short}" windows "$baseline" "phase=preparing" "testTier=${suite}" "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}"
   trap '"${lab_dir}/lab.sh" evidence-finish "${prepare_output_dir}" failed || true' EXIT
   prepare_cli_binaries windows
   "${lab_dir}/lab.sh" evidence-set "${prepare_output_dir}" "phase=prepared" "buildCacheKey=${cli_build_key}"
-  lease_args=(lease windows cli "${lease_run_id}" --cleanup-baseline clean)
+  lease_args=(lease windows cli "${lease_run_id}" --cleanup-baseline "$baseline")
   [[ "${keep_vm}" != "1" ]] || lease_args+=(--keep-state)
   lease_args+=(-- env OMNIDECK_CLI_BUILD_CACHE="${cli_build_cache}" OMNIDECK_CLI_BUILD_KEY="${cli_build_key}" \
     OMNIDECK_VM_E2E_OUTPUT_DIR="${prepare_output_dir}" "$0" "${original_args[@]}")
@@ -129,7 +136,7 @@ if [[ -f "${output_dir}/run.json" ]]; then
   "${lab_dir}/lab.sh" evidence-set "${output_dir}" "phase=executing" "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}"
 else
   "${lab_dir}/lab.sh" evidence-init "${output_dir}" cli e2e "${safe_run_id}" \
-    "${source_commit}" windows clean "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}" \
+    "${source_commit}" windows "$baseline" "expectedVersion=${expected_version}" "fixtureImage=${fixture_guest}" "testTier=${suite}" \
     "sourceDirty=${source_dirty}" "sourceFingerprint=${source_fingerprint}" \
     "buildCacheKey=${OMNIDECK_CLI_BUILD_KEY}"
 fi
@@ -166,7 +173,7 @@ cleanup() {
     vm_started=0
   fi
   if [[ "${initial_reset}" == "1" && "${keep_vm}" != "1" ]]; then
-    "${lab_dir}/lab.sh" reset windows clean || exit_code=1
+    "${lab_dir}/lab.sh" reset windows "$baseline" || exit_code=1
   elif [[ "${keep_vm}" == "1" ]]; then
     printf 'Windows guest kept stopped for debugging.\n'
   fi
@@ -181,8 +188,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-printf 'Resetting the leased Windows guest to its clean golden.\n'
-"${lab_dir}/lab.sh" reset windows clean
+printf 'Resetting the leased Windows guest to its %s baseline.\n' "$baseline"
+"${lab_dir}/lab.sh" reset windows "$baseline"
 initial_reset=1
 
 printf 'Using prepared CLI build cache: %s\n' "${OMNIDECK_CLI_BUILD_KEY}"
@@ -223,23 +230,25 @@ curl --fail --silent --max-time 2 --cacert "${build_dir}/tls/registry.crt" \
   --resolve "host.containers.internal:${tls_port}:127.0.0.1" \
   "https://host.containers.internal:${tls_port}/v2/" >/dev/null
 
-printf 'Starting and verifying the clean Windows guest.\n'
+printf 'Starting and verifying the %s Windows guest.\n' "$suite"
 "${lab_dir}/lab.sh" start windows
 vm_started=1
 "${lab_dir}/lab.sh" wait windows
 "${lab_dir}/lab.sh" verify windows | tee "${output_dir}/guest-verify-before.txt"
-grep -Fq 'podman=absent' "${output_dir}/guest-verify-before.txt"
+if [[ "$suite" == onboarding ]]; then grep -Fq 'podman=absent' "${output_dir}/guest-verify-before.txt"; else grep -Fq 'podman=' "${output_dir}/guest-verify-before.txt" && ! grep -Fq 'podman=absent' "${output_dir}/guest-verify-before.txt"; fi
 
-"${lab_dir}/lab.sh" run windows "cmd.exe /d /c if not exist ${remote_root} mkdir ${remote_root}"
+payload_dir="${build_dir}/payload"
+mkdir -p "$payload_dir"
+install -m 0644 "${build_dir}/omnideck-windows-amd64.zip" "${payload_dir}/omnideck-windows-amd64.zip"
+install -m 0644 "${build_dir}/SHA256SUMS" "${payload_dir}/SHA256SUMS"
+install -m 0755 "${build_dir}/releasecontract.exe" "${payload_dir}/releasecontract.exe"
+install -m 0644 "${build_dir}/contracts.tar.gz" "${payload_dir}/contracts.tar.gz"
+install -m 0644 "${script_dir}/windows_guest.ps1" "${payload_dir}/windows_guest.ps1"
+install -m 0644 "${script_dir}/windows_registry.ps1" "${payload_dir}/windows_registry.ps1"
+install -m 0644 "${repo_root}/tests/hardware/run.ps1" "${payload_dir}/hardware-run.ps1"
+install -m 0644 "${build_dir}/tls/registry.crt" "${payload_dir}/registry.crt"
+"${lab_dir}/lab.sh" stage windows "$payload_dir" "$remote_root" | tee "${output_dir}/payload-stage.txt"
 remote_staged=1
-"${lab_dir}/lab.sh" copy-to windows "${build_dir}/omnideck-windows-amd64.zip" "${remote_scp_root}/omnideck-windows-amd64.zip"
-"${lab_dir}/lab.sh" copy-to windows "${build_dir}/SHA256SUMS" "${remote_scp_root}/SHA256SUMS"
-"${lab_dir}/lab.sh" copy-to windows "${build_dir}/releasecontract.exe" "${remote_scp_root}/releasecontract.exe"
-"${lab_dir}/lab.sh" copy-to windows "${build_dir}/contracts.tar.gz" "${remote_scp_root}/contracts.tar.gz"
-"${lab_dir}/lab.sh" copy-to windows "${script_dir}/windows_guest.ps1" "${remote_scp_root}/windows_guest.ps1"
-"${lab_dir}/lab.sh" copy-to windows "${script_dir}/windows_registry.ps1" "${remote_scp_root}/windows_registry.ps1"
-"${lab_dir}/lab.sh" copy-to windows "${repo_root}/tests/hardware/run.ps1" "${remote_scp_root}/hardware-run.ps1"
-"${lab_dir}/lab.sh" copy-to windows "${build_dir}/tls/registry.crt" "${remote_scp_root}/registry.crt"
 
 ssh_base_options=(
   -i "${key_file}"
@@ -250,23 +259,24 @@ ssh_base_options=(
   -o ExitOnForwardFailure=yes
   -p "${ssh_port}"
 )
-ssh_terminal_options=(
+ssh_forward_options=(
   "${ssh_base_options[@]}"
-  -tt
   -R "${reverse_port}:127.0.0.1:${tls_port}"
 )
+ssh_terminal_options=("${ssh_forward_options[@]}" -tt)
 
 json_command() {
   python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@"
 }
 
-prepare_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Prepare -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest}"
+prepare_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Prepare -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest} -TestTier ${suite}"
 bootstrap_remote="set \"OMNIDECK_CONFIG_DIR=${remote_root}\\config\"&& ${remote_root}\\bin\\omnideck.exe install --image ${fixture_guest}"
 install_remote="set \"OMNIDECK_CONFIG_DIR=${remote_root}\\config\"&& ${remote_root}\\bin\\omnideck.exe install --image ${fixture_guest}"
 ca_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_registry.ps1 -CertificatePath ${remote_root}\\registry.crt -RegistryAuthority ${registry_authority}"
-installed_command="wsl.exe --shutdown&& podman.exe machine start omnideck-runtime&& podman.exe start omnideck&& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Installed -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest}&& echo OMNIDECK_E2E_INSTALLED_PASSED"
+product_setup_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase ProductSetup -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest} -TestTier product -CertificatePath ${remote_root}\\registry.crt -RegistryAuthority ${registry_authority}"
+installed_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Installed -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest} -TestTier ${suite}&& echo OMNIDECK_E2E_INSTALLED_PASSED"
 manage_remote="wsl.exe --shutdown&& podman.exe machine start omnideck-runtime&& podman.exe start omnideck&& set \"OMNIDECK_CONFIG_DIR=${remote_root}\\config\"&& ${remote_root}\\bin\\omnideck.exe tui"
-final_command="wsl.exe --shutdown&& podman.exe machine start omnideck-runtime&& powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Final -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest}&& echo OMNIDECK_E2E_FINAL_PASSED"
+final_command="powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File ${remote_root}\\windows_guest.ps1 -Phase Final -WorkDir ${remote_root} -ExpectedVersion ${expected_version} -FixtureImage ${fixture_guest} -TestTier ${suite}&& echo OMNIDECK_E2E_FINAL_PASSED"
 
 set_registry_bridge() {
 	local target_port="$1"
@@ -288,6 +298,7 @@ set +e
   "${lab_dir}/lab.sh" run windows \
     "netsh.exe advfirewall firewall add rule name=${firewall_rule} dir=in action=allow protocol=TCP localport=${bridge_port} profile=any"
 
+  if [[ "$suite" == onboarding ]]; then
   printf 'Driving Windows prerequisite setup and approving the real UAC prompt.\n'
   bootstrap_json="$(json_command ssh "${ssh_terminal_options[@]}" tester@127.0.0.1 "${bootstrap_remote}")"
   uac_hook_json="$(json_command "${script_dir}/windows_uac_hook.sh" "${lab_dir}" "${evidence_dir}")"
@@ -327,12 +338,17 @@ set +e
     --install-timeout 2400 \
     --command-json "${install_json}" \
     --hook-command-json "${ca_hook_json}"
+  else
+    printf 'Creating the test instance on the certified product-ready runtime.\n'
+    ssh "${ssh_forward_options[@]}" tester@127.0.0.1 "${product_setup_command}" \
+      | tee "${build_dir}/windows-product-setup.log"
+  fi
 
   printf 'Checking installed state and unattended JSON/update behavior.\n'
   # Windows OpenSSH places session children in a job that is torn down when
   # the session closes. Start the WSL-backed Podman machine inside every phase
   # that uses it, and attach the registry forward to that same live session.
-  ssh "${ssh_terminal_options[@]}" tester@127.0.0.1 "${installed_command}" \
+  ssh "${ssh_forward_options[@]}" tester@127.0.0.1 "${installed_command}" \
     | tee "${build_dir}/windows-installed-session.log"
   grep -Fq 'OMNIDECK_E2E_INSTALLED_PASSED' "${build_dir}/windows-installed-session.log"
 
@@ -348,7 +364,7 @@ set +e
     --command-json "${manage_json}"
 
   printf 'Running the full unattended Windows CLI lifecycle.\n'
-  ssh "${ssh_terminal_options[@]}" tester@127.0.0.1 "${final_command}" \
+  ssh "${ssh_forward_options[@]}" tester@127.0.0.1 "${final_command}" \
     | tee "${build_dir}/windows-final-session.log"
   grep -Fq 'OMNIDECK_E2E_FINAL_PASSED' "${build_dir}/windows-final-session.log"
 )

@@ -231,16 +231,15 @@ func TestBuildPodmanRunArgsWindows(t *testing.T) {
 		Platform:    "windows",
 	}
 
-	args := buildPodmanRunArgs(opts, "192.168.127.254")
+	args := buildPodmanRunArgs(opts)
 	assertContainsPrefix(t, args, "OLLAMA_HOST=http://host.containers.internal:11434")
-	assertContains(t, args, "--add-host")
-	assertContains(t, args, "host.containers.internal:192.168.127.254")
+	assertNotContains(t, args, "--add-host")
 	if got := defaultOllamaURL("podman", "windows"); got != "http://host.containers.internal:11434" {
 		t.Fatalf("Windows Podman Ollama URL = %q", got)
 	}
 }
 
-func TestBuildPodmanRunArgsDoesNotAddWindowsHostOverrideOnOtherPlatforms(t *testing.T) {
+func TestBuildPodmanRunArgsDoesNotOverridePodmanMachineHostAlias(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		opts := RunOptions{
 			Name:        "omnideck",
@@ -250,27 +249,8 @@ func TestBuildPodmanRunArgsDoesNotAddWindowsHostOverrideOnOtherPlatforms(t *test
 			StateVolume: "omnideck-state",
 			Platform:    platform,
 		}
-		args := buildPodmanRunArgs(opts, "192.168.127.254")
+		args := buildPodmanRunArgs(opts)
 		assertNotContains(t, args, "--add-host")
-		assertNotContains(t, args, "host.containers.internal:192.168.127.254")
-	}
-}
-
-func TestParseWindowsPodmanHostAddress(t *testing.T) {
-	tests := []struct {
-		output string
-		want   string
-	}{
-		{"default via 192.168.127.1 dev podman-usermode\n", "192.168.127.1"},
-		{"192.168.127.254 STREAM host.containers.internal\n", "192.168.127.254"},
-		{"192.168.127.254 DGRAM\n192.168.127.254 RAW\n", "192.168.127.254"},
-		{"999.168.127.254 STREAM invalid\n", ""},
-		{"no address", ""},
-	}
-	for _, tt := range tests {
-		if got := parseWindowsPodmanHostAddress(tt.output); got != tt.want {
-			t.Errorf("parseWindowsPodmanHostAddress(%q) = %q, want %q", tt.output, got, tt.want)
-		}
 	}
 }
 
