@@ -239,6 +239,23 @@ func TestBuildPodmanRunArgsWindows(t *testing.T) {
 	}
 }
 
+func TestMCPCallbackUsesPublishedPortOnEveryPlatform(t *testing.T) {
+	for _, platform := range []string{"linux", "darwin", "windows"} {
+		for _, port := range []string{"", "2338", "49123"} {
+			t.Run(platform+"/"+port, func(t *testing.T) {
+				hostPort := port
+				if hostPort == "" {
+					hostPort = "2337"
+				}
+				args := buildPodmanRunArgs(RunOptions{Platform: platform, WebUIPort: port})
+				assertContains(t, args, "127.0.0.1:"+hostPort+":8080")
+				assertContains(t, args, "OMNIDECK_EXTERNAL_URL=http://localhost:"+hostPort)
+				assertContains(t, args, "PORT=8080")
+			})
+		}
+	}
+}
+
 func TestBuildPodmanRunArgsDoesNotOverridePodmanMachineHostAlias(t *testing.T) {
 	for _, platform := range []string{"darwin", "linux"} {
 		opts := RunOptions{

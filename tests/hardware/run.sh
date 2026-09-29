@@ -227,6 +227,10 @@ grep -Eq "^container_name:[[:space:]]+${instance}$" "${config_path}" || fail "Th
 current_step="verify web UI"
 wait_for_web_ui
 
+current_step="verify MCP callback origin"
+callback_origin="$("${engine}" exec "${instance}" printenv OMNIDECK_EXTERNAL_URL | tr -d '\r')"
+[[ "${callback_origin}" == "http://localhost:${port}" ]] || fail "MCP callback origin does not match the published browser port."
+
 current_step="status"
 run_cli status
 
