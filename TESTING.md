@@ -40,6 +40,14 @@ and therefore run only on dedicated machines or disposable virtual machines.
 
 Run the race detector separately with `make race`.
 
+MCP callback wiring is derived from the published host port, while the app
+still listens on container port 8080. Source tests cover default/custom ports
+on all platform argument paths, and layout-1 reconciliation to layout 2
+without deleting saved volumes or repeatedly recreating the container. The
+hardware lifecycle checks the actual callback environment inside the fixture
+container. These checks do not prove live provider OAuth or desktop popup
+behavior; those require the application and packaged-desktop suites.
+
 The `CI` workflow applies these requirements to pull requests and `main`:
 
 - `quality` runs the formatting, module, vet, staticcheck, and workflow checks;

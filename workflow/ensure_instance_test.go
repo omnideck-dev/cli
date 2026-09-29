@@ -187,3 +187,33 @@ func TestEnsureInstanceRefusesToReplaceMissingSavedStorage(t *testing.T) {
 		t.Fatalf("repair mutated storage/container: created=%v runs=%d", eng.created, len(eng.runOptions))
 	}
 }
+
+func TestEnsureInstanceUpgradesContainerWiringOnceWithoutRemovingStorage(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	current.LayoutVersion = 1 // Before the host-local MCP callback environment.
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running"},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error {
+		current = *desired
+		return nil
+	}, EnsureInstanceOptions{})
+	if err != nil || result.Action != "recreated" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if len(eng.created) != 0 || len(eng.removedVolume) != 0 || len(eng.runOptions) != 1 {
+		t.Fatalf("created=%v removed=%v runs=%d", eng.created, eng.removedVolume, len(eng.runOptions))
+	}
+	if eng.runOptions[0].HomeVolume != desired.HomeVolumeName() || eng.runOptions[0].StateVolume != desired.StateVolumeName() {
+		t.Fatal("container replacement changed the saved data volumes")
+	}
+	result, err = EnsureInstance(eng, &current, desired, func() error {
+		t.Fatal("matching layout should not rewrite config")
+		return nil
+	}, EnsureInstanceOptions{})
+	if err != nil || result.Action != "unchanged" || len(eng.runOptions) != 1 {
+		t.Fatalf("second reconciliation result=%#v err=%v runs=%d", result, err, len(eng.runOptions))
+	}
+}

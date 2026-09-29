@@ -183,6 +183,10 @@ try {
     $CurrentStep = "verify web UI"
     Wait-WebUI
 
+    $CurrentStep = "verify MCP callback origin"
+    $CallbackOrigin = & $Engine exec $Instance printenv OMNIDECK_EXTERNAL_URL
+    if ($LASTEXITCODE -ne 0 -or $CallbackOrigin.Trim() -ne "http://localhost:$Port") { throw "MCP callback origin does not match the published browser port." }
+
     $CurrentStep = "status"
     Invoke-Cli @("status")
 

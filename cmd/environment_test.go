@@ -5,8 +5,21 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/workflow"
 )
+
+func TestDesiredEnvironmentUpdatesLayoutWithoutMutatingSavedConfig(t *testing.T) {
+	current := config.DefaultConfig()
+	current.LayoutVersion = 1
+	desired, err := desiredEnvironmentConfig(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.LayoutVersion != 1 || desired.LayoutVersion != config.CurrentContainerLayout || desired.LayoutVersion <= current.LayoutVersion {
+		t.Fatalf("current=%d desired=%d", current.LayoutVersion, desired.LayoutVersion)
+	}
+}
 
 func TestDesiredEnvironmentConfigRejectsSharedMemoryAboveMemoryLimit(t *testing.T) {
 	originalMemory, originalSHM := environmentMemoryFlag, environmentShmFlag
