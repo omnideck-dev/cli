@@ -169,7 +169,8 @@ cleanup() {
     "${lab_dir}/lab.sh" run "${vm}" "rm -rf -- '${remote_root}'" >/dev/null 2>&1 || true
   fi
   if [[ "${registry_started}" == "1" ]]; then
-    docker rm -f "${registry_name}" >/dev/null 2>&1 || true
+    docker container inspect "${registry_name}" > "${output_dir}/registry-container-before-removal.json" 2>/dev/null || true
+    docker rm -f --volumes "${registry_name}" >/dev/null 2>&1 || true
   fi
   docker image rm -f "${fixture_local}" >/dev/null 2>&1 || true
   if [[ -n "${fixture_host}" ]]; then
@@ -179,9 +180,8 @@ cleanup() {
     "${lab_dir}/lab.sh" stop "${vm}" || exit_code=1
     vm_started=0
   fi
-  if [[ "${keep_vm}" != "1" ]]; then
-    "${lab_dir}/lab.sh" reset "${vm}" "$baseline" || exit_code=1
-  else
+  # The parent lease restores the baseline once after this child exits.
+  if [[ "${keep_vm}" == "1" ]]; then
     printf 'Guest kept stopped for debugging: %s\n' "${vm}"
   fi
   if [[ "${exit_code}" == "0" ]]; then

@@ -1,6 +1,9 @@
 import importlib.util
 import argparse
 import pathlib
+import os
+import sys
+import tempfile
 import unittest
 
 
@@ -38,6 +41,23 @@ class ScenarioCommandTest(unittest.TestCase):
         args = argparse.Namespace(command_json='"ssh tester@127.0.0.1"')
         with self.assertRaisesRegex(ValueError, "JSON array of strings"):
             DRIVER.scenario_command(args, ["fallback"])
+
+
+class TerminalLifecycleTest(unittest.TestCase):
+    def test_slave_closure_before_child_exit_preserves_nonzero_status(self) -> None:
+        # Reproduce the SSH teardown race after the restart-later checkpoint:
+        # the PTY closes while its process is briefly still alive.
+        command = [sys.executable, "-c", "import os,time; os.close(0); os.close(1); os.close(2); time.sleep(.15); os._exit(7)"]
+        with tempfile.TemporaryDirectory(dir=MODULE_PATH.parent) as output:
+            with DRIVER.TerminalSession(command, env=dict(os.environ), artifact_dir=pathlib.Path(output), name="close-race") as terminal:
+                self.assertEqual(terminal.wait(5), 7)
+
+    def test_actual_startup_error_exits_wait_before_ready_timeout(self) -> None:
+        command = [sys.executable, "-c", "import time; print('omnideck didn’t finish starting', flush=True); time.sleep(30)"]
+        with tempfile.TemporaryDirectory(dir=MODULE_PATH.parent) as output:
+            with DRIVER.TerminalSession(command, env=dict(os.environ), artifact_dir=pathlib.Path(output), name="fatal-startup") as terminal:
+                with self.assertRaisesRegex(AssertionError, "reached an error screen before ready"):
+                    terminal.expect_all(["omnideck is ready"], timeout=5, checkpoint="ready", fail_phrases=DRIVER.INSTALL_FAILURE_PHRASES)
 
 
 if __name__ == "__main__":
