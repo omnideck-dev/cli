@@ -169,7 +169,8 @@ cleanup() {
     "${lab_dir}/lab.sh" run "${vm}" "rm -rf -- '${remote_root}'" >/dev/null 2>&1 || true
   fi
   if [[ "${registry_started}" == "1" ]]; then
-    docker rm -f "${registry_name}" >/dev/null 2>&1 || true
+    docker container inspect "${registry_name}" > "${output_dir}/registry-container-before-removal.json" 2>/dev/null || true
+    docker rm -f --volumes "${registry_name}" >/dev/null 2>&1 || true
   fi
   docker image rm -f "${fixture_local}" >/dev/null 2>&1 || true
   if [[ -n "${fixture_host}" ]]; then
