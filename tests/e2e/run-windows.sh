@@ -121,7 +121,6 @@ fixture_guest="${registry_authority}/${fixture_repository}:${safe_run_id}"
 key_file="${LAB_VM_KEY}"
 known_hosts="${LAB_VM_KNOWN_HOSTS}"
 vm_started=0
-initial_reset=0
 registry_started=0
 remote_staged=0
 tls_pid=""
@@ -173,9 +172,8 @@ cleanup() {
     "${lab_dir}/lab.sh" stop windows || exit_code=1
     vm_started=0
   fi
-  if [[ "${initial_reset}" == "1" && "${keep_vm}" != "1" ]]; then
-    "${lab_dir}/lab.sh" reset windows "$baseline" || exit_code=1
-  elif [[ "${keep_vm}" == "1" ]]; then
+  # The parent lease restores the baseline once after this child exits.
+  if [[ "${keep_vm}" == "1" ]]; then
     printf 'Windows guest kept stopped for debugging.\n'
   fi
 
@@ -191,7 +189,6 @@ trap cleanup EXIT
 
 printf 'Resetting the leased Windows guest to its %s baseline.\n' "$baseline"
 "${lab_dir}/lab.sh" reset windows "$baseline"
-initial_reset=1
 
 printf 'Using prepared CLI build cache: %s\n' "${OMNIDECK_CLI_BUILD_KEY}"
 

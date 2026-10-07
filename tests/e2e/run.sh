@@ -180,9 +180,8 @@ cleanup() {
     "${lab_dir}/lab.sh" stop "${vm}" || exit_code=1
     vm_started=0
   fi
-  if [[ "${keep_vm}" != "1" ]]; then
-    "${lab_dir}/lab.sh" reset "${vm}" "$baseline" || exit_code=1
-  else
+  # The parent lease restores the baseline once after this child exits.
+  if [[ "${keep_vm}" == "1" ]]; then
     printf 'Guest kept stopped for debugging: %s\n' "${vm}"
   fi
   if [[ "${exit_code}" == "0" ]]; then
