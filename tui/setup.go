@@ -123,6 +123,8 @@ type SetupModel struct {
 	// Failure.
 	errorMsg         string
 	errorDetail      string
+	errorTitle       string
+	errorHint        string
 	errorShowDetails bool
 
 	quickCheckSpinner spinner.Model
