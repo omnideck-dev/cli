@@ -14,7 +14,7 @@ LDFLAGS := -ldflags "\
   -X main.date=$(DATE) \
 "
 
-.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint lint vulnerability verify clean release hardware-test macos-lab-test macos-e2e vm-e2e vm-e2e-matrix vm-e2e-purge vm-lab-cleanup
+.PHONY: build test race vet fmt-check tidy-check staticcheck actionlint harness-check lint vulnerability verify clean release hardware-test macos-lab-test macos-e2e vm-e2e vm-e2e-matrix vm-e2e-purge vm-lab-cleanup
 
 build:
 	go build $(LDFLAGS) -o $(BINARY) .
@@ -45,7 +45,11 @@ staticcheck:
 actionlint:
 	go run github.com/rhysd/actionlint/cmd/actionlint@$(ACTIONLINT_VERSION)
 
-lint: fmt-check tidy-check vet staticcheck actionlint
+harness-check:
+	python3 -m unittest discover -s tests/e2e -p 'test_*.py' -v
+	bash -n tests/e2e/run.sh tests/e2e/run-windows.sh tests/e2e/macos_guest.sh tests/hardware/run.sh
+
+lint: fmt-check tidy-check vet staticcheck actionlint harness-check
 
 vulnerability:
 	go run golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION) ./...

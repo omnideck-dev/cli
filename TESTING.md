@@ -17,7 +17,7 @@ Omnideck uses four separate layers. No layer substitutes for a later layer.
 
 | Layer | Implementation | Required evidence |
 |---|---|---|
-| Source | Go unit and smoke tests, formatting, module consistency, vet, staticcheck, actionlint, race detection, dependency review, and vulnerability scanning | Command result or GitHub Actions run for the exact commit |
+| Source | Go unit and smoke tests, isolated Python harness tests, shell syntax, formatting, module consistency, vet, staticcheck, actionlint, race detection, dependency review, and vulnerability scanning | Command result or GitHub Actions run for the exact commit |
 | Release contract | [`tests/releasecontract`](tests/releasecontract/README.md) | JSON and optional JUnit reports for the exact binary or archive |
 | Hardware lifecycle | [`tests/hardware`](tests/hardware/README.md) and [`tests/e2e`](tests/e2e/README.md) | Harness report, terminal transcripts, and diagnostics from a dedicated machine or disposable VM using Podman |
 | Manual journey | [`tests/manual`](tests/manual/README.md) | A completed procedure with host inventory, commands, observations, cleanup, and pass/fail/blocked result |
@@ -35,10 +35,17 @@ and therefore run only on dedicated machines or disposable virtual machines.
 - `go vet ./...`;
 - staticcheck with the version and checks configured in the `Makefile`;
 - actionlint with the version configured in the `Makefile`;
+- Python harness unit tests and shell syntax checks (`make harness-check`);
 - `go test ./...`; and
 - govulncheck with the version configured in the `Makefile`.
 
 Run the race detector separately with `make race`.
+
+The harness source checks require Python 3 and Bash. They use temporary PTYs and
+fake lab/engine commands; they do not start a VM, install software, or run the
+CLI lifecycle on the developer host. Cleanup tests verify that children stop
+their guest and record results while the parent lease owns the final baseline
+restore, including failures and explicit keep-state runs.
 
 MCP callback wiring is derived from the published host port, while the app
 still listens on container port 8080. Source tests cover default/custom ports
@@ -50,7 +57,7 @@ behavior; those require the application and packaged-desktop suites.
 
 The `CI` workflow applies these requirements to pull requests and `main`:
 
-- `quality` runs the formatting, module, vet, staticcheck, and workflow checks;
+- `quality` runs formatting, module, vet, staticcheck, workflow, and harness source checks;
 - `vulnerability-check` verifies downloaded modules and scans reachable code;
 - `race` runs the Go test suite with the race detector;
 - native test jobs run vet, tests, a build, and the portable release contract
