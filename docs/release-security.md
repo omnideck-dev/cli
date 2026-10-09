@@ -1,7 +1,8 @@
 # Release security
 
-Omnideck release archives are built only by the tag-triggered GitHub Actions
-workflow. The workflow tests the source, cross-builds each supported platform,
+Published omnideck release archives are built by the tag-triggered GitHub Actions
+workflow; manual runs produce unpublished proof artifacts. The workflow tests
+the source, builds each supported platform,
 creates checksums and SPDX software bills of materials (SBOMs), records GitHub
 artifact attestations, and then pauses for a maintainer to approve publication.
 
