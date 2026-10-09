@@ -30,7 +30,7 @@ ditto -c -k "$binary" "$workdir/omnideck.zip"
 notary_status=0
 xcrun notarytool submit "$workdir/omnideck.zip" \
   --key "$APPLE_API_KEY_PATH" --key-id "$APPLE_API_KEY" --issuer "$APPLE_API_ISSUER" \
-  --wait --timeout 20m --output-format json > "$workdir/submission.json" || notary_status=$?
+  --wait --timeout 90m --output-format json > "$workdir/submission.json" || notary_status=$?
 cat "$workdir/submission.json"
 [[ "$notary_status" == 0 ]] || { echo "Notarization command failed or timed out; retain the submission ID above for follow-up" >&2; exit "$notary_status"; }
 python3 - "$workdir/submission.json" <<'PY'
