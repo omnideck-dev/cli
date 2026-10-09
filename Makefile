@@ -47,7 +47,7 @@ actionlint:
 
 harness-check:
 	python3 -m unittest discover -s tests/e2e -p 'test_*.py' -v
-	bash -n tests/e2e/run.sh tests/e2e/run-windows.sh tests/e2e/macos_guest.sh tests/hardware/run.sh
+	bash -n tests/e2e/run.sh tests/e2e/run-windows.sh tests/e2e/macos_guest.sh tests/hardware/run.sh scripts/macos/*.sh
 
 lint: fmt-check tidy-check vet staticcheck actionlint harness-check
 

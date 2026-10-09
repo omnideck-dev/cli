@@ -1,6 +1,7 @@
 name: Release
 
 on:
+  workflow_dispatch:
   push:
     tags:
       - "v*"
@@ -11,6 +12,7 @@ permissions:
 env:
   # Keep archive timestamps and tool output independent of the runner locale.
   TZ: UTC
+  RELEASE_VERSION: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'signing-proof' }}
 
 concurrency:
   group: release-${{ github.ref }}
@@ -27,6 +29,7 @@ jobs:
           persist-credentials: false
 
       - name: Validate semantic version tag
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           if [[ ! "${GITHUB_REF_NAME}" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
@@ -45,6 +48,7 @@ jobs:
           fi
 
       - name: Require reviewed release notes
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           notes="docs/releases/${GITHUB_REF_NAME}.md"
@@ -73,7 +77,9 @@ jobs:
 
   build:
     needs: verify
-    runs-on: ubuntu-24.04
+    runs-on: ${{ matrix.goos == 'darwin' && 'macos-15' || 'ubuntu-24.04' }}
+    environment: ${{ matrix.goos == 'darwin' && 'desktop-signing' || 'release-build' }}
+    timeout-minutes: 45
     permissions:
       contents: read
       id-token: write
@@ -123,10 +129,10 @@ jobs:
           GOARCH: ${{ matrix.goarch }}
           CGO_ENABLED: "0"
         run: |
-          VERSION=${GITHUB_REF_NAME}
+          VERSION=${RELEASE_VERSION}
           COMMIT=$(git rev-parse --short=12 HEAD)
           SOURCE_DATE_EPOCH=$(git show -s --format=%ct HEAD)
-          DATE=$(date -u -d "@${SOURCE_DATE_EPOCH}" +%Y-%m-%dT%H:%M:%SZ)
+          DATE=$(python3 -c 'import datetime,sys; print(datetime.datetime.fromtimestamp(int(sys.argv[1]), datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))' "${SOURCE_DATE_EPOCH}")
           LDFLAGS="-X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE}"
           mkdir -p dist
 
@@ -138,9 +144,30 @@ jobs:
           # Keep Go build/symbol metadata for transparency and malware-analysis
           # tooling. -trimpath removes runner-specific filesystem paths.
           go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "dist/${BIN}" .
-          touch -d "@${SOURCE_DATE_EPOCH}" "dist/${BIN}"
-          sha256sum "dist/${BIN}"
+          python3 -c 'import os,sys; t=int(sys.argv[2]); os.utime(sys.argv[1], (t,t))' "dist/${BIN}" "${SOURCE_DATE_EPOCH}"
+          shasum -a 256 "dist/${BIN}"
           go version -m "dist/${BIN}"
+
+      - name: Configure Developer ID signing
+        if: matrix.goos == 'darwin'
+        env:
+          APPLE_TEAM_ID: 2FL6BUG8Q4
+          DESKTOP_MAC_CERTIFICATE_P12_BASE64: ${{ secrets.DESKTOP_MAC_CERTIFICATE_P12_BASE64 }}
+          DESKTOP_MAC_CERTIFICATE_PASSWORD: ${{ secrets.DESKTOP_MAC_CERTIFICATE_PASSWORD }}
+          DESKTOP_APPLE_API_KEY_ID: ${{ secrets.DESKTOP_APPLE_API_KEY_ID }}
+          DESKTOP_APPLE_API_ISSUER_ID: ${{ secrets.DESKTOP_APPLE_API_ISSUER_ID }}
+          DESKTOP_APPLE_API_PRIVATE_KEY_BASE64: ${{ secrets.DESKTOP_APPLE_API_PRIVATE_KEY_BASE64 }}
+        run: scripts/macos/configure-signing.sh
+
+      - name: Sign and notarize macOS CLI
+        if: matrix.goos == 'darwin'
+        env:
+          APPLE_TEAM_ID: 2FL6BUG8Q4
+        run: scripts/macos/sign-and-notarize.sh dist/omnideck
+
+      - name: Remove signing material
+        if: always() && matrix.goos == 'darwin'
+        run: scripts/macos/cleanup-signing.sh
 
       - name: Generate executable SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -178,6 +205,8 @@ jobs:
           ARCHIVE=omnideck-${GOOS}-${GOARCH}
           if [ "${GOOS}" = "windows" ]; then
             (cd dist && zip -X -q "${ARCHIVE}.zip" "${BIN}")
+          elif [ "${GOOS}" = "darwin" ]; then
+            python3 scripts/macos/package-cli.py "dist/${BIN}" "dist/${ARCHIVE}.tar.gz" "${SOURCE_DATE_EPOCH}"
           else
             chmod +x "dist/${BIN}"
             tar --sort=name \
@@ -236,10 +265,14 @@ jobs:
             goos: linux
             goarch: arm64
             archive: omnideck-linux-arm64.tar.gz
-          - runs-on: macos-latest
+          - runs-on: macos-15
             goos: darwin
             goarch: arm64
             archive: omnideck-darwin-arm64.tar.gz
+          - runs-on: macos-15-intel
+            goos: darwin
+            goarch: amd64
+            archive: omnideck-darwin-amd64.tar.gz
           - runs-on: windows-latest
             goos: windows
             goarch: amd64
@@ -259,6 +292,17 @@ jobs:
           name: omnideck-${{ matrix.goos }}-${{ matrix.goarch }}
           path: release-artifact
 
+      - name: Verify packaged Developer ID and notarization
+        if: matrix.goos == 'darwin'
+        shell: bash
+        env:
+          RELEASE_ARCHIVE: ${{ matrix.archive }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/signed-cli"
+          tar -xzf "release-artifact/${RELEASE_ARCHIVE}" -C "${RUNNER_TEMP}/signed-cli"
+          codesign --verify --strict --check-notarization --verbose=4 "${RUNNER_TEMP}/signed-cli/omnideck"
+          codesign --display --verbose=4 "${RUNNER_TEMP}/signed-cli/omnideck" 2>&1 | grep '^TeamIdentifier=2FL6BUG8Q4$'
+
       - name: Execute the packaged binary contract
         shell: bash
         env:
@@ -270,7 +314,7 @@ jobs:
           go run ./tests/releasecontract \
             --archive "release-artifact/${RELEASE_ARCHIVE}" \
             --mode portable \
-            --expected-version "${GITHUB_REF_NAME}" \
+            --expected-version "${RELEASE_VERSION}" \
             --expected-os "${EXPECTED_GOOS}" \
             --expected-arch "${EXPECTED_GOARCH}" \
             --report "${RUNNER_TEMP}/release-contract/report.json" \
@@ -285,6 +329,7 @@ jobs:
           if-no-files-found: warn
 
   publish:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, portable-contract]
     runs-on: ubuntu-24.04
     environment: release

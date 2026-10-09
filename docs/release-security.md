@@ -101,3 +101,35 @@ The repository must never store a `.pfx` file or certificate password. Signing
 changes the executable bytes, so the unsigned pre-signing build remains the
 reproducible artifact while provenance, the Authenticode signature, and the
 timestamp protect the published result.
+
+## macOS Developer ID signing
+
+Intel and Apple Silicon release builds run on macOS and require the protected
+`desktop-signing` environment. Only `main` and `v*` tags may use it, with Larry's
+approval. Other platform jobs use the unprivileged `release-build` environment.
+The certificate archive must include its private key and Apple Developer ID
+intermediate certificate. Five environment secrets configure the ephemeral
+signing keychain and Apple notary authentication:
+
+- `DESKTOP_MAC_CERTIFICATE_P12_BASE64`
+- `DESKTOP_MAC_CERTIFICATE_PASSWORD`
+- `DESKTOP_APPLE_API_KEY_ID`
+- `DESKTOP_APPLE_API_ISSUER_ID`
+- `DESKTOP_APPLE_API_PRIVATE_KEY_BASE64`
+
+The scripts require Developer ID Application for team `2FL6BUG8Q4`, hardened
+runtime, an Apple timestamp, and an Accepted notarization response. Signing
+happens before executable SBOM generation, attestations, archive creation, and
+checksums, so all integrity records refer to the final signed bytes. Temporary
+signing material is removed even when a build fails.
+
+Standalone executables and ZIP submissions cannot have notarization tickets
+stapled to them. Apple's ticket is checked online by `codesign
+--check-notarization`; first-use Gatekeeper verification can require network
+access. The desktop's bundled CLI is independently signed within the desktop
+app and covered by its notarized, stapled distribution.
+
+Before tagging a release, dispatch `release.yml` from `main` to build and verify
+`signing-proof` artifacts without publication. Tag releases remain immutable;
+existing unsigned releases are not overwritten. Signing does not establish
+Windows publisher trust.
