@@ -39,4 +39,4 @@ submission = json.load(open(sys.argv[1]))
 if submission.get('status') != 'Accepted':
     raise SystemExit('Apple did not accept the signed CLI')
 PY
-codesign --verify --strict --check-notarization --verbose=4 "$binary"
+codesign --verify --strict --check-notarization -R "=notarized" --verbose=4 "$binary"

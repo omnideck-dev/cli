@@ -126,7 +126,7 @@ signing material is removed even when a build fails.
 
 Standalone executables and ZIP submissions cannot have notarization tickets
 stapled to them. Apple's ticket is checked online by `codesign
---check-notarization`; first-use Gatekeeper verification can require network
+--check-notarization -R "=notarized"`; first-use Gatekeeper verification can require network
 access. The desktop's bundled CLI is independently signed within the desktop
 app and covered by its notarized, stapled distribution.
 

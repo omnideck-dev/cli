@@ -300,7 +300,7 @@ jobs:
         run: |
           mkdir -p "${RUNNER_TEMP}/signed-cli"
           tar -xzf "release-artifact/${RELEASE_ARCHIVE}" -C "${RUNNER_TEMP}/signed-cli"
-          codesign --verify --strict --check-notarization --verbose=4 "${RUNNER_TEMP}/signed-cli/omnideck"
+          codesign --verify --strict --check-notarization -R "=notarized" --verbose=4 "${RUNNER_TEMP}/signed-cli/omnideck"
           codesign --display --verbose=4 "${RUNNER_TEMP}/signed-cli/omnideck" 2>&1 | grep '^TeamIdentifier=2FL6BUG8Q4$'
 
       - name: Execute the packaged binary contract

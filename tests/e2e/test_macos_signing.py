@@ -26,7 +26,7 @@ class MacosSigningTests(unittest.TestCase):
                 self.assertEqual((item.uid, item.gid, item.mode, item.mtime), (0, 0, 0o755, 1000))
                 self.assertEqual(archive.extractfile(item).read(), binary.read_bytes())
 
-    def signing_run(self, status='Accepted', team='2FL6BUG8Q4'):
+    def signing_run(self, status='Accepted', team='2FL6BUG8Q4', ticket='valid'):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
@@ -37,6 +37,7 @@ class MacosSigningTests(unittest.TestCase):
             'uname': '#!/bin/bash\necho Darwin\n',
             'codesign': '''#!/bin/bash
 printf '%s\\n' "$*" >> "$TRACE"
+if [[ "$*" == *"=notarized"* && "$TICKET" == missing ]]; then exit 3; fi
 if [[ "$1" == --display ]]; then
   printf 'CodeDirectory v=20500 size=281 flags=0x10000(runtime)\\nAuthority=Developer ID Application: Test\\nTeamIdentifier=%s\\nTimestamp=Oct 8 2026\\n' "$TEAM"
 fi
@@ -54,7 +55,7 @@ printf '{"id":"test-submission","status":"%s"}\\n' "$STATUS"
         binary = root / 'omnideck'
         binary.write_bytes(b'test signed Mach-O fixture')
         env = dict(os.environ, PATH=f'{tools}:'+os.environ['PATH'], TRACE=str(trace),
-                   TEAM=team, STATUS=status, RUNNER_TEMP=str(root),
+                   TEAM=team, STATUS=status, TICKET=ticket, RUNNER_TEMP=str(root),
                    APPLE_SIGNING_IDENTITY='Developer ID Application: Test',
                    APPLE_TEAM_ID='2FL6BUG8Q4', APPLE_API_KEY='test',
                    APPLE_API_ISSUER='test', APPLE_API_KEY_PATH=str(root/'test.p8'))
@@ -66,7 +67,12 @@ printf '{"id":"test-submission","status":"%s"}\\n' "$STATUS"
         result, trace = self.signing_run()
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('--options runtime --timestamp', trace)
-        self.assertIn('--check-notarization', trace)
+        self.assertIn('--check-notarization -R =notarized', trace)
+
+    def test_missing_online_ticket_blocks_packaging(self):
+        result, trace = self.signing_run(ticket='missing')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('--check-notarization -R =notarized', trace)
 
     def test_rejected_submission_blocks_packaging(self):
         result, trace = self.signing_run(status='Invalid')
