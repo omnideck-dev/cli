@@ -79,7 +79,7 @@ jobs:
     needs: verify
     runs-on: ${{ matrix.goos == 'darwin' && 'macos-15' || 'ubuntu-24.04' }}
     environment: ${{ matrix.goos == 'darwin' && 'desktop-signing' || 'release-build' }}
-    timeout-minutes: 45
+    timeout-minutes: 120
     permissions:
       contents: read
       id-token: write
@@ -164,6 +164,15 @@ jobs:
         env:
           APPLE_TEAM_ID: 2FL6BUG8Q4
         run: scripts/macos/sign-and-notarize.sh dist/omnideck
+
+      - name: Preserve interrupted macOS executable
+        if: failure() && matrix.goos == 'darwin'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: signing-recovery-darwin-${{ matrix.goarch }}-${{ github.run_id }}
+          path: dist/omnideck
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Remove signing material
         if: always() && matrix.goos == 'darwin'

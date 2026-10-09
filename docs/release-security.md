@@ -122,7 +122,11 @@ The scripts require Developer ID Application for team `2FL6BUG8Q4`, hardened
 runtime, an Apple timestamp, and an Accepted notarization response. Signing
 happens before executable SBOM generation, attestations, archive creation, and
 checksums, so all integrity records refer to the final signed bytes. Temporary
-signing material is removed even when a build fails.
+signing material is removed even when a build fails. Notarization waits up to
+ninety minutes. Failed Mac jobs retain the executable in a separate recovery
+artifact, allowing a maintainer to inspect the existing submission and verify
+its ticket later without re-signing. Recovery artifacts are not release assets
+and must pass the same trust checks before any distribution.
 
 Standalone executables and ZIP submissions cannot have notarization tickets
 stapled to them. Apple's ticket is checked online by `codesign
