@@ -9,16 +9,17 @@ import (
 )
 
 var restartCmd = &cobra.Command{
-	Use:   "restart",
-	Short: "Restart an Omnideck installation",
-	RunE:  runRestart,
+	Use:          "restart",
+	Short:        "Restart an Omnideck installation",
+	SilenceUsage: true,
+	RunE:         runRestart,
 }
 
 func init() {
 	rootCmd.AddCommand(restartCmd)
 }
 
-func runRestart(_ *cobra.Command, _ []string) error {
+func runRestart(cmd *cobra.Command, _ []string) error {
 	if err := requireConfigMulti(); err != nil {
 		return err
 	}
@@ -37,7 +38,10 @@ func runRestart(_ *cobra.Command, _ []string) error {
 				return actionErr
 			}
 			_, actionErr := workflow.EnsureStarted(eng, cfg.ContainerName)
-			return actionErr
+			if actionErr != nil {
+				return actionErr
+			}
+			return workflow.WaitForApplication(cmd.Context(), eng, cfg)
 		})
 	}
 
@@ -57,6 +61,10 @@ func runRestart(_ *cobra.Command, _ []string) error {
 	if _, err := workflow.EnsureStarted(eng, cfg.ContainerName); err != nil {
 		fmt.Println(styles.CrossMark)
 		return err
+	}
+	if err := workflow.WaitForApplication(cmd.Context(), eng, cfg); err != nil {
+		fmt.Println(styles.CrossMark)
+		return startupTextError(err)
 	}
 	fmt.Println(styles.CheckMark)
 	return nil
