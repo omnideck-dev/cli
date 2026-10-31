@@ -121,6 +121,10 @@ func environmentJSONError(err error) *jsonCmdError {
 	if errors.Is(err, context.Canceled) {
 		return newJSONError(ErrCodeCancelled, err.Error())
 	}
+	var startup *workflow.StartupFailure
+	if errors.As(err, &startup) {
+		return newJSONError(startup.Code, startup.Error()).withDetail(startup.Detail()).withHint("Run omnideck logs for technical details. Retry after correcting the problem.")
+	}
 	message := err.Error()
 	lower := strings.ToLower(message)
 	if errors.Is(err, workflow.ErrPortInUse) ||
@@ -146,7 +150,7 @@ func environmentStageJSONError(stage string, err error) *jsonCmdError {
 	return structured
 }
 
-func runEnvironmentEnsure(_ *cobra.Command, _ []string) error {
+func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	if nameFlag == "" {
 		err := newJSONError(ErrCodeMissingRequiredFlag, "environment ensure requires --name")
 		if jsonFlag {
@@ -215,6 +219,12 @@ func runEnvironmentEnsure(_ *cobra.Command, _ []string) error {
 			return nd.fail(lastStage, environmentStageJSONError(lastStage, ensureErr))
 		}
 		return ensureErr
+	}
+	if err := workflow.WaitForApplication(cmd.Context(), eng, desired); err != nil {
+		if nd != nil {
+			return nd.fail("startup", environmentJSONError(err))
+		}
+		return startupTextError(err)
 	}
 	payload := environmentEnsurePayload{
 		Changed: result.Changed,

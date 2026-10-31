@@ -392,7 +392,7 @@ An RC requires every beta gate plus recorded evidence for:
 - multiple simultaneous instances;
 - instance removal with both keep and delete choices;
 - local Ollama connectivity where applicable; and
-- Desktop/Tauri compatibility with JSON contract 3 and runtime schema 4,
+- Desktop/Tauri compatibility with JSON contract 4 and runtime schema 4,
   including valid status JSON accompanied by a nonzero process exit where the
   command reports a non-ready state.
 
@@ -449,3 +449,20 @@ preferred. Once a public asset and its provenance are independently available,
 do not retain an additional local payload merely as evidence. Large local
 evidence must have a specific unresolved diagnostic purpose and should be
 removed after that purpose is satisfied.
+
+## Application startup reporting
+
+`workflow/startup_test.go` covers timestamped Podman logs, the boundary between
+old failures and a new user retry, automatic restart loops, HTTP readiness, and
+cancellation. `cmd/startup_test.go` checks matching plain-text and JSON errors;
+the release-contract checks now validate JSON contract 4, including the new
+startup error codes.
+
+For a native proof, use a cleanup-owning VM-lab lease and a development app image
+that emits version-1 startup records. Seed an invalid migration record in only
+the test instance's volume, then check `start` and `wait` exit nonzero with
+`MIGRATION_FAILED`, including with Podman's normal automatic restart policy.
+Correct the fixture, run `restart` and `wait`, and require HTTP readiness plus
+an unchanged saved-data sentinel. Use the lane's actual `runtime status`
+resource policy when sharing the fixture with Desktop. Never corrupt an existing
+user installation or substitute a development binary for a published artifact.
