@@ -110,11 +110,19 @@ func streamCommandOutput(action string, cmd *exec.Cmd, msgs chan<- string) error
 // runtimeCommandError keeps the engine's explanation alongside its exit code.
 // Full-screen callers cannot safely stream stderr directly to the terminal.
 func runtimeCommandError(action string, err error, output []byte) error {
+	return runtimeCommandErrorForPlatform(runtime.GOOS, action, err, output)
+}
+
+func runtimeCommandErrorForPlatform(goos, action string, err error, output []byte) error {
 	detail := cleanCommandOutput(string(output))
 	if detail == "" {
 		return fmt.Errorf("%s: %w (the container engine did not provide more details)", action, err)
 	}
-	return fmt.Errorf("%s: %w\n%s", action, err, detail)
+	cause := fmt.Errorf("%s: %w\n%s", action, err, detail)
+	if isWindowsWSLCgroupFailure(goos, action, detail) {
+		return &WSLCgroupError{Err: cause}
+	}
+	return cause
 }
 
 func cleanCommandOutput(output string) string {

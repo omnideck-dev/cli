@@ -203,9 +203,9 @@ func checkContractSchemas(contractsDir string) error {
 		"json/v2/version.schema.json",
 		"json/v2/error.schema.json",
 		"json/v2/stage-event.schema.json",
-		"json/v3/version.schema.json",
-		"json/v3/error.schema.json",
-		"json/v3/stage-event.schema.json",
+		"json/v4/version.schema.json",
+		"json/v4/error.schema.json",
+		"json/v4/stage-event.schema.json",
 		"runtime/v4/status.schema.json",
 	} {
 		if _, err := compileSchema(contractsDir, relative); err != nil {
@@ -226,7 +226,7 @@ func checkVersionJSON(binary, expectedVersion, contractsDir string) error {
 	if err := requireJSONStderrEmpty(result); err != nil {
 		return err
 	}
-	if err := validateJSONSchema(contractsDir, "json/v3/version.schema.json", result.stdout); err != nil {
+	if err := validateJSONSchema(contractsDir, "json/v4/version.schema.json", result.stdout); err != nil {
 		return err
 	}
 	var payload struct {
@@ -244,8 +244,8 @@ func checkVersionJSON(binary, expectedVersion, contractsDir string) error {
 	if payload.Version == "" || payload.Commit == "" || payload.Date == "" {
 		return fmt.Errorf("incomplete version payload: %+v", payload)
 	}
-	if payload.JSONContract != 3 {
-		return fmt.Errorf("jsonContract = %d, want 3", payload.JSONContract)
+	if payload.JSONContract != 4 {
+		return fmt.Errorf("jsonContract = %d, want 4", payload.JSONContract)
 	}
 	return nil
 }
@@ -284,7 +284,7 @@ func checkHelp(binary string) error {
 }
 
 func checkSubcommandHelp(binary string) error {
-	for _, command := range []string{"add", "list", "start", "stop", "restart", "status", "logs", "doctor", "config", "environment", "runtime", "update", "remove"} {
+	for _, command := range []string{"add", "list", "start", "stop", "restart", "wait", "status", "logs", "doctor", "config", "environment", "runtime", "update", "remove"} {
 		result, err := invoke(binary, nil, command, "--help")
 		if err != nil {
 			return err
@@ -481,7 +481,7 @@ func checkAmbiguousInstances(binary, contractsDir string) error {
 	if err := requireJSONStderrEmpty(result); err != nil {
 		return err
 	}
-	if err := validateJSONSchema(contractsDir, "json/v3/error.schema.json", result.stdout); err != nil {
+	if err := validateJSONSchema(contractsDir, "json/v4/error.schema.json", result.stdout); err != nil {
 		return err
 	}
 	var envelope struct {
@@ -598,7 +598,7 @@ func decodeSingleJSON(text string, target any) error {
 }
 
 func requireErrorCode(text, expected, contractsDir string) error {
-	if err := validateJSONSchema(contractsDir, "json/v3/error.schema.json", text); err != nil {
+	if err := validateJSONSchema(contractsDir, "json/v4/error.schema.json", text); err != nil {
 		return err
 	}
 	var envelope struct {

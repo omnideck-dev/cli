@@ -42,13 +42,20 @@ inventory() {
   } > "$result_dir/inventory-$suffix.txt"
 }
 
+remove_registry() {
+  if podman container exists "$registry_container"; then
+    podman container inspect "$registry_container" > "$result_dir/registry-container-before-removal.json"
+    podman rm -f --volumes "$registry_container" >/dev/null
+  fi
+}
+
 cleanup_resources() {
   if [[ "$test_instance_selected" == 1 && "$instance" =~ ^omnideck[0-9]*$ ]]; then
     podman rm -f "$instance" >/dev/null 2>&1 || true
     podman volume rm -f "$instance-home" "$instance-state" >/dev/null 2>&1 || true
   fi
   rm -f -- "$ownership_marker"
-  podman rm -f "$registry_container" >/dev/null 2>&1 || true
+  remove_registry || true
   podman rmi -f "$published_image" "$fixture_image" >/dev/null 2>&1 || true
   rm -rf -- "$config_dir"
 }
@@ -203,7 +210,7 @@ current_step='removal cleanup contract'
 [[ ! -e "$config_dir/instances/$instance.yaml" ]]
 
 current_step='unattended CLI lifecycle'
-podman rm -f "$registry_container" >/dev/null
+remove_registry
 chmod +x "$work_dir/hardware-run.sh"
 OMNIDECK_HARDWARE_CLI="$binary" \
 OMNIDECK_HARDWARE_ENGINE=podman \

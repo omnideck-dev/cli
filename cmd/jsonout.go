@@ -20,7 +20,7 @@ import (
 // JSON_MODE_SPEC.md changes in a way that isn't backward compatible. A
 // calling GUI checks this against the value it was built against before
 // trusting any other --json output.
-const jsonContract = 3
+const jsonContract = 4
 
 // Closed set of --json error codes. Every error surfaced under --json must
 // resolve to one of these — see JSON_MODE_SPEC.md's "Structured error shape".
@@ -43,6 +43,8 @@ const (
 	ErrCodeRuntimeSetupFailed    = "RUNTIME_SETUP_FAILED"
 	ErrCodePortInUse             = "PORT_IN_USE"
 	ErrCodeContainerConflict     = "CONTAINER_CONFLICT"
+	ErrCodeMigrationFailed       = "MIGRATION_FAILED"
+	ErrCodeAppStartupFailed      = "APP_STARTUP_FAILED"
 	ErrCodeInternal              = "INTERNAL_ERROR"
 )
 
@@ -548,7 +550,7 @@ type removeResultPayload struct {
 // status call. On failure it emits the standard structured error.
 func runLifecycleJSON(cfg *config.Config, eng engine.Engine, action func() error) error {
 	if err := action(); err != nil {
-		return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		return writeJSONError(environmentJSONError(err))
 	}
 	writeJSON(gatherStatusPayload(cfg, eng))
 	return nil

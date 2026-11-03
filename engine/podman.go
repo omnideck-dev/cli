@@ -270,6 +270,9 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 
 	// PORT tells the container app which internal port to bind on.
 	args = append(args, "-e", "PORT=8080")
+	// OAuth redirects must use the host browser's published port, not the
+	// container port or a request Host header. No user configuration is needed.
+	args = append(args, "-e", "OMNIDECK_EXTERNAL_URL=http://localhost:"+hostPort)
 	// The host browser or native Desktop shell owns the UI. Do not start a
 	// second desktop process inside the application container.
 	args = append(args, "-e", "ENABLE_DESKTOP=false")

@@ -112,6 +112,8 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 		"RUNTIME_SETUP_FAILED":    true,
 		"PORT_IN_USE":             true,
 		"CONTAINER_CONFLICT":      true,
+		"MIGRATION_FAILED":        true,
+		"APP_STARTUP_FAILED":      true,
 		"INTERNAL_ERROR":          true,
 	}
 	got := map[string]bool{
@@ -133,6 +135,8 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 		ErrCodeRuntimeSetupFailed:    true,
 		ErrCodePortInUse:             true,
 		ErrCodeContainerConflict:     true,
+		ErrCodeMigrationFailed:       true,
+		ErrCodeAppStartupFailed:      true,
 		ErrCodeInternal:              true,
 	}
 	if len(got) != len(want) {
@@ -163,11 +167,14 @@ func TestEveryJSONErrorResolvesToAClosedCode(t *testing.T) {
 		ErrCodePackageIndexFailed: true, ErrCodeInstallerFailed: true,
 		ErrCodeDownloadFailed: true, ErrCodeUnsupported: true, ErrCodeRuntimeSetupFailed: true,
 		ErrCodePortInUse: true, ErrCodeContainerConflict: true,
+		ErrCodeMigrationFailed: true, ErrCodeAppStartupFailed: true,
 		ErrCodeInternal: true,
 	}
 	inputs := []error{
 		errors.New("some arbitrary internal failure"),
 		newJSONError(ErrCodeContainerNotFound, "gone"),
+		environmentJSONError(&workflow.StartupFailure{Code: ErrCodeMigrationFailed, Phase: "migrations", Step: "016_connection_tool_categories"}),
+		environmentJSONError(&workflow.StartupFailure{Code: ErrCodeAppStartupFailed}),
 	}
 	for _, err := range inputs {
 		out := captureStdout(t, func() { _ = writeJSONError(err) })

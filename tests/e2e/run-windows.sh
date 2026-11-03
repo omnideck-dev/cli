@@ -121,7 +121,6 @@ fixture_guest="${registry_authority}/${fixture_repository}:${safe_run_id}"
 key_file="${LAB_VM_KEY}"
 known_hosts="${LAB_VM_KNOWN_HOSTS}"
 vm_started=0
-initial_reset=0
 registry_started=0
 remote_staged=0
 tls_pid=""
@@ -162,7 +161,8 @@ cleanup() {
     wait "${tls_pid}" 2>/dev/null || true
   fi
   if [[ "${registry_started}" == "1" ]]; then
-    docker rm -f "${registry_name}" >/dev/null 2>&1 || true
+    docker container inspect "${registry_name}" > "${output_dir}/registry-container-before-removal.json" 2>/dev/null || true
+    docker rm -f --volumes "${registry_name}" >/dev/null 2>&1 || true
   fi
   docker image rm -f "${fixture_local}" >/dev/null 2>&1 || true
   if [[ -n "${fixture_host}" ]]; then
@@ -172,9 +172,8 @@ cleanup() {
     "${lab_dir}/lab.sh" stop windows || exit_code=1
     vm_started=0
   fi
-  if [[ "${initial_reset}" == "1" && "${keep_vm}" != "1" ]]; then
-    "${lab_dir}/lab.sh" reset windows "$baseline" || exit_code=1
-  elif [[ "${keep_vm}" == "1" ]]; then
+  # The parent lease restores the baseline once after this child exits.
+  if [[ "${keep_vm}" == "1" ]]; then
     printf 'Windows guest kept stopped for debugging.\n'
   fi
 
@@ -190,7 +189,6 @@ trap cleanup EXIT
 
 printf 'Resetting the leased Windows guest to its %s baseline.\n' "$baseline"
 "${lab_dir}/lab.sh" reset windows "$baseline"
-initial_reset=1
 
 printf 'Using prepared CLI build cache: %s\n' "${OMNIDECK_CLI_BUILD_KEY}"
 
@@ -235,6 +233,23 @@ printf 'Starting and verifying the %s Windows guest.\n' "$suite"
 vm_started=1
 "${lab_dir}/lab.sh" wait windows
 "${lab_dir}/lab.sh" verify windows | tee "${output_dir}/guest-verify-before.txt"
+# An SSH-ready guest can still be at the lock screen. Require its disposable
+# interactive test-user session before collecting security-prompt evidence.
+ensure_windows_desktop_session() {
+  local check='if (-not (Get-Process explorer -ErrorAction SilentlyContinue)) { exit 1 }'
+  if ! "${lab_dir}/lab.sh" run windows "powershell.exe -NoProfile -NonInteractive -Command $check"; then
+    "${lab_dir}/lab.sh" send-keys windows tab ret
+    sleep 1
+    "${lab_dir}/lab.sh" send-keys windows o m n i d e c k minus t e s t ret
+    for attempt in $(seq 1 30); do
+      "${lab_dir}/lab.sh" run windows "powershell.exe -NoProfile -NonInteractive -Command $check" && break
+      sleep 1
+    done
+    "${lab_dir}/lab.sh" run windows "powershell.exe -NoProfile -NonInteractive -Command $check"
+  fi
+}
+ensure_windows_desktop_session
+
 if [[ "$suite" == onboarding ]]; then grep -Fq 'podman=absent' "${output_dir}/guest-verify-before.txt"; else grep -Fq 'podman=' "${output_dir}/guest-verify-before.txt" && ! grep -Fq 'podman=absent' "${output_dir}/guest-verify-before.txt"; fi
 
 payload_dir="${build_dir}/payload"
@@ -325,6 +340,7 @@ set +e
   "${lab_dir}/lab.sh" wait windows
   "${lab_dir}/lab.sh" verify windows | tee "${output_dir}/guest-verify-after-restart.txt"
   grep -Fq 'podman=absent' "${output_dir}/guest-verify-after-restart.txt"
+  ensure_windows_desktop_session
 
   printf 'Driving the post-restart Podman install and first Omnideck instance.\n'
   install_json="$(json_command ssh "${ssh_terminal_options[@]}" tester@127.0.0.1 "${install_remote}")"

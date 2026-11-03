@@ -168,6 +168,7 @@ func (m SetupModel) beginApplying() (tea.Model, tea.Cmd) {
 	m.stateVolumeCreated = false
 	m.errorMsg = ""
 	m.errorDetail = ""
+	m.errorTitle, m.errorHint = "", ""
 	m.errorShowDetails = false
 	m.failureFromRuntime = false
 	m.spinnerModel = NewSpinnerModel(setupStepLabels, defaultFlavorMessages)

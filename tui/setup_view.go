@@ -450,6 +450,9 @@ func (m SetupModel) tnFailed(w int) string {
 		title = "omnideck didn’t finish starting"
 		detail = "Everything installed, but omnideck did not answer in time. Trying again runs the startup checks."
 	}
+	if m.errorTitle != "" {
+		title, detail = m.errorTitle, m.errorHint
+	}
 	sb.WriteString("\n  " + styles.TUIDangerText.Render("✗") + "  " + styles.TUIDangerText.Render(title) + "\n")
 	writeTUIWrapped(&sb, w, "  ", "  ", detail, styles.TUISecondaryText)
 	sb.WriteString("\n")

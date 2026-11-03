@@ -9,16 +9,17 @@ import (
 )
 
 var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start an Omnideck installation",
-	RunE:  runStart,
+	Use:          "start",
+	Short:        "Start an Omnideck installation",
+	SilenceUsage: true,
+	RunE:         runStart,
 }
 
 func init() {
 	rootCmd.AddCommand(startCmd)
 }
 
-func runStart(_ *cobra.Command, _ []string) error {
+func runStart(cmd *cobra.Command, _ []string) error {
 	if err := requireConfigMulti(); err != nil {
 		return err
 	}
@@ -34,7 +35,10 @@ func runStart(_ *cobra.Command, _ []string) error {
 	if jsonFlag {
 		return runLifecycleJSON(cfg, eng, func() error {
 			_, actionErr := workflow.EnsureStarted(eng, cfg.ContainerName)
-			return actionErr
+			if actionErr != nil {
+				return actionErr
+			}
+			return workflow.WaitForApplication(cmd.Context(), eng, cfg)
 		})
 	}
 
@@ -43,6 +47,10 @@ func runStart(_ *cobra.Command, _ []string) error {
 	if err != nil {
 		fmt.Println(styles.CrossMark)
 		return err
+	}
+	if err := workflow.WaitForApplication(cmd.Context(), eng, cfg); err != nil {
+		fmt.Println(styles.CrossMark)
+		return startupTextError(err)
 	}
 	if !changed {
 		fmt.Println(styles.Warning.Render("already running"))

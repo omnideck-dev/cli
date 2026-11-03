@@ -754,3 +754,23 @@ func TestInstallErrorOffersRetryAndShowsReportableDetails(t *testing.T) {
 		t.Fatalf("details should be hidden when requested:\n%s", view)
 	}
 }
+
+func TestWSLCgroupFailureShowsRecoveryWithoutCallingItATimeout(t *testing.T) {
+	m := NewSetupModel(SetupRequest{})
+	m.Stage = SetupStageApplying
+	m.eng = &mockEngine{}
+	m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+	err := &engine.WSLCgroupError{Err: errors.New("podman run: exit status 127: crun: open memory.max: No such file or directory")}
+	model, _ := m.updateApplying(StepFailedMsg{Index: setupStepContainer, Err: fmt.Errorf("start: %w", err)})
+	failed := model.(SetupModel)
+	for _, showDetails := range []bool{true, false} {
+		failed.errorShowDetails = showDetails
+		view := failed.tnFailed(160)
+		if !strings.Contains(view, engine.WSLCgroupTitle) || !strings.Contains(view, "windows-wsl-recovery") || strings.Contains(view, "did not answer in time") {
+			t.Fatalf("missing accurate recovery (details %v): %s", showDetails, view)
+		}
+		if strings.Contains(view, "exit status 127") != showDetails {
+			t.Fatalf("diagnostic visibility differs: %s", view)
+		}
+	}
+}

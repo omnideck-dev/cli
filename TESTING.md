@@ -17,7 +17,7 @@ Omnideck uses four separate layers. No layer substitutes for a later layer.
 
 | Layer | Implementation | Required evidence |
 |---|---|---|
-| Source | Go unit and smoke tests, formatting, module consistency, vet, staticcheck, actionlint, race detection, dependency review, and vulnerability scanning | Command result or GitHub Actions run for the exact commit |
+| Source | Go unit and smoke tests, isolated Python harness tests, shell syntax, formatting, module consistency, vet, staticcheck, actionlint, race detection, dependency review, and vulnerability scanning | Command result or GitHub Actions run for the exact commit |
 | Release contract | [`tests/releasecontract`](tests/releasecontract/README.md) | JSON and optional JUnit reports for the exact binary or archive |
 | Hardware lifecycle | [`tests/hardware`](tests/hardware/README.md) and [`tests/e2e`](tests/e2e/README.md) | Harness report, terminal transcripts, and diagnostics from a dedicated machine or disposable VM using Podman |
 | Manual journey | [`tests/manual`](tests/manual/README.md) | A completed procedure with host inventory, commands, observations, cleanup, and pass/fail/blocked result |
@@ -35,14 +35,29 @@ and therefore run only on dedicated machines or disposable virtual machines.
 - `go vet ./...`;
 - staticcheck with the version and checks configured in the `Makefile`;
 - actionlint with the version configured in the `Makefile`;
+- Python harness unit tests and shell syntax checks (`make harness-check`);
 - `go test ./...`; and
 - govulncheck with the version configured in the `Makefile`.
 
 Run the race detector separately with `make race`.
 
+The harness source checks require Python 3 and Bash. They use temporary PTYs and
+fake lab/engine commands; they do not start a VM, install software, or run the
+CLI lifecycle on the developer host. Cleanup tests verify that children stop
+their guest and record results while the parent lease owns the final baseline
+restore, including failures and explicit keep-state runs.
+
+MCP callback wiring is derived from the published host port, while the app
+still listens on container port 8080. Source tests cover default/custom ports
+on all platform argument paths, and layout-1 reconciliation to layout 2
+without deleting saved volumes or repeatedly recreating the container. The
+hardware lifecycle checks the actual callback environment inside the fixture
+container. These checks do not prove live provider OAuth or desktop popup
+behavior; those require the application and packaged-desktop suites.
+
 The `CI` workflow applies these requirements to pull requests and `main`:
 
-- `quality` runs the formatting, module, vet, staticcheck, and workflow checks;
+- `quality` runs formatting, module, vet, staticcheck, workflow, and harness source checks;
 - `vulnerability-check` verifies downloaded modules and scans reachable code;
 - `race` runs the Go test suite with the race detector;
 - native test jobs run vet, tests, a build, and the portable release contract
@@ -377,7 +392,7 @@ An RC requires every beta gate plus recorded evidence for:
 - multiple simultaneous instances;
 - instance removal with both keep and delete choices;
 - local Ollama connectivity where applicable; and
-- Desktop/Tauri compatibility with JSON contract 3 and runtime schema 4,
+- Desktop/Tauri compatibility with JSON contract 4 and runtime schema 4,
   including valid status JSON accompanied by a nonzero process exit where the
   command reports a non-ready state.
 
@@ -434,3 +449,20 @@ preferred. Once a public asset and its provenance are independently available,
 do not retain an additional local payload merely as evidence. Large local
 evidence must have a specific unresolved diagnostic purpose and should be
 removed after that purpose is satisfied.
+
+## Application startup reporting
+
+`workflow/startup_test.go` covers timestamped Podman logs, the boundary between
+old failures and a new user retry, automatic restart loops, HTTP readiness, and
+cancellation. `cmd/startup_test.go` checks matching plain-text and JSON errors;
+the release-contract checks now validate JSON contract 4, including the new
+startup error codes.
+
+For a native proof, use a cleanup-owning VM-lab lease and a development app image
+that emits version-1 startup records. Seed an invalid migration record in only
+the test instance's volume, then check `start` and `wait` exit nonzero with
+`MIGRATION_FAILED`, including with Podman's normal automatic restart policy.
+Correct the fixture, run `restart` and `wait`, and require HTTP readiness plus
+an unchanged saved-data sentinel. Use the lane's actual `runtime status`
+resource policy when sharing the fixture with Desktop. Never corrupt an existing
+user installation or substitute a development binary for a published artifact.

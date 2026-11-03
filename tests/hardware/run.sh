@@ -70,7 +70,9 @@ cleanup() {
   [[ "${instance}" == omnideck-hw-* ]] || return 0
   if [[ -n "${engine}" ]] && command -v "${engine}" >/dev/null 2>&1; then
     "${engine}" rm -f "${instance}" >/dev/null 2>&1 || true
-    "${engine}" rm -f "${registry_container}" >/dev/null 2>&1 || true
+    if "${engine}" container inspect "${registry_container}" > "${output_dir}/registry-container-before-removal.json" 2>/dev/null; then
+      "${engine}" rm -f --volumes "${registry_container}" >/dev/null 2>&1 || true
+    fi
     "${engine}" volume rm "${instance}-home" "${instance}-state" >/dev/null 2>&1 || true
     if [[ "${built_fixture}" == "1" && -n "${fixture_image}" ]]; then
       "${engine}" rmi -f "${fixture_image}" >/dev/null 2>&1 || true
@@ -226,6 +228,10 @@ grep -Eq "^container_name:[[:space:]]+${instance}$" "${config_path}" || fail "Th
 
 current_step="verify web UI"
 wait_for_web_ui
+
+current_step="verify MCP callback origin"
+callback_origin="$("${engine}" exec "${instance}" printenv OMNIDECK_EXTERNAL_URL | tr -d '\r')"
+[[ "${callback_origin}" == "http://localhost:${port}" ]] || fail "MCP callback origin does not match the published browser port."
 
 current_step="status"
 run_cli status

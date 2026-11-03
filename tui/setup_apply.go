@@ -9,6 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/engine"
 	"github.com/omnideck-dev/cli/workflow"
 )
 
@@ -114,6 +115,13 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.errorMsg = setupStepLabels[msg.Index]
 		m.errorDetail = msg.Err.Error()
 		m.errorShowDetails = true
+		m.errorTitle, m.errorHint = "", ""
+		var wslErr *engine.WSLCgroupError
+		if errors.As(msg.Err, &wslErr) {
+			m.errorTitle = engine.WSLCgroupTitle
+			m.errorHint = engine.WSLCgroupRecovery
+			m.errorDetail = wslErr.Err.Error()
+		}
 		var inputErr *setupInputError
 		if msg.Index == setupStepAvailability && errors.Is(msg.Err, workflow.ErrContainerConflict) {
 			inputErr = &setupInputError{field: inputContainerName, message: "another container already uses this name; choose a different name"}

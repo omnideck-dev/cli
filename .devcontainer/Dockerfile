@@ -1,4 +1,4 @@
-FROM golang:1.25.13-bookworm@sha256:40dfc169bd5ad8a8617e49c8ead7fe16c6873e79d6937539e9c2e5947b7984ef
+FROM golang:1.26.10-bookworm@sha256:23ce71337b726608afb1bc00986e630a05034a87a87ea1fc2cd1ae5cf33387eb
 
 RUN apt-get update \
     && apt-get install --no-install-recommends -y ca-certificates git zip zsh \

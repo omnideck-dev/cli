@@ -36,7 +36,7 @@ const DefaultImage = "ghcr.io/omnideck-dev/omnideck:latest"
 
 // CurrentContainerLayout is bumped whenever RunOptions/engine wiring changes
 // in a way an already-created container cannot acquire by being restarted.
-const CurrentContainerLayout = 1
+const CurrentContainerLayout = 2
 
 // legacyImagePrefixes are image repositories that DefaultImage supersedes.
 // A config still pointing at one of these (regardless of tag) is migrated to

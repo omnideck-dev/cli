@@ -29,6 +29,12 @@ from typing import Iterable, Sequence
 CSI_RE = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]")
 OSC_RE = re.compile(rb"\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)")
 CONTROL_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+INSTALL_FAILURE_PHRASES = (
+    "The download didn’t finish",
+    "Setup couldn’t finish",
+    "omnideck didn’t finish starting",
+    "Windows' Linux runtime could not apply container limits",
+)
 
 
 def strip_terminal_controls(value: bytes) -> str:
@@ -96,7 +102,14 @@ class TerminalSession:
         try:
             chunk = os.read(self.master, 65536)
         except OSError as exc:
-            if exc.errno == errno.EIO and self.process.poll() is not None:
+            # Linux PTYs report EIO once the final slave closes. The child can
+            # still be between closing its descriptors and becoming waitable.
+            # Treat that as EOF; wait() separately enforces its real exit code.
+            if exc.errno == errno.EIO:
+                try:
+                    self.process.wait(timeout=timeout)
+                except subprocess.TimeoutExpired:
+                    pass
                 return False
             raise
         if not chunk:
@@ -264,7 +277,7 @@ def install_scenario(args: argparse.Namespace) -> None:
             timeout=args.install_timeout,
             since=mark,
             checkpoint="computer-ready",
-            fail_phrases=("The download didn’t finish", "Setup couldn’t finish"),
+            fail_phrases=INSTALL_FAILURE_PHRASES,
         )
         terminal.expect_all(
             [
@@ -278,7 +291,7 @@ def install_scenario(args: argparse.Namespace) -> None:
             timeout=args.install_timeout,
             since=mark,
             checkpoint="ready",
-            fail_phrases=("The download didn’t finish", "Setup couldn’t finish"),
+            fail_phrases=INSTALL_FAILURE_PHRASES,
         )
         mark = terminal.send(ENTER, label="enter")
         terminal.expect_all(
@@ -328,7 +341,7 @@ def macos_install_scenario(args: argparse.Namespace) -> None:
             timeout=args.install_timeout,
             since=mark,
             checkpoint="ready",
-            fail_phrases=("The download didn’t finish", "Setup couldn’t finish"),
+            fail_phrases=INSTALL_FAILURE_PHRASES,
         )
         transcript = strip_terminal_controls(bytes(terminal.raw[mark:]))
         unexpected_runtime_setup = [
@@ -610,7 +623,7 @@ def windows_install_scenario(args: argparse.Namespace) -> None:
             timeout=args.install_timeout,
             since=mark,
             checkpoint="ready",
-            fail_phrases=("The download didn’t finish", "Setup couldn’t finish"),
+            fail_phrases=INSTALL_FAILURE_PHRASES,
         )
         mark = terminal.send(ENTER, label="enter")
         terminal.expect_all(
