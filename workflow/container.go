@@ -92,7 +92,7 @@ func EnsureStarted(eng ContainerStartEngine, name string) (changed bool, err err
 		return false, fmt.Errorf("checking container %q: %w", name, err)
 	}
 	if !exists {
-		return false, fmt.Errorf("container %q was not found; run `omnideck doctor` for guided repair", name)
+		return false, classifyError(ErrContainerNotFound, fmt.Errorf("container %q was not found; run `omnideck doctor` for guided repair", name))
 	}
 	status, err := eng.ContainerStatus(name)
 	if err != nil {

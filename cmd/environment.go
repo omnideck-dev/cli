@@ -129,6 +129,16 @@ func environmentJSONError(err error) *jsonCmdError {
 	if errors.As(err, &startup) {
 		return newJSONError(startup.Code, startup.Error()).withDetail(startup.Detail()).withHint("Run omnideck logs for technical details. Retry after correcting the problem.")
 	}
+	var validation *workflow.ConfigValidationError
+	if errors.As(err, &validation) {
+		return newJSONError(ErrCodeInvalidSetting, err.Error()).withSetting(settingKey(validation.Field)).withHint("Correct this setting and retry. Nothing was changed.")
+	}
+	if errors.Is(err, workflow.ErrMissingStorage) {
+		return newJSONError(ErrCodeMissingStorage, err.Error()).withHint("Do not create replacement volumes. Restore the named volume, or ask for support with this message.")
+	}
+	if errors.Is(err, workflow.ErrContainerNotFound) {
+		return newJSONError(ErrCodeContainerNotFound, err.Error())
+	}
 	message := err.Error()
 	lower := strings.ToLower(message)
 	if errors.Is(err, workflow.ErrPortInUse) ||
@@ -143,10 +153,27 @@ func environmentJSONError(err error) *jsonCmdError {
 	if errors.Is(err, workflow.ErrExternalURL) {
 		return newJSONError(ErrCodeInternal, message).withHint("The update was applied and saved. Retry it; if the address is still wrong, run omnideck doctor.")
 	}
+	if strings.Contains(lower, "another omnideck installation already uses the name") {
+		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name. That name belongs to an existing Omnideck installation; do not remove it.")
+	}
 	if errors.Is(err, workflow.ErrContainerConflict) || strings.Contains(lower, "already uses the name") {
 		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name or remove the unrelated container.")
 	}
 	return newJSONError(ErrCodeInternal, message)
+}
+
+// settingKey maps a workflow.ConfigValidationError field to the saved-settings
+// key (as `config set` and `config --json` name it), the one vocabulary the
+// INVALID_SETTING "setting" field uses for every command.
+func settingKey(field string) string {
+	switch field {
+	case "name":
+		return "container_name"
+	case "port":
+		return "web_ui_port"
+	default:
+		return field
+	}
 }
 
 func environmentStageJSONError(stage string, err error) *jsonCmdError {
@@ -193,57 +220,97 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 		return structured
 	}
 
-	var nd *ndjsonEncoder
-	if jsonFlag {
-		nd = newNDJSONEncoder()
-	}
-	lastStage := "check_environment"
-	opts := workflow.EnsureInstanceOptions{
-		OnStage: func(stage string) {
-			if nd != nil && lastStage != "" && lastStage != stage {
-				nd.done(lastStage)
-			}
-			lastStage = stage
-			if nd != nil {
-				nd.start(stage)
-			}
-		},
-		OnPullProgress: func(line string) {
-			if nd != nil {
-				nd.progress("pull_image", line)
-			}
-		},
-	}
-
+	stream := newEnsureStream(jsonFlag)
 	result, ensureErr := workflow.EnsureInstance(eng, current, desired, func() error {
-		if err := config.SaveRuntime(eng.Name()); err != nil {
-			return err
-		}
-		return config.Save(path, desired)
-	}, opts)
+		return workflow.SaveInstanceConfig(eng.Name(), path, desired)
+	}, stream.options())
 	if ensureErr != nil {
-		if nd != nil {
-			return nd.fail(lastStage, environmentStageJSONError(lastStage, ensureErr))
-		}
-		return ensureErr
+		return stream.fail(ensureErr)
 	}
 	if err := workflow.WaitForApplication(cmd.Context(), eng, desired); err != nil {
-		if nd != nil {
-			return nd.fail("startup", environmentJSONError(err))
-		}
-		return startupTextError(err)
+		return stream.failStartup(err)
 	}
-	payload := environmentEnsurePayload{
-		Changed: result.Changed,
-		Action:  result.Action,
-		Reason:  result.Reason,
-		Status:  gatherStatusPayload(nameFlag, desired, eng),
-	}
-	if nd != nil {
-		nd.done(lastStage)
-		nd.complete(payload)
+	if stream.complete(result, gatherStatusPayload(nameFlag, desired, eng)) {
 		return nil
 	}
 	fmt.Printf("Omnideck is ready at http://127.0.0.1:%s (%s).\n", desired.WebUIPortOrDefault(), result.Action)
 	return nil
+}
+
+// ensureStream reports workflow.EnsureInstance stages as NDJSON for
+// `environment ensure --json` and `repair --json`; without --json it is
+// silent and leaves text output to the caller.
+type ensureStream struct {
+	nd        *ndjsonEncoder
+	lastStage string
+	started   bool
+}
+
+func newEnsureStream(json bool) *ensureStream {
+	stream := &ensureStream{lastStage: "check_environment"}
+	if json {
+		stream.nd = newNDJSONEncoder()
+	}
+	return stream
+}
+
+func (s *ensureStream) options() workflow.EnsureInstanceOptions {
+	return workflow.EnsureInstanceOptions{
+		OnStage: func(stage string) {
+			// A repeated stage (repair announces check_environment before
+			// EnsureInstance does) continues the running one.
+			if s.started && s.lastStage == stage {
+				return
+			}
+			if s.nd != nil && s.started {
+				s.nd.done(s.lastStage)
+			}
+			s.lastStage = stage
+			s.started = true
+			if s.nd != nil {
+				s.nd.start(stage)
+			}
+		},
+		OnPullProgress: func(line string) {
+			if s.nd != nil {
+				s.nd.progress("pull_image", line)
+			}
+		},
+	}
+}
+
+// fail ends the stream with err on the stage that was running, or returns
+// err unchanged without --json.
+func (s *ensureStream) fail(err error) error {
+	if s.nd == nil {
+		return err
+	}
+	// Every error event follows a start for the same stage.
+	if !s.started {
+		s.nd.start(s.lastStage)
+		s.started = true
+	}
+	return s.nd.fail(s.lastStage, environmentStageJSONError(s.lastStage, err))
+}
+
+func (s *ensureStream) failStartup(err error) error {
+	if s.nd == nil {
+		return startupTextError(err)
+	}
+	return s.nd.fail("startup", environmentJSONError(err))
+}
+
+// complete emits the final result and reports whether it did (under --json).
+func (s *ensureStream) complete(result workflow.EnsureInstanceResult, status statusPayload) bool {
+	if s.nd == nil {
+		return false
+	}
+	s.nd.done(s.lastStage)
+	s.nd.complete(environmentEnsurePayload{
+		Changed: result.Changed,
+		Action:  result.Action,
+		Reason:  result.Reason,
+		Status:  status,
+	})
+	return true
 }

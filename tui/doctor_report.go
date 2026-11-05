@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/omnideck-dev/cli/styles"
 	"github.com/omnideck-dev/cli/workflow"
@@ -22,6 +23,7 @@ const (
 	DoctorActionStartInstance  = workflow.DoctorActionStartInstance
 	DoctorActionSetupInstance  = workflow.DoctorActionSetupInstance
 	DoctorActionRepairInstance = workflow.DoctorActionRepairInstance
+	DoctorActionUpdateInstance = workflow.DoctorActionUpdateInstance
 )
 
 // RenderDoctorReport renders a static report for `omnideck doctor`.
@@ -58,7 +60,7 @@ func RenderDoctorReport(results []CheckResult) (string, bool) {
 		if result.Hint != "" && result.Status != CheckPass {
 			out += fmt.Sprintf("       %s\n", styles.Dim.Render("→ "+result.Hint))
 		}
-		if command := doctorActionCommand(result); command != "" {
+		if command := doctorActionCommand(result); command != "" && !hintShowsCommand(result.Hint, command) {
 			out += fmt.Sprintf("       %s\n", styles.Dim.Render("Next: "+command))
 		}
 	}
@@ -74,6 +76,13 @@ func RenderDoctorReport(results []CheckResult) (string, bool) {
 	return out, allPass
 }
 
+// hintShowsCommand reports whether hint already names the command in next
+// ("run `…`"), so the report does not print the same command twice.
+func hintShowsCommand(hint, next string) bool {
+	command := strings.TrimSuffix(strings.TrimPrefix(next, "run `"), "`")
+	return command != next && strings.Contains(hint, command)
+}
+
 func doctorActionCommand(result CheckResult) string {
 	switch result.Action {
 	case DoctorActionRuntimeSetup:
@@ -83,7 +92,9 @@ func doctorActionCommand(result CheckResult) string {
 	case DoctorActionSetupInstance:
 		return "run `omnideck setup`"
 	case DoctorActionRepairInstance:
-		return "run `omnideck` and choose Doctor, then Repair this installation"
+		return "run `" + workflow.InstanceCommand("repair", result.ActionValue) + "`"
+	case DoctorActionUpdateInstance:
+		return "run `" + workflow.InstanceCommand("update", result.ActionValue) + "`"
 	default:
 		return ""
 	}

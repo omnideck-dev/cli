@@ -31,6 +31,7 @@ const (
 	DoctorActionStartInstance
 	DoctorActionSetupInstance
 	DoctorActionRepairInstance
+	DoctorActionUpdateInstance
 )
 
 // CheckResult is one plain-language Doctor result. Action fields are used by
@@ -297,7 +298,7 @@ func doctorContainerCheck(name string, cfg *config.Config, eng engine.Engine) (C
 			Label:       "Omnideck instance",
 			Status:      CheckFail,
 			Detail:      "The saved instance " + cfg.ContainerName + " is missing its container",
-			Hint:        "Repair recreates the container and reconnects the same saved data volumes.",
+			Hint:        "Run: " + InstanceCommand("repair", name) + " (recreates the container and reconnects the same saved data volumes)",
 			Action:      DoctorActionRepairInstance,
 			ActionLabel: "Repair this installation",
 			ActionValue: name,
@@ -365,25 +366,23 @@ func doctorExternalURLCheck(name string, cfg *config.Config, eng ContainerEnvEng
 	if err != nil {
 		return CheckResult{Label: label, Status: CheckWarn, Detail: "Could not check the address MCP integrations use to sign in", Hint: err.Error()}
 	}
-	hint := "Run: " + InstanceCommand("update", name) + " (saved data is kept)"
+	result := CheckResult{
+		Label:       label,
+		Status:      CheckWarn,
+		Hint:        "Run: " + InstanceCommand("update", name) + " (saved data is kept)",
+		Action:      DoctorActionUpdateInstance,
+		ActionLabel: "Update Omnideck",
+		ActionValue: name,
+	}
 	switch check.State {
 	case ExternalURLOK:
 		return CheckResult{Label: label, Status: CheckPass, Detail: "MCP sign-in address is " + check.Expected}
 	case ExternalURLMismatch:
-		return CheckResult{
-			Label:  label,
-			Status: CheckWarn,
-			Detail: "MCP integrations may fail to sign in: this installation uses " + check.Actual + " instead of " + check.Expected,
-			Hint:   hint,
-		}
+		result.Detail = "MCP integrations may fail to sign in: this installation uses " + check.Actual + " instead of " + check.Expected
 	default:
-		return CheckResult{
-			Label:  label,
-			Status: CheckWarn,
-			Detail: "MCP integrations are unavailable: this installation was created without its sign-in address",
-			Hint:   hint,
-		}
+		result.Detail = "MCP integrations are unavailable: this installation was created without its sign-in address"
 	}
+	return result
 }
 
 func doctorImageCheck(cfg *config.Config, eng engine.Engine) CheckResult {

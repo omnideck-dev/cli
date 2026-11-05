@@ -44,6 +44,7 @@ type mockEngine struct {
 	tailLines  []string
 
 	pullErr              error
+	localImages          map[string]bool
 	pullMsgs             []string
 	runErr               error
 	runCalls             []engine.RunOptions
@@ -132,6 +133,8 @@ func (m *mockEngine) RunContainer(opts engine.RunOptions) error {
 }
 
 func (m *mockEngine) ContainerImageID(string) (string, error) { return "sha256:mock", nil }
+
+func (m *mockEngine) ImageExists(image string) (bool, error) { return m.localImages[image], nil }
 
 func (m *mockEngine) ContainerEnv(name string) ([]string, error) {
 	if m.envErr != nil {

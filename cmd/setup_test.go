@@ -89,7 +89,7 @@ func TestValidatePlainSetupRejectsAnExistingInstanceName(t *testing.T) {
 	cfg.ContainerName = "desktop"
 	cfg.WebUIPort = "2400"
 	err := validatePlainSetup(cfg, &mockEngine{})
-	if err == nil || !strings.Contains(err.Error(), `named "desktop" already exists`) {
+	if err == nil || !strings.Contains(err.Error(), `already uses the name "desktop"`) {
 		t.Fatalf("validatePlainSetup() error = %v", err)
 	}
 
@@ -104,7 +104,7 @@ func TestValidatePlainSetupRejectsAnExistingInstanceName(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg.ContainerName = "broken"
-	if err := validatePlainSetup(cfg, &mockEngine{}); err == nil || !strings.Contains(err.Error(), `named "broken" already exists`) {
+	if err := validatePlainSetup(cfg, &mockEngine{}); err == nil || !strings.Contains(err.Error(), `already uses the name "broken"`) {
 		t.Fatalf("validatePlainSetup() over an unreadable file error = %v", err)
 	}
 }

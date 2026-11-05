@@ -77,7 +77,19 @@ func (m *AppModel) validateSettingFields() error {
 			}
 		}
 	}
-	return nil
+	// Name memory only when it is the one being changed, so the error points
+	// at the field the person edited.
+	changed := "shm_size"
+	for _, field := range m.settingFields {
+		if field.Changed && field.Key == "shm_size" {
+			changed = "shm_size"
+			break
+		}
+		if field.Changed && field.Key == "memory" {
+			changed = "memory"
+		}
+	}
+	return workflow.CheckMemoryLimits(&candidate, changed)
 }
 
 // applySettingsCmd recreates the container first, then saves the candidate settings.

@@ -356,3 +356,76 @@ func TestDoctorStartActionExplainsUnreadableSettings(t *testing.T) {
 		t.Fatalf("doctorMessage = %q, want an explanation", got)
 	}
 }
+
+func TestDoctorUpdateActionOpensTheUpdateReview(t *testing.T) {
+	eng := &mockEngine{name: "podman", containerExists: true, containerStatus: "running"}
+	m := NewAppModel(eng, []config.InstanceInfo{{
+		Name:   "desktop",
+		Config: &config.Config{ContainerName: "omnideck-desktop", WebUIPort: "2337", Image: "example:test"},
+	}})
+	m.router.Replace(RouteDoctor)
+	m.doctorStage = doctorStageResults
+	m.doctorResults = []CheckResult{{
+		Label: "MCP sign-in address", Status: CheckWarn,
+		Action: DoctorActionUpdateInstance, ActionLabel: "Update Omnideck", ActionValue: "desktop",
+	}}
+	m.doctorFocus = 0
+
+	updated, _ := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
+	app := updated.(AppModel)
+	if app.router.Current() != RouteMaintenance || app.maintenanceModel.Mode != MaintenanceUpdate || app.maintenanceModel.Stage != MaintenanceStageReview {
+		t.Fatalf("route = %v mode = %v stage = %v, want the update review", app.router.Current(), app.maintenanceModel.Mode, app.maintenanceModel.Stage)
+	}
+	if got := doctorActionCommand(m.doctorResults[0]); got != "run `omnideck update --name desktop`" {
+		t.Fatalf("plain report command = %q", got)
+	}
+	if got := doctorActionCommand(CheckResult{Action: DoctorActionRepairInstance, ActionValue: "desktop"}); got != "run `omnideck repair --name desktop`" {
+		t.Fatalf("plain repair command = %q", got)
+	}
+}
+
+// The memory rule is judged on the final values, so lowering memory and
+// shared memory together in one edit is accepted.
+func TestSettingsJudgeMemoryLimitsOnTheFinalValues(t *testing.T) {
+	m := NewAppModel(&mockEngine{name: "podman"}, []config.InstanceInfo{{
+		Name:   "work",
+		Config: &config.Config{ContainerName: "work", Memory: "2g", ShmSize: "1g", WebUIPort: "2337", Image: "example:test"},
+	}})
+	m.settingFields = []settingField{
+		{Key: "memory", Value: "512m", Changed: true},
+		{Key: "shm_size", Value: "256m", Changed: true},
+	}
+	if err := m.validateSettingFields(); err != nil {
+		t.Fatalf("lowering both together was rejected: %v", err)
+	}
+	if cfg := m.configFromSettingFields(); cfg.Memory != "512m" || cfg.ShmSize != "256m" {
+		t.Fatalf("saved candidate = %s/%s", cfg.Memory, cfg.ShmSize)
+	}
+	m.settingFields = []settingField{{Key: "shm_size", Value: "4g", Changed: true}}
+	if err := m.validateSettingFields(); err == nil {
+		t.Fatal("shared memory above memory was accepted")
+	}
+}
+
+func TestDoctorReportPrintsEachCommandOnce(t *testing.T) {
+	out, _ := RenderDoctorReport([]CheckResult{{
+		Label: "Omnideck instance", Status: CheckFail, Detail: "missing",
+		Hint:   "Run: omnideck repair --name desktop (recreates the container)",
+		Action: DoctorActionRepairInstance, ActionValue: "desktop",
+	}})
+	if n := strings.Count(out, "omnideck repair --name desktop"); n != 1 {
+		t.Fatalf("command printed %d times:\n%s", n, out)
+	}
+}
+
+func TestSettingsNameTheMemoryFieldThatChanged(t *testing.T) {
+	m := NewAppModel(&mockEngine{name: "podman"}, []config.InstanceInfo{{
+		Name:   "work",
+		Config: &config.Config{ContainerName: "work", Memory: "4g", ShmSize: "1g", WebUIPort: "2337", Image: "example:test"},
+	}})
+	m.settingFields = []settingField{{Key: "memory", Value: "512m", Changed: true}}
+	err := m.validateSettingFields()
+	if err == nil || !strings.Contains(err.Error(), "lower shm_size first") {
+		t.Fatalf("err = %v, want it to name memory", err)
+	}
+}

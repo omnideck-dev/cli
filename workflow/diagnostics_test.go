@@ -57,6 +57,12 @@ func TestDoctorExternalURLCheck(t *testing.T) {
 			if tc.status == CheckWarn && result.Hint != "Run: omnideck update --name work (saved data is kept)" {
 				t.Fatalf("hint = %q", result.Hint)
 			}
+			if tc.status == CheckWarn && (result.Action != DoctorActionUpdateInstance || result.ActionValue != "work") {
+				t.Fatalf("action = %v %q, want update_instance for work", result.Action, result.ActionValue)
+			}
+			if tc.status == CheckPass && result.Action != DoctorActionNone {
+				t.Fatalf("a passing check offered %v", result.Action)
+			}
 			if id := diagnosticID(result.Label); id != "instance.external_url" {
 				t.Fatalf("id = %q", id)
 			}

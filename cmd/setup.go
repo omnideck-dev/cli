@@ -265,7 +265,7 @@ func runSetupJSON(instances []config.InstanceInfo) error {
 
 	cfg, err := resolveSetupConfig(eng, instances)
 	if err != nil {
-		return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+		return writeJSONError(environmentJSONError(err))
 	}
 
 	return runSetupStepsJSON(eng, cfg, config.InstancePath(cfg.ContainerName))
@@ -414,14 +414,14 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 	// instance file with that name, even an unreadable one, must not be
 	// overwritten either.
 	if config.InstanceFileExists(cfg.ContainerName) {
-		return fmt.Errorf("an Omnideck installation named %q already exists; choose a different --name", cfg.ContainerName)
+		return fmt.Errorf("another Omnideck installation already uses the name %q; choose a different --name", cfg.ContainerName)
 	}
 	for _, instance := range instances {
 		if instance.Config == nil {
 			continue
 		}
 		if instance.Config.ContainerName == cfg.ContainerName {
-			return fmt.Errorf("an Omnideck installation named %q already exists; choose a different --name", cfg.ContainerName)
+			return fmt.Errorf("another Omnideck installation already uses the name %q; choose a different --name", cfg.ContainerName)
 		}
 		if instance.Config.WebUIPortOrDefault() == cfg.WebUIPortOrDefault() {
 			return fmt.Errorf("another Omnideck installation already uses port %s; choose a different --port", cfg.WebUIPortOrDefault())
@@ -456,15 +456,15 @@ func setupValidationError(err error) error {
 	message := validation.Message
 	if validation.Field == "shm_size" {
 		if strings.Contains(message, "larger than memory") {
-			return errors.New("--shm-size cannot be larger than --memory")
+			return &workflow.ConfigValidationError{Field: validation.Field, Message: "--shm-size cannot be larger than --memory"}
 		}
 		message = strings.Replace(message, "shared memory", "--shm-size", 1)
-		return errors.New(message)
+		return &workflow.ConfigValidationError{Field: validation.Field, Message: message}
 	}
 	if strings.HasPrefix(message, validation.Field) {
 		message = flag + strings.TrimPrefix(message, validation.Field)
 	} else {
 		message = flag + " " + message
 	}
-	return errors.New(message)
+	return &workflow.ConfigValidationError{Field: validation.Field, Message: message}
 }
