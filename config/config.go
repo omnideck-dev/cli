@@ -284,9 +284,6 @@ func LoadInventory() (Inventory, error) {
 	return inventory, nil
 }
 
-// ListInstances is retained for callers that only need usable configurations.
-// User-facing inventory and Doctor flows should use LoadInventory so corrupt
-// files remain visible.
 // InstanceFileExists reports whether an instance file named name is present,
 // including one that cannot be decoded (which ListInstances leaves out). Any
 // error other than "not found" counts as present, so callers never overwrite
@@ -296,6 +293,9 @@ func InstanceFileExists(name string) bool {
 	return !os.IsNotExist(err)
 }
 
+// ListInstances is retained for callers that only need usable configurations.
+// User-facing inventory and Doctor flows should use LoadInventory so corrupt
+// files remain visible.
 func ListInstances() ([]InstanceInfo, error) {
 	inventory, err := LoadInventory()
 	return inventory.Instances, err
