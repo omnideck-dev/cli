@@ -23,6 +23,7 @@ var (
 	removeBackupFlag        bool
 	removeNoBackupFlag      bool
 	removePlainFlag         bool
+	removeBackupDirFlag     string
 )
 
 var removeCmd = &cobra.Command{
@@ -40,6 +41,7 @@ func init() {
 	removeCmd.Flags().BoolVar(&removeDeleteVolumesFlag, "delete-volumes", false, "permanently delete this instance's saved data volumes (mutually exclusive with --keep-volumes)")
 	removeCmd.Flags().BoolVar(&removeBackupFlag, "backup", false, "back up data volumes before deleting them (required with --delete-volumes; mutually exclusive with --no-backup)")
 	removeCmd.Flags().BoolVar(&removeNoBackupFlag, "no-backup", false, "skip the backup when deleting data volumes (mutually exclusive with --backup)")
+	removeCmd.Flags().StringVar(&removeBackupDirFlag, "backup-dir", "", "existing folder to save the backup in (default: your home folder)")
 	removeCmd.Flags().BoolVar(&removePlainFlag, "plain", false, "non-interactive removal (no prompts) — for scripts and CI/CD")
 	rootCmd.AddCommand(removeCmd)
 }
@@ -98,8 +100,17 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 
 	deleteData := promptYesNo(prompts, "Also permanently delete this instance's saved data? [y/N]: ", false)
 	backupData := false
+	backupDir := ""
 	if deleteData {
 		backupData = promptYesNo(prompts, "Create a backup before deleting the data? [Y/n]: ", true)
+		if backupData {
+			// Checked once a backup is chosen, before the final confirmation,
+			// so an unusable folder never surfaces after the container is gone.
+			var dirErr error
+			if backupDir, dirErr = resolveBackupDir(); dirErr != nil {
+				return dirErr
+			}
+		}
 		fmt.Printf("Type %s to confirm permanent data deletion: ", instance.Name)
 		if !prompts.Scan() || strings.TrimSpace(prompts.Text()) != instance.Name {
 			fmt.Println("\nThe name did not match. Nothing was changed.")
@@ -107,10 +118,14 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 		}
 	}
 
+	if removeBackupDirFlag != "" && !backupData {
+		fmt.Println("No backup will be made, so --backup-dir is not used.")
+	}
 	fmt.Println("\nRemoving the instance safely…")
 	result, err := workflow.RemoveInstance(eng, instance, workflow.RemoveInstanceOptions{
 		DeleteData: deleteData,
 		BackupData: backupData,
+		BackupDir:  backupDir,
 	})
 	if err != nil {
 		if result.BackupPath != "" {
@@ -153,7 +168,45 @@ func resolveRemoveOptions() (workflow.RemoveInstanceOptions, error) {
 		}
 		opts.BackupData = removeBackupFlag
 	}
+	if removeBackupDirFlag != "" && !opts.BackupData {
+		return workflow.RemoveInstanceOptions{}, newJSONError(ErrCodeMissingRequiredFlag, "--backup-dir can only be used with --delete-volumes --backup")
+	}
+	backupDir, err := resolveBackupDir()
+	if err != nil {
+		return workflow.RemoveInstanceOptions{}, err
+	}
+	opts.BackupDir = backupDir
 	return opts, nil
+}
+
+// resolveBackupDir validates --backup-dir before anything is removed, so a
+// mistyped folder never surfaces only after the container is already gone.
+// Empty keeps the default (the user's home folder).
+func resolveBackupDir() (string, error) {
+	if removeBackupDirFlag == "" {
+		return "", nil
+	}
+	dir, err := filepath.Abs(removeBackupDirFlag)
+	if err == nil {
+		var info os.FileInfo
+		if info, err = os.Stat(dir); err == nil && !info.IsDir() {
+			err = fmt.Errorf("not a folder")
+		}
+	}
+	if err == nil {
+		// Prove the folder is writable now, so a read-only folder fails here
+		// instead of after the container has been stopped.
+		var probe *os.File
+		if probe, err = os.CreateTemp(dir, ".omnideck-backup-check-*"); err == nil {
+			probe.Close()
+			_ = os.Remove(probe.Name())
+		}
+	}
+	if err != nil {
+		return "", newJSONError(ErrCodeInvalidSetting, fmt.Sprintf("--backup-dir %s cannot be used: %v", removeBackupDirFlag, err)).
+			withSetting("backup_dir").withHint("Choose an existing folder you can write to. Nothing was changed.")
+	}
+	return dir, nil
 }
 
 // removeStageLabel gives each workflow.RemoveInstance stage the same

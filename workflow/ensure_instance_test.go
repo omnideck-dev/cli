@@ -20,6 +20,13 @@ type fakeEnsureEngine struct {
 	pulls         []string
 	pullErr       error
 	volumeErr     error
+	// localImages lists images ImageExists reports as stored locally.
+	localImages map[string]bool
+	imageErr    error
+}
+
+func (f *fakeEnsureEngine) ImageExists(image string) (bool, error) {
+	return f.localImages[image], f.imageErr
 }
 
 func (f *fakeEnsureEngine) VolumeExists(name string) (bool, error) {
@@ -349,5 +356,35 @@ func TestEnsureInstanceKeepsStoppedDriftedContainerWhenPortIsTaken(t *testing.T)
 	}
 	if eng.removed != 0 || len(eng.runOptions) != 0 || result.Action != "started" {
 		t.Fatalf("result=%#v removed=%d runs=%d; a busy port must not risk removing the container", result, eng.removed, len(eng.runOptions))
+	}
+}
+
+func TestEnsureInstanceReuseLocalImageSkipsDownloadOnlyWhenStored(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		stored    bool
+		checkErr  error
+		wantPulls int
+	}{
+		{"stored", true, nil, 0},
+		{"not stored", false, nil, 1},
+		{"check failed", true, errors.New("podman image exists: timed out"), 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired := desiredTestConfig(t)
+			current := *desired
+			eng := &fakeEnsureEngine{
+				volumes:     map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+				localImages: map[string]bool{desired.Image: tc.stored},
+				imageErr:    tc.checkErr,
+			}
+			result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{ReuseLocalImage: true})
+			if err != nil || result.Action != "repaired" {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			if len(eng.pulls) != tc.wantPulls {
+				t.Fatalf("pulls = %v, want %d", eng.pulls, tc.wantPulls)
+			}
+		})
 	}
 }

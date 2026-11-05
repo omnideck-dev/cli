@@ -60,7 +60,7 @@ func runRestart(cmd *cobra.Command, _ []string) error {
 	fmt.Printf("Starting %s... ", cfg.ContainerName)
 	if _, err := workflow.EnsureStarted(eng, cfg.ContainerName); err != nil {
 		fmt.Println(styles.CrossMark)
-		return err
+		return containerNotFoundTextError(err)
 	}
 	if err := workflow.WaitForApplication(cmd.Context(), eng, cfg); err != nil {
 		fmt.Println(styles.CrossMark)

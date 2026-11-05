@@ -89,6 +89,11 @@ semantics used everywhere:
 - `EnsureInstance` is the idempotent create/start/repair/update transaction used
   by Desktop and automation. It owns image pulls, volumes, replacement,
   rollback, and persistence.
+- `RepairInstance` is the one repair transaction for `omnideck repair` and the
+  TUI's Repair. It runs `EnsureInstance` with `ReuseLocalImage`, so a missing
+  container is recreated from the image already stored instead of a fresh
+  download, and it stops with `ErrMissingStorage` rather than create empty
+  saved data.
 - `RunOptions` is the only config-to-container mapping. It leaves the
   container-facing Ollama hostname to the selected engine and host platform,
   and passes `Config.BrowserURL()` as the OAuth callback origin

@@ -20,7 +20,7 @@ import (
 // JSON_MODE_SPEC.md changes in a way that isn't backward compatible. A
 // calling GUI checks this against the value it was built against before
 // trusting any other --json output.
-const jsonContract = 4
+const jsonContract = 5
 
 // Closed set of --json error codes. Every error surfaced under --json must
 // resolve to one of these — see JSON_MODE_SPEC.md's "Structured error shape".
@@ -45,6 +45,8 @@ const (
 	ErrCodeContainerConflict     = "CONTAINER_CONFLICT"
 	ErrCodeMigrationFailed       = "MIGRATION_FAILED"
 	ErrCodeAppStartupFailed      = "APP_STARTUP_FAILED"
+	ErrCodeInvalidSetting        = "INVALID_SETTING"
+	ErrCodeMissingStorage        = "MISSING_STORAGE"
 	ErrCodeInternal              = "INTERNAL_ERROR"
 )
 
@@ -61,6 +63,8 @@ func jsonAction(a workflow.CheckAction) string {
 		return "setup_instance"
 	case workflow.DoctorActionRepairInstance:
 		return "repair_instance"
+	case workflow.DoctorActionUpdateInstance:
+		return "update_instance"
 	default:
 		return ""
 	}
@@ -91,6 +95,9 @@ type jsonErrorPayload struct {
 	Action      string   `json:"action,omitempty"`
 	ActionValue string   `json:"actionValue,omitempty"`
 	Instances   []string `json:"instances,omitempty"`
+	// Setting names what INVALID_SETTING rejected: a saved-settings key (see
+	// settingKey), or "backup_dir" for remove --backup-dir.
+	Setting string `json:"setting,omitempty"`
 }
 
 type jsonErrorEnvelope struct {
@@ -125,6 +132,11 @@ func (e *jsonCmdError) withDetail(detail string) *jsonCmdError {
 func (e *jsonCmdError) withAction(action workflow.CheckAction, value string) *jsonCmdError {
 	e.payload.Action = jsonAction(action)
 	e.payload.ActionValue = value
+	return e
+}
+
+func (e *jsonCmdError) withSetting(key string) *jsonCmdError {
+	e.payload.Setting = key
 	return e
 }
 
@@ -561,10 +573,39 @@ type removeResultPayload struct {
 // status call. On failure it emits the standard structured error.
 func runLifecycleJSON(instance string, cfg *config.Config, eng engine.Engine, action func() error) error {
 	if err := action(); err != nil {
-		return writeJSONError(environmentJSONError(err))
+		structured := environmentJSONError(err)
+		if errors.Is(err, workflow.ErrContainerNotFound) {
+			structured = containerNotFoundJSONError(instance, cfg, eng, err)
+		}
+		return writeJSONError(structured)
 	}
 	writeJSON(gatherStatusPayload(instance, cfg, eng))
 	return nil
+}
+
+// containerNotFoundJSONError offers repair_instance, as Doctor does, only
+// when both saved data volumes still exist; otherwise a repair would start
+// from empty storage, so it points at Doctor instead. instance is "" for a
+// configuration that cannot be selected by name; actionValue is then omitted
+// and the commands carry no --name, as in Doctor.
+func containerNotFoundJSONError(instance string, cfg *config.Config, eng engine.Engine, err error) *jsonCmdError {
+	structured := newJSONError(ErrCodeContainerNotFound, err.Error())
+	home, homeErr := eng.VolumeExists(cfg.HomeVolumeName())
+	state, stateErr := eng.VolumeExists(cfg.StateVolumeName())
+	if homeErr == nil && stateErr == nil && home && state {
+		return structured.withAction(workflow.DoctorActionRepairInstance, instance).
+			withHint("Run: " + workflow.InstanceCommand("repair", instance) + " (saved data is kept)")
+	}
+	return structured.withHint("Saved data for this instance may be missing. Run: " + workflow.InstanceCommand("doctor", instance))
+}
+
+// containerNotFoundTextError names the exact repair command for the loaded
+// instance when start or restart finds its container missing.
+func containerNotFoundTextError(err error) error {
+	if !errors.Is(err, workflow.ErrContainerNotFound) {
+		return err
+	}
+	return fmt.Errorf("%w\nTo recreate it from its saved settings, run: %s", err, workflow.InstanceCommand("repair", loadedInstanceName()))
 }
 
 // gatherListEntries fetches every instance's entry concurrently, matching

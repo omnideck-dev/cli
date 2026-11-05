@@ -127,6 +127,8 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 		"CONTAINER_CONFLICT":      true,
 		"MIGRATION_FAILED":        true,
 		"APP_STARTUP_FAILED":      true,
+		"INVALID_SETTING":         true,
+		"MISSING_STORAGE":         true,
 		"INTERNAL_ERROR":          true,
 	}
 	got := map[string]bool{
@@ -150,6 +152,8 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 		ErrCodeContainerConflict:     true,
 		ErrCodeMigrationFailed:       true,
 		ErrCodeAppStartupFailed:      true,
+		ErrCodeInvalidSetting:        true,
+		ErrCodeMissingStorage:        true,
 		ErrCodeInternal:              true,
 	}
 	if len(got) != len(want) {
@@ -596,6 +600,7 @@ func TestJSONActionMapping(t *testing.T) {
 		workflow.DoctorActionStartInstance:  "start_instance",
 		workflow.DoctorActionSetupInstance:  "setup_instance",
 		workflow.DoctorActionRepairInstance: "repair_instance",
+		workflow.DoctorActionUpdateInstance: "update_instance",
 	}
 	for action, want := range cases {
 		if got := jsonAction(action); got != want {

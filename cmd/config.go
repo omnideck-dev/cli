@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/omnideck-dev/cli/config"
@@ -84,21 +85,25 @@ func runConfigSet(_ *cobra.Command, args []string) error {
 	if key == "container_name" {
 		err := fmt.Errorf("an Omnideck name cannot be changed after setup; create another installation if you need a different name")
 		if jsonFlag {
-			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+			return writeJSONError(newJSONError(ErrCodeInvalidSetting, err.Error()).withSetting(key))
 		}
 		return err
 	}
 	if !isValidConfigKey(key) {
 		err := fmt.Errorf("invalid key %q\nValid keys: %v", key, validConfigKeys)
 		if jsonFlag {
-			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+			return writeJSONError(newJSONError(ErrCodeInvalidSetting, err.Error()).withSetting(key).withHint(fmt.Sprintf("Valid keys: %s", strings.Join(validConfigKeys, ", "))))
 		}
 		return err
 	}
 	candidate := *LoadedConfig
-	if err := workflow.ApplySetting(&candidate, key, value); err != nil {
+	err := workflow.ApplySetting(&candidate, key, value)
+	if err == nil && (key == "memory" || key == "shm_size") {
+		err = workflow.CheckMemoryLimits(&candidate, key)
+	}
+	if err != nil {
 		if jsonFlag {
-			return writeJSONError(newJSONError(ErrCodeInternal, err.Error()))
+			return writeJSONError(environmentJSONError(err))
 		}
 		return err
 	}
@@ -122,7 +127,7 @@ func runConfigSet(_ *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Set %s = %s\n", key, value)
-	fmt.Printf("Run `omnideck update --name %s` to restart Omnideck with this setting.\n", candidate.ContainerName)
+	fmt.Printf("Run `%s` to restart Omnideck with this setting.\n", workflow.InstanceCommand("update", loadedInstanceName()))
 	return nil
 }
 

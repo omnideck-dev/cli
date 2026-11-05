@@ -2,13 +2,16 @@ package tui
 
 import (
 	"errors"
+	"net"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 func TestUpdateStartsAtReviewWithoutChangingAnything(t *testing.T) {
@@ -129,4 +132,59 @@ func TestUpdateKeepsConfigAlignedWhenSignInCheckFails(t *testing.T) {
 	if cfg.LayoutVersion != config.CurrentContainerLayout || m.current.LayoutVersion != config.CurrentContainerLayout {
 		t.Fatalf("saved replacement not reflected in memory: cfg=%d current=%d", cfg.LayoutVersion, m.current.LayoutVersion)
 	}
+}
+
+// TUI repair is the same transaction as `omnideck repair`: it reuses the
+// stored image instead of downloading, records the current layout, and keeps
+// the in-memory settings aligned with what it saved.
+func TestRepairUsesTheSharedRepairWorkflow(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.ContainerName = "omnideck-desktop"
+	cfg.WebUIPort = availablePort(t)
+	cfg.LayoutVersion = 1
+	path := filepath.Join(t.TempDir(), "desktop.yaml")
+	eng := &mockEngine{volumes: map[string]bool{cfg.HomeVolumeName(): true, cfg.StateVolumeName(): true}, imageStored: true}
+	m := NewMaintenanceModel(MaintenanceRequest{Config: cfg, ConfigPath: path, Engine: eng, Embedded: true, Mode: MaintenanceRepair})
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(MaintenanceModel)
+
+	msg := runMaintenanceStep(t, &m, 0)
+	if failed, ok := msg.(StepFailedMsg); ok {
+		t.Fatalf("repair failed: %v", failed.Err)
+	}
+	if eng.pulls != 0 {
+		t.Fatalf("repair downloaded the image %d time(s); it is stored locally", eng.pulls)
+	}
+	model, _ = m.Update(msg)
+	m = model.(MaintenanceModel)
+	if m.Stage != MaintenanceStageComplete || cfg.LayoutVersion != config.CurrentContainerLayout {
+		t.Fatalf("stage = %v layout = %d", m.Stage, cfg.LayoutVersion)
+	}
+	saved, err := config.Load(path)
+	if err != nil || saved.LayoutVersion != config.CurrentContainerLayout {
+		t.Fatalf("saved = %+v, err = %v", saved, err)
+	}
+}
+
+func TestRepairStopsWhenSavedDataIsMissing(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.WebUIPort = availablePort(t)
+	eng := &mockEngine{volumes: map[string]bool{cfg.HomeVolumeName(): true}, imageStored: true}
+	m := NewMaintenanceModel(MaintenanceRequest{Config: cfg, ConfigPath: filepath.Join(t.TempDir(), "o.yaml"), Engine: eng, Embedded: true, Mode: MaintenanceRepair})
+	model, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = model.(MaintenanceModel)
+	failed, ok := runMaintenanceStep(t, &m, 0).(StepFailedMsg)
+	if !ok || !errors.Is(failed.Err, workflow.ErrMissingStorage) {
+		t.Fatalf("repair result = %#v, want missing storage", failed)
+	}
+}
+
+func availablePort(t *testing.T) string {
+	t.Helper()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	return strconv.Itoa(listener.Addr().(*net.TCPAddr).Port)
 }

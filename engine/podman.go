@@ -77,6 +77,20 @@ func (e *PodmanEngine) VolumeExists(name string) (bool, error) {
 	return true, nil
 }
 
+// ImageExists reports whether image is stored locally. `podman image exists`
+// exits 1 for a missing image; any other failure is an error.
+func (e *PodmanEngine) ImageExists(image string) (bool, error) {
+	cmd := buildCmd("podman", "image", "exists", image)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			return false, nil
+		}
+		return false, runtimeCommandError("podman image exists", err, out)
+	}
+	return true, nil
+}
+
 func (e *PodmanEngine) RemoveVolume(name string) error {
 	cmd := buildCmd("podman", "volume", "rm", name)
 	_, err := commandCombinedOutput("podman volume rm", cmd)

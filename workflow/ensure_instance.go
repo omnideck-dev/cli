@@ -14,6 +14,7 @@ type InstanceEnsureEngine interface {
 	ContainerEngine
 	ContainerEnvEngine
 	ContainerImageID(name string) (string, error)
+	ImageExists(image string) (bool, error)
 	CreateVolume(name string) (bool, error)
 	RemoveVolume(name string) error
 	VolumeExists(name string) (bool, error)
@@ -24,6 +25,10 @@ type InstanceEnsureEngine interface {
 type EnsureInstanceOptions struct {
 	OnStage        func(stage string)
 	OnPullProgress func(line string)
+	// ReuseLocalImage skips the download when the saved image is already
+	// stored locally, so a repair keeps the version it had instead of
+	// following a tag that moved. A failed local check still downloads.
+	ReuseLocalImage bool
 }
 
 // EnsureInstanceResult describes the mutation performed by EnsureInstance.
@@ -155,22 +160,10 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 		}
 	}
 
-	opts.stage("pull_image")
-	msgs := make(chan string, 32)
-	forwarded := make(chan struct{})
-	go func() {
-		defer close(forwarded)
-		for line := range msgs {
-			if opts.OnPullProgress != nil {
-				opts.OnPullProgress(line)
-			}
+	if !opts.ReuseLocalImage || !imageStored(eng, desired.Image) {
+		if pullErr := pullEnsureImage(eng, desired.Image, opts); pullErr != nil {
+			return result, pullErr
 		}
-	}()
-	pullErr := eng.PullImage(desired.Image, msgs)
-	close(msgs)
-	<-forwarded
-	if pullErr != nil {
-		return result, classifyError(ErrImageDownload, pullErr)
 	}
 
 	if current == nil {
@@ -277,4 +270,30 @@ func repairExternalURL(eng InstanceEnsureEngine, desired *config.Config, imageID
 		return EnsureInstanceResult{}, err
 	}
 	return EnsureInstanceResult{Changed: true, Action: "recreated", Reason: reason}, nil
+}
+
+func imageStored(eng InstanceEnsureEngine, image string) bool {
+	present, err := eng.ImageExists(image)
+	return err == nil && present
+}
+
+func pullEnsureImage(eng InstanceEnsureEngine, image string, opts EnsureInstanceOptions) error {
+	opts.stage("pull_image")
+	msgs := make(chan string, 32)
+	forwarded := make(chan struct{})
+	go func() {
+		defer close(forwarded)
+		for line := range msgs {
+			if opts.OnPullProgress != nil {
+				opts.OnPullProgress(line)
+			}
+		}
+	}()
+	pullErr := eng.PullImage(image, msgs)
+	close(msgs)
+	<-forwarded
+	if pullErr != nil {
+		return classifyError(ErrImageDownload, pullErr)
+	}
+	return nil
 }

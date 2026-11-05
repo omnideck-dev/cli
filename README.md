@@ -168,6 +168,7 @@ omnideck <command> [flags]
 | `add` | Set up the first or one additional Omnideck instance (`install` and `setup` remain aliases) |
 | `list` | List saved installations, their container status, and browser addresses (`instances` is an alias) |
 | `update` | Download and apply the latest Omnideck version (`--plain` for non-interactive) |
+| `repair` | Recreate a missing container from its saved settings and the Omnideck version already downloaded, reusing the saved data volumes |
 | `start` | Start a stopped container |
 | `stop` | Gracefully stop the running container |
 | `restart` | Stop then start |
@@ -178,7 +179,7 @@ omnideck <command> [flags]
 | `config set <key> <value>` | Save one setting and explain how to apply it |
 | `config path` | Print the config file path |
 | `environment ensure` | Reconcile an exact desired instance for Desktop or automation (`--json`) |
-| `remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it (`uninstall` remains an alias; `--plain` for non-interactive) |
+| `remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it (`--backup-dir` chooses the backup folder; `uninstall` remains an alias; `--plain` for non-interactive) |
 
 ### Global flags
 

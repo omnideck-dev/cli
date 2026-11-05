@@ -29,8 +29,8 @@ misparse real output.
     `restart`, `wait`, `runtime status`, `logs` without `--follow`, and
     `runtime ensure` when Podman is already ready.
   - **NDJSON stream**: one flushed JSON object per line, for multi-step work:
-    `add`, `update`, `remove`, `environment ensure`, `runtime ensure`, and
-    `logs --follow`.
+    `add`, `update`, `repair`, `remove`, `environment ensure`,
+    `runtime ensure`, and `logs --follow`.
 - **Errors are always structured** (see [§3](#3-structured-error-shape)) and
   every error resolves to one of the closed codes.
 - **stdout is exclusively machine-readable.** Structured failures are written
@@ -43,12 +43,15 @@ misparse real output.
   with a failed check). Always parse the body. See [§8](#8-process-lifecycle-rules-for-a-gui-wrapper).
 - **Consumers must ignore unknown fields and unknown stages.** Additive
   optional fields and new stages do not change the contract version.
-- **`jsonContract`** (currently `4`) is returned by `omnideck --version
+- **`jsonContract`** (currently `5`) is returned by `omnideck --version
   --json`. It is bumped only for an incompatible change: a removal, rename,
   type change, enum change, or semantic change. Check it once at startup.
-  Contract 4 added the migration/startup error codes and made `start`,
+  Contract 5 added the `INVALID_SETTING` and `MISSING_STORAGE` codes, the
+  error `setting` field, the `update_instance` action, and `repair --json`;
+  `CONTAINER_NOT_FOUND` is now emitted, and status `name` is the instance
+  name. Contract 4 added the migration/startup error codes and made `start`,
   `restart`, and `environment ensure` success mean the application answers
-  over HTTP. Contract 3 schemas remain under `contracts/json/v3`.
+  over HTTP. Earlier schemas remain under `contracts/json/v<n>`.
 
 ---
 
@@ -94,14 +97,15 @@ Every non-streaming error writes exactly this envelope to stdout and exits `1`:
     "detail": "optional safe technical detail",
     "action": "runtime_setup",
     "actionValue": "podman",
-    "instances": ["omnideck", "staging"]
+    "instances": ["omnideck", "staging"],
+    "setting": "web_ui_port"
   }
 }
 ```
 
 `code` and `message` are always present. `hint`, `detail`, `action`,
-`actionValue`, and `instances` appear only when relevant (omitted, never
-`null`). Streaming commands carry the same object as the `error` field of
+`actionValue`, `instances`, and `setting` appear only when relevant (omitted,
+never `null`). Streaming commands carry the same object as the `error` field of
 their terminal event (see [§5](#5-ndjson-streaming-commands)).
 
 ### Closed error codes
@@ -115,8 +119,10 @@ a code outside this list; adding one is a contract change.
 | `AMBIGUOUS_INSTANCE` | Several instances exist and no `--name` was given. `instances` lists the valid names. |
 | `NOT_INSTALLED` | No instance matches: none saved, an unknown `--name`, or an unreadable `--config` path. |
 | `ENGINE_NOT_FOUND` | Podman is not installed or not ready. `environment ensure` adds `action: runtime_setup`. |
-| `CONTAINER_NOT_FOUND` | Reserved; not currently emitted (see note below). |
+| `CONTAINER_NOT_FOUND` | `start` or `restart` found the instance's settings but not its container. Adds `action: repair_instance` when both saved data volumes still exist. |
 | `MISSING_REQUIRED_FLAG` | A required non-interactive flag was omitted or contradictory (`remove` flags, `environment ensure --name`). |
+| `INVALID_SETTING` | A setting or flag value was rejected before anything changed. `setting` names it with the saved-settings key (`container_name`, `web_ui_port`, `memory`, `shm_size`, `image`, `home_volume`, `state_volume`, or an unknown key as given), or `backup_dir` for `remove --backup-dir`. Used by `config set`, `add`, and `environment ensure`. |
+| `MISSING_STORAGE` | A saved data volume is missing, so `repair` or `environment ensure` stopped rather than create an empty one. Nothing was changed. |
 | `MISSING_SUBCOMMAND` | Bare `omnideck --json`. `--json` never falls through to help text or the TUI. |
 | `CANCELLED` | Interrupted by SIGINT/SIGTERM mid-flight. |
 | `RESTART_REQUIRED` | Runtime setup finished a step that needs the computer to restart. |
@@ -125,11 +131,11 @@ a code outside this list; adding one is a contract change.
 | `WINDOWS_FEATURES_FAILED` | Enabling the Windows features Podman needs failed. |
 | `PACKAGE_INDEX_FAILED` | The Linux package manager could not refresh its package lists. |
 | `INSTALLER_FAILED` | The Podman installer ran and failed. |
-| `DOWNLOAD_FAILED` | A download failed: the Podman installer, or the application image during `add` or `environment ensure`. |
+| `DOWNLOAD_FAILED` | A download failed: the Podman installer, or the application image during `add`, `update`, `repair`, or `environment ensure`. |
 | `UNSUPPORTED` | This computer cannot run Omnideck's runtime setup. |
 | `RUNTIME_SETUP_FAILED` | Any other runtime setup failure. |
 | `PORT_IN_USE` | The requested local port is taken. |
-| `CONTAINER_CONFLICT` | An unrelated container already uses the requested name. |
+| `CONTAINER_CONFLICT` | An unrelated container, or another saved instance, already uses the requested name. |
 | `MIGRATION_FAILED` | The application's migration barrier stopped startup. `detail` names the failed migration; it never contains saved records, credentials, or raw logs. |
 | `APP_STARTUP_FAILED` | The application exited, or did not answer before the deadline, without a recognized migration failure. |
 | `INTERNAL_ERROR` | Anything not classified above. |
@@ -139,10 +145,8 @@ Neither startup failure deletes data or retries a migration automatically.
 `action`/`actionValue` use Doctor's vocabulary ([§7](#7-doctor-action-vocabulary-guided-repair))
 so a GUI can offer a "fix it" button straight from an error.
 
-> **Note on `CONTAINER_NOT_FOUND`:** reserved but not emitted. A missing
-> container currently surfaces as `INTERNAL_ERROR` (for example from `start`)
-> or as `"status": "unknown"` in `status`/`list`. Keep it in your switch as a
-> no-op case so a future CLI that starts using it does not hit your fallback.
+`status` and `list` report a missing container as `"status": "unknown"`
+rather than an error, and `stop` on a missing container is a successful no-op.
 
 ---
 
@@ -153,7 +157,7 @@ so a GUI can offer a "fix it" button straight from an error.
 Single value, no instance required.
 
 ```json
-{"version": "0.11.0", "commit": "a1b2c3d", "date": "2026-11-01", "jsonContract": 4}
+{"version": "0.11.0", "commit": "a1b2c3d", "date": "2026-11-01", "jsonContract": 5}
 ```
 
 ### `omnideck status --json`
@@ -257,7 +261,10 @@ Both emit the same shape; `config set` re-emits it after a successful write.
 
 Editable keys: `home_volume`, `state_volume`, `memory`, `shm_size`,
 `web_ui_port`, `image`. `container_name` is rejected (a name cannot change
-after setup). Any rejected key or value is `INTERNAL_ERROR`.
+after setup). Any rejected key or value is `INVALID_SETTING` with `setting`
+set to the key. Changing `memory` or `shm_size` is also rejected when shared
+memory would end up larger than memory; `setting` is the key being changed
+(`memory` or `shm_size`).
 
 Validation a GUI form can mirror client-side (the CLI still enforces it):
 
@@ -397,6 +404,10 @@ Stages: `check_availability` → `create_home_volume` → `create_state_volume` 
 `complete` result is the status shape for the new instance.
 
 Flags: `--name`, `--port`, `--memory`, `--shm-size`, `--image`, `--runtime`.
+An invalid flag value is `INVALID_SETTING` (for example `--port` →
+`setting: "web_ui_port"`); a name already used by a container or a saved
+instance is `CONTAINER_CONFLICT`; a taken port is `PORT_IN_USE`. All of these
+are single error values reported before any stage starts.
 
 `add --suggest-defaults --json` is a non-mutating single value that previews
 what a plain `add` would pick:
@@ -447,6 +458,12 @@ missing one is `MISSING_REQUIRED_FLAG` before any runtime call:
 - Exactly one of `--keep-volumes` or `--delete-volumes`.
 - With `--delete-volumes`, exactly one of `--backup` or `--no-backup`.
 
+`--backup-dir <folder>` saves the backup in an existing folder instead of the
+home folder. It is only valid with `--delete-volumes --backup`
+(`MISSING_REQUIRED_FLAG` otherwise), and a folder that does not exist or is
+not a folder is `INVALID_SETTING` with `setting: "backup_dir"`. Both are
+checked before anything is removed.
+
 Passing `--yes --delete-volumes` *is* the confirmation; there is no
 "type the name" step.
 
@@ -463,9 +480,9 @@ Stages (only those that apply): `prepare` → `stop_container` → [`backup`] �
 ```
 
 `removedVolumes` is `[]`, never `null`, when nothing was deleted.
-`backupPath` is omitted when no backup was made. Backups always go to the
-user's home directory as `omnideck-backup-<container>-<timestamp>.tar.gz`;
-show the returned path rather than assuming it.
+`backupPath` is omitted when no backup was made. Backups are named
+`omnideck-backup-<container>-<timestamp>.tar.gz` in `--backup-dir` or the
+user's home folder; show the returned path rather than assuming it.
 
 A cancelled remove needs no cleanup: a partly removed instance is a state
 `doctor` and a retried `remove` already handle.
@@ -506,7 +523,43 @@ be inspected, ensure leaves it alone and starts it as usual; if a saved volume
 is missing, it stops with an error naming that volume rather than let Podman
 create an empty one. A stopped container is left in place when another app holds its
 port. Saved data volumes are never removed; if one is missing, ensure stops
-rather than create an empty replacement.
+with `MISSING_STORAGE` rather than create an empty replacement. Invalid flag
+values are `INVALID_SETTING`.
+
+### `omnideck repair --json`
+
+Makes a saved instance run again without a reviewed update. It is the command
+for Doctor's `repair_instance` action and for `CONTAINER_NOT_FOUND`, and the
+TUI's Repair runs the same transaction.
+Requires an instance ([§2](#2-global-flags-relevant-to-a-gui-wrapper)).
+
+- **Missing container:** recreates it from the saved settings, reusing the
+  saved image already stored locally. It downloads only when that image is
+  not stored (or cannot be checked), with a `pull_image` stage. The container
+  gets the current layout and a legacy image name is migrated to the current
+  one; both are saved (`save_config`). If that save fails, the new container
+  is removed again so nothing changes. The lost
+  container's exact image is no longer known, so this is the version the
+  saved image name points to locally: usually the one it ran, but a newer
+  one if another instance's update has since moved a shared tag such as
+  `:latest`.
+- **Existing container:** starts it if stopped. If its MCP sign-in address is
+  missing or wrong, it is replaced from the exact image it runs, as
+  `environment ensure` does. It never replaces a healthy container just to
+  modernize it; that is `update`'s job.
+- Saved data volumes are reused and never created empty: a missing one is
+  `MISSING_STORAGE`, before anything changes.
+
+Stages are the `environment ensure` stages that apply, then `startup`. The
+`complete` result has the `environment ensure` shape:
+
+```json
+{"changed": true, "action": "repaired", "status": {"name": "desktop", "container": "omnideck-desktop", "status": "running", "...": "status shape"}}
+```
+
+`action` is `repaired` whenever the container was missing, otherwise
+`unchanged`, `started`, or `recreated` (with `reason` for a sign-in address
+fix). Other failures use the `environment ensure` codes.
 
 ### `omnideck runtime status --json` / `runtime ensure --json`
 
@@ -563,7 +616,9 @@ gathered fresh, so no follow-up `status` call is needed.
 
 Readiness failures since the current check began — including automatic
 container restarts — are reported as `MIGRATION_FAILED` or
-`APP_STARTUP_FAILED`. A new retry starts a fresh check. Other failures are
+`APP_STARTUP_FAILED`. A new retry starts a fresh check. A missing container is
+`CONTAINER_NOT_FOUND`, with `action: repair_instance` and the instance name in
+`actionValue` when its saved data volumes still exist. Other failures are
 `ENGINE_NOT_FOUND`, `PORT_IN_USE`, `CONTAINER_CONFLICT`, `CANCELLED`, or
 `INTERNAL_ERROR`.
 
@@ -595,11 +650,10 @@ these values:
 | `runtime_setup` | Podman needs installing or starting. | The runtime name (`podman`). Run `runtime ensure`. |
 | `start_instance` | A known instance exists but is not running. | Pass as `--name` to `omnideck start`. |
 | `setup_instance` | No instance exists yet. | Absent. Guide the person through `omnideck add`. |
-| `repair_instance` | The instance's container is missing but its saved data volumes exist. | Pass as `--name` to your repair flow. There is no dedicated `--json` repair command; `update --name <name>` recreates the container from its saved settings. |
+| `repair_instance` | The instance's container is missing but its saved data volumes exist. | Pass as `--name` to `omnideck repair`. |
+| `update_instance` | The instance's container lacks, or has a wrong, MCP sign-in address (`instance.external_url`). | Pass as `--name` to `omnideck update`, which downloads the latest version and keeps saved data. `omnideck repair` fixes the address without changing the version. |
 
 No `action` means there is nothing actionable to offer; show the message.
-`instance.external_url` warnings have no `action` yet; follow their `hint`
-(`update`).
 
 ---
 

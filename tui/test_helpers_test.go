@@ -30,6 +30,8 @@ type mockEngine struct {
 	env             []string
 	envErr          error
 	startedNames    []string
+	imageStored     bool
+	pulls           int
 
 	statsCPU      string
 	statsCPUPct   float64
@@ -50,9 +52,10 @@ func (m *mockEngine) IsAvailable() bool                       { return true }
 func (m *mockEngine) HasPermission() bool                     { return true }
 func (m *mockEngine) Version() string                         { return "1.0" }
 func (m *mockEngine) ImageDigest(string) string               { return "" }
-func (m *mockEngine) PullImage(string, chan<- string) error   { return nil }
+func (m *mockEngine) PullImage(string, chan<- string) error   { m.pulls++; return nil }
 func (m *mockEngine) ContainerEnv(string) ([]string, error)   { return m.env, m.envErr }
 func (m *mockEngine) ContainerImageID(string) (string, error) { return "sha256:mock", nil }
+func (m *mockEngine) ImageExists(string) (bool, error)        { return m.imageStored, nil }
 func (m *mockEngine) RunContainer(opts engine.RunOptions) error {
 	m.lastRunOptions = opts
 	m.env = []string{"OMNIDECK_EXTERNAL_URL=" + opts.ExternalURL}

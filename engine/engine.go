@@ -84,6 +84,8 @@ type Engine interface {
 	// ContainerImageID returns the ID of the image the container was created
 	// from, which stays fixed when its tag later moves to a newer image.
 	ContainerImageID(name string) (string, error)
+	// ImageExists reports whether image is already stored locally.
+	ImageExists(image string) (bool, error)
 }
 
 // Detect returns the Podman engine when it is ready. Omnideck deliberately

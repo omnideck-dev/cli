@@ -62,23 +62,37 @@ func TestDecodeSingleJSONRejectsTrailingValue(t *testing.T) {
 func TestVersionSchemaRejectsMissingContractVersion(t *testing.T) {
 	contractsDir := filepath.Join("..", "..", "contracts")
 	invalid := `{"version":"test","commit":"abc","date":"today"}`
-	if err := validateJSONSchema(contractsDir, "json/v4/version.schema.json", invalid); err == nil {
+	if err := validateJSONSchema(contractsDir, "json/v5/version.schema.json", invalid); err == nil {
 		t.Fatal("version schema accepted a payload without jsonContract")
 	}
-	valid := `{"version":"test","commit":"abc","date":"today","jsonContract":4}`
-	if err := validateJSONSchema(contractsDir, "json/v4/version.schema.json", valid); err != nil {
+	valid := `{"version":"test","commit":"abc","date":"today","jsonContract":5}`
+	if err := validateJSONSchema(contractsDir, "json/v5/version.schema.json", valid); err != nil {
 		t.Fatalf("version schema rejected a valid payload: %v", err)
 	}
 }
 
-func TestJSONContract3AcceptsTypedRuntimeSetupEventsAndErrors(t *testing.T) {
+func TestJSONContractAcceptsTypedRuntimeSetupEventsAndErrors(t *testing.T) {
 	contractsDir := filepath.Join("..", "..", "contracts")
 	errorEnvelope := `{"error":{"code":"PERMISSION_CANCELLED","message":"approval cancelled","detail":"ERROR_CANCELLED (1223)"}}`
-	if err := validateJSONSchema(contractsDir, "json/v4/error.schema.json", errorEnvelope); err != nil {
-		t.Fatalf("contract 3 rejected a typed setup error: %v", err)
+	if err := validateJSONSchema(contractsDir, "json/v5/error.schema.json", errorEnvelope); err != nil {
+		t.Fatalf("contract 5 rejected a typed setup error: %v", err)
 	}
 	event := `{"stage":"software","substage":"wsl-permission","state":"permission","activity":"Getting ready","status":"Approval required"}`
-	if err := validateJSONSchema(contractsDir, "json/v4/stage-event.schema.json", event); err != nil {
-		t.Fatalf("contract 3 rejected a runtime setup event: %v", err)
+	if err := validateJSONSchema(contractsDir, "json/v5/stage-event.schema.json", event); err != nil {
+		t.Fatalf("contract 5 rejected a runtime setup event: %v", err)
+	}
+}
+
+func TestJSONContract5AcceptsInvalidSettingAndUpdateAction(t *testing.T) {
+	contractsDir := filepath.Join("..", "..", "contracts")
+	for _, envelope := range []string{
+		`{"error":{"code":"INVALID_SETTING","message":"web_ui_port must be a number between 1 and 65535","setting":"web_ui_port"}}`,
+		`{"error":{"code":"MISSING_STORAGE","message":"saved data volume \"omnideck-home\" is missing"}}`,
+		`{"error":{"code":"CONTAINER_NOT_FOUND","message":"container \"omnideck\" was not found","action":"repair_instance","actionValue":"omnideck"}}`,
+		`{"error":{"code":"INTERNAL_ERROR","message":"x","action":"update_instance","actionValue":"work"}}`,
+	} {
+		if err := validateJSONSchema(contractsDir, "json/v5/error.schema.json", envelope); err != nil {
+			t.Fatalf("contract 5 rejected %s: %v", envelope, err)
+		}
 	}
 }

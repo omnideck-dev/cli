@@ -114,6 +114,8 @@ func (m AppModel) runDoctorAction(result CheckResult) (tea.Model, tea.Cmd) {
 		return m.startEmbeddedSetup()
 	case DoctorActionRepairInstance:
 		return m.startEmbeddedRepair()
+	case DoctorActionUpdateInstance:
+		return m.startEmbeddedUpdate()
 	}
 	return m, nil
 }

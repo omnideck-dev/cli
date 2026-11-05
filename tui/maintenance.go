@@ -63,6 +63,9 @@ type MaintenanceModel struct {
 	externalURL *workflow.ExternalURLCheck
 	// externalURLSummary is the verified outcome shown on completion.
 	externalURLSummary string
+	// repaired receives the configuration a repair leaves the instance
+	// running with, for the same goroutine reason as externalURL.
+	repaired *config.Config
 }
 
 // NewMaintenanceModel creates a review-first maintenance workflow. No container or file
@@ -76,8 +79,7 @@ func NewMaintenanceModel(req MaintenanceRequest) MaintenanceModel {
 	}
 	if req.Mode == MaintenanceRepair {
 		stepLabels = []string{
-			"Download Omnideck",
-			"Recreate the missing container from its saved settings",
+			"Recreate the container from its saved settings",
 		}
 	}
 	return MaintenanceModel{
@@ -127,7 +129,7 @@ func (m MaintenanceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StepDoneMsg:
 		var cmd tea.Cmd
 		m.spinnerModel, cmd = m.spinnerModel.Update(msg)
-		if msg.Index == 1 {
+		if m.Mode == MaintenanceUpdate && msg.Index == 1 {
 			// The container is replaced and its settings saved. Keep the
 			// in-memory config aligned with the YAML even if the sign-in
 			// address check fails, and make a retry start from what is saved.
@@ -140,6 +142,10 @@ func (m MaintenanceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if m.Mode == MaintenanceUpdate {
 			m.externalURLSummary = msg.Detail
+		}
+		if m.Mode == MaintenanceRepair && m.repaired != nil && m.repaired.ContainerName != "" {
+			m.next = *m.repaired
+			m.current = m.next
 		}
 		*m.cfg = m.next
 		m.Stage = MaintenanceStageComplete
@@ -165,6 +171,7 @@ func (m MaintenanceModel) begin() (tea.Model, tea.Cmd) {
 	m.errorMsg = ""
 	m.externalURLSummary = ""
 	m.externalURL = &workflow.ExternalURLCheck{}
+	m.repaired = &config.Config{}
 	m.spinnerModel = NewSpinnerModel(m.stepLabels, defaultFlavorMessages)
 	return m, tea.Batch(m.spinnerModel.Init(), m.startMaintenanceStep(0))
 }
@@ -179,6 +186,23 @@ func (m MaintenanceModel) exit(outcome WorkflowOutcome) (tea.Model, tea.Cmd) {
 func (m *MaintenanceModel) startMaintenanceStep(i int) tea.Cmd {
 	startCmd := func() tea.Msg { return StepStartedMsg{Index: i} }
 	var workCmd tea.Cmd
+	if m.Mode == MaintenanceRepair {
+		// Repair is one shared transaction: it reuses the stored version,
+		// downloads only when it is missing, and stops rather than create
+		// empty saved data.
+		repaired := m.repaired
+		current, path := m.current, m.configPath
+		workCmd = StepCmd(i, func() (string, error) {
+			_, result, err := workflow.RepairInstance(m.eng, &current, func(cfg *config.Config) error {
+				return workflow.SaveInstanceConfig(m.eng.Name(), path, cfg)
+			}, workflow.EnsureInstanceOptions{})
+			if err == nil && repaired != nil {
+				*repaired = result
+			}
+			return "", err
+		})
+		return tea.Sequence(startCmd, workCmd)
+	}
 	switch i {
 	case 0:
 		workCmd = StepCmd(i, func() (string, error) {
@@ -218,7 +242,7 @@ func (m *MaintenanceModel) startMaintenanceStep(i int) tea.Cmd {
 
 func (m MaintenanceModel) reviewText() string {
 	if m.Mode == MaintenanceRepair {
-		return fmt.Sprintf("Repair %s\n\nOmnideck found this installation's saved settings, but its container is missing. It will recreate the container and reconnect the same saved file and app-data volumes. No saved data will be deleted.", m.next.ContainerName)
+		return fmt.Sprintf("Repair %s\n\nOmnideck found this installation's saved settings, but its container is missing. It will recreate the container, reusing the Omnideck version already downloaded (or downloading it if it is missing), and reconnect the same saved file and app-data volumes. If saved data is missing, it stops without changing anything. No saved data will be deleted.", m.next.ContainerName)
 	}
 	return fmt.Sprintf("Update %s\n\nOmnideck will download the latest version and restart this installation. Your files and agent data are kept in separate container volumes and will not be deleted.", m.next.ContainerName)
 }

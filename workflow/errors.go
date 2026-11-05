@@ -15,6 +15,9 @@ var (
 	// ErrExternalURL identifies a container whose OMNIDECK_EXTERNAL_URL does
 	// not match the instance's browser address after Omnideck configured it.
 	ErrExternalURL = errors.New("external URL mismatch")
+	// ErrContainerNotFound identifies a saved instance whose container is
+	// missing, so it cannot be started until it is repaired.
+	ErrContainerNotFound = errors.New("container not found")
 )
 
 type classifiedError struct {
