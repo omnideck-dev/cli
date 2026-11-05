@@ -33,7 +33,7 @@ func runStart(cmd *cobra.Command, _ []string) error {
 	}
 
 	if jsonFlag {
-		return runLifecycleJSON(cfg, eng, func() error {
+		return runLifecycleJSON(loadedInstanceName(), cfg, eng, func() error {
 			_, actionErr := workflow.EnsureStarted(eng, cfg.ContainerName)
 			if actionErr != nil {
 				return actionErr

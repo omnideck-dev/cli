@@ -21,6 +21,30 @@ func TestDesiredEnvironmentUpdatesLayoutWithoutMutatingSavedConfig(t *testing.T)
 	}
 }
 
+func TestDesiredEnvironmentConfigKeepsAnExistingInstancesContainer(t *testing.T) {
+	originalName := nameFlag
+	t.Cleanup(func() { nameFlag = originalName })
+	nameFlag = "desktop"
+
+	current := config.DefaultConfig()
+	current.ContainerName = "omnideck-desktop"
+	desired, err := desiredEnvironmentConfig(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if desired.ContainerName != "omnideck-desktop" {
+		t.Fatalf("existing instance container = %q, want omnideck-desktop", desired.ContainerName)
+	}
+
+	created, err := desiredEnvironmentConfig(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ContainerName != "desktop" {
+		t.Fatalf("new instance container = %q, want desktop", created.ContainerName)
+	}
+}
+
 func TestDesiredEnvironmentConfigRejectsSharedMemoryAboveMemoryLimit(t *testing.T) {
 	originalMemory, originalSHM := environmentMemoryFlag, environmentShmFlag
 	t.Cleanup(func() {

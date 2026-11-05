@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,5 +73,38 @@ func TestSaveInstalledConfigRecordsMachineWideRuntime(t *testing.T) {
 	}
 	if settings.Runtime != "podman" {
 		t.Fatalf("machine-wide Runtime = %q, want podman", settings.Runtime)
+	}
+}
+
+// A new instance is saved under its container name, so an existing instance
+// file with that name must block it even when its container is named
+// differently; otherwise add would overwrite that instance's settings.
+func TestValidatePlainSetupRejectsAnExistingInstanceName(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	existing := &config.Config{ContainerName: "omnideck-desktop", WebUIPort: "2337", Image: config.DefaultImage}
+	if err := config.Save(config.InstancePath("desktop"), existing); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.DefaultConfig()
+	cfg.ContainerName = "desktop"
+	cfg.WebUIPort = "2400"
+	err := validatePlainSetup(cfg, &mockEngine{})
+	if err == nil || !strings.Contains(err.Error(), `named "desktop" already exists`) {
+		t.Fatalf("validatePlainSetup() error = %v", err)
+	}
+
+	name, err := suggestAvailableRuntimeName("desktop", &mockEngine{})
+	if err != nil || name == "desktop" {
+		t.Fatalf("suggestAvailableRuntimeName() = %q, %v; the instance name is taken", name, err)
+	}
+
+	// An unreadable instance file is left out of ListInstances but must still
+	// not be overwritten: it may be the only copy of that instance's settings.
+	if err := os.WriteFile(config.InstancePath("broken"), []byte(": not yaml"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg.ContainerName = "broken"
+	if err := validatePlainSetup(cfg, &mockEngine{}); err == nil || !strings.Contains(err.Error(), `named "broken" already exists`) {
+		t.Fatalf("validatePlainSetup() over an unreadable file error = %v", err)
 	}
 }

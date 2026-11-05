@@ -266,6 +266,31 @@ run_cli restart
 wait_for_web_ui
 run_cli status
 
+current_step="replace container without MCP callback origin"
+# Simulate an installation created by an older CLI: same name, port, and
+# volumes, but no OMNIDECK_EXTERNAL_URL.
+"${engine}" rm -f "${instance}"
+"${engine}" run -d --name "${instance}" -p "127.0.0.1:${port}:8080" \
+  -v "${instance}-home:/home/omnideck" -v "${instance}-state:/var/lib/omnideck" \
+  -e PORT=8080 "${fixture_image}"
+if "${engine}" exec "${instance}" printenv OMNIDECK_EXTERNAL_URL >/dev/null 2>&1; then
+  fail "The simulated legacy container unexpectedly has OMNIDECK_EXTERNAL_URL."
+fi
+
+current_step="doctor detects missing MCP callback origin"
+run_cli doctor | tee "${output_dir}/doctor-legacy.log"
+grep -Fq "created without its sign-in address" "${output_dir}/doctor-legacy.log" || fail "doctor did not warn about the missing MCP callback origin."
+
+current_step="update restores MCP callback origin"
+run_cli update --plain | tee "${output_dir}/update.log"
+grep -Fq "MCP sign-in address... set to http://localhost:${port}" "${output_dir}/update.log" || fail "update did not report setting the MCP callback origin."
+callback_origin="$("${engine}" exec "${instance}" printenv OMNIDECK_EXTERNAL_URL | tr -d '\r')"
+[[ "${callback_origin}" == "http://localhost:${port}" ]] || fail "update did not set the MCP callback origin."
+grep -Eq "^layout_version:[[:space:]]+[0-9]+$" "${config_path}" || fail "update did not record the container layout version."
+wait_for_web_ui
+marker="$("${engine}" exec "${instance}" cat /home/omnideck/hardware-marker | tr -d '\r')"
+[[ "${marker}" == "hardware-volume-marker" ]] || fail "The home volume marker did not survive an update."
+
 current_step="doctor"
 run_cli doctor | tee "${output_dir}/doctor.log"
 grep -Fq "Omnideck Doctor" "${output_dir}/doctor.log" || fail "doctor did not render its report."

@@ -311,7 +311,7 @@ func runSetupStepsJSON(eng engine.Engine, cfg *config.Config, savePath string) e
 	if nd.broken() {
 		return errAborted
 	}
-	nd.complete(gatherStatusPayload(cfg, eng))
+	nd.complete(gatherStatusPayload(cfg.ContainerName, cfg, eng))
 	if nd.broken() {
 		return errAborted
 	}
@@ -375,6 +375,8 @@ func suggestAvailableRuntimeName(initial string, eng engine.Engine) (string, err
 	if err != nil {
 		return "", fmt.Errorf("checking existing installations: %w", err)
 	}
+	// A new instance is saved under its container name, so a candidate must
+	// be free as both an instance file and a container name.
 	reserved := map[string]bool{}
 	for _, instance := range instances {
 		if instance.Config != nil {
@@ -386,7 +388,7 @@ func suggestAvailableRuntimeName(initial string, eng engine.Engine) (string, err
 		if suffix > 1 {
 			candidate = fmt.Sprintf("omnideck%d", suffix)
 		}
-		if reserved[candidate] {
+		if reserved[candidate] || config.InstanceFileExists(candidate) {
 			continue
 		}
 		exists, err := eng.ContainerExists(candidate)
@@ -407,6 +409,12 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 	instances, err := config.ListInstances()
 	if err != nil {
 		return fmt.Errorf("checking existing installations: %w", err)
+	}
+	// The new instance is saved under its container name, so an existing
+	// instance file with that name, even an unreadable one, must not be
+	// overwritten either.
+	if config.InstanceFileExists(cfg.ContainerName) {
+		return fmt.Errorf("an Omnideck installation named %q already exists; choose a different --name", cfg.ContainerName)
 	}
 	for _, instance := range instances {
 		if instance.Config == nil {

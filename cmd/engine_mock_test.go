@@ -31,6 +31,13 @@ type mockEngine struct {
 	inspect    map[string]engine.InspectData
 	inspectErr error
 
+	// env is keyed by container name. A successful RunContainer records the
+	// sign-in address it was given, like the real engine, unless
+	// runIgnoresExternalURL simulates a broken replacement.
+	env                   map[string][]string
+	envErr                error
+	runIgnoresExternalURL bool
+
 	fetchLines []string
 	fetchErr   error
 	tailErr    error
@@ -111,7 +118,26 @@ func (m *mockEngine) PullImage(_ string, msgs chan<- string) error {
 
 func (m *mockEngine) RunContainer(opts engine.RunOptions) error {
 	m.runCalls = append(m.runCalls, opts)
-	return m.runErr
+	if m.runErr != nil {
+		return m.runErr
+	}
+	if m.env == nil {
+		m.env = map[string][]string{}
+	}
+	m.env[opts.Name] = []string{"PORT=8080"}
+	if !m.runIgnoresExternalURL {
+		m.env[opts.Name] = append(m.env[opts.Name], "OMNIDECK_EXTERNAL_URL="+opts.ExternalURL)
+	}
+	return nil
+}
+
+func (m *mockEngine) ContainerImageID(string) (string, error) { return "sha256:mock", nil }
+
+func (m *mockEngine) ContainerEnv(name string) ([]string, error) {
+	if m.envErr != nil {
+		return nil, m.envErr
+	}
+	return m.env[name], nil
 }
 
 func (m *mockEngine) CheckOllamaConnection(string) error { return m.ollamaErr }

@@ -79,7 +79,7 @@ func doctorActionCommand(result CheckResult) string {
 	case DoctorActionRuntimeSetup:
 		return "run `omnideck` to open guided container setup"
 	case DoctorActionStartInstance:
-		return "run `omnideck start --name " + result.ActionValue + "`"
+		return "run `" + workflow.InstanceCommand("start", result.ActionValue) + "`"
 	case DoctorActionSetupInstance:
 		return "run `omnideck setup`"
 	case DoctorActionRepairInstance:

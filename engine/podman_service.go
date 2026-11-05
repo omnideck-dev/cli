@@ -49,6 +49,10 @@ type podmanServiceInspect struct {
 			Status string `json:"Status"`
 		} `json:"Health"`
 	} `json:"State"`
+	Config struct {
+		Env []string `json:"Env"`
+	} `json:"Config"`
+	Image string `json:"Image"`
 }
 
 func (c *podmanServiceClient) containerInspect(name string) (InspectData, error) {
@@ -67,6 +71,24 @@ func (c *podmanServiceClient) containerInspect(name string) (InspectData, error)
 		inspect.HealthStatus = response.State.Health.Status
 	}
 	return inspect, nil
+}
+
+func (c *podmanServiceClient) containerEnv(name string) ([]string, error) {
+	var response podmanServiceInspect
+	path := "/containers/" + url.PathEscape(name) + "/json"
+	if err := c.get(path, &response); err != nil {
+		return nil, fmt.Errorf("podman inspect: %w", err)
+	}
+	return response.Config.Env, nil
+}
+
+func (c *podmanServiceClient) containerImageID(name string) (string, error) {
+	var response podmanServiceInspect
+	path := "/containers/" + url.PathEscape(name) + "/json"
+	if err := c.get(path, &response); err != nil {
+		return "", fmt.Errorf("podman inspect: %w", err)
+	}
+	return parseContainerImageID([]byte(response.Image))
 }
 
 type podmanServiceStatsReport struct {

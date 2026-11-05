@@ -79,6 +79,7 @@ func RunOptions(cfg *config.Config) engine.RunOptions {
 		StateVolume: cfg.StateVolumeName(),
 		Restart:     "always",
 		WebUIPort:   cfg.WebUIPortOrDefault(),
+		ExternalURL: cfg.BrowserURL(),
 		Platform:    runtime.GOOS,
 	}
 }

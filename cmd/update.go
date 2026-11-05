@@ -1,8 +1,6 @@
 package cmd
 
 import (
-	"context"
-	"errors"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -69,31 +67,21 @@ func runUpdate(_ *cobra.Command, _ []string) error {
 	return err
 }
 
-// updateSteps mirrors tui/maintenance.go's MaintenanceUpdate step sequence
-// exactly (pull the possibly-migrated image, then replace the container and
-// save its settings as one transaction) so the interactive and
-// non-interactive paths can never disagree about what an update does.
-// workflow.RecreateAndSave already contains its own rollback for a failed
-// replacement or a failed save — neither runUpdatePlain nor runUpdateJSON
-// need to reimplement that.
-func updateTarget(cfg *config.Config) (current, next config.Config) {
-	current = *cfg
-	next = current
-	next.MigrateImage()
-	return current, next
-}
-
 // runUpdatePlain performs the same update tui/maintenance.go's interactive
-// MaintenanceUpdate flow does, non-interactively, mirroring runSetupPlain's
-// step-printing style.
+// MaintenanceUpdate flow does (pull, replace and save as one transaction via
+// workflow.RecreateAndSave, then verify the MCP sign-in address),
+// non-interactively, mirroring runSetupPlain's step-printing style.
 func runUpdatePlain(eng engine.Engine, cfg *config.Config) error {
-	current, next := updateTarget(cfg)
+	current, next := workflow.UpdateTarget(cfg)
+	var before workflow.ExternalURLCheck
 
+	// A step's detail replaces the default "ok" so outcomes worth reading
+	// (such as what happened to the sign-in address) appear on the step line.
 	steps := []struct {
 		label string
-		fn    func() error
+		fn    func() (string, error)
 	}{
-		{"Download the latest Omnideck version", func() error {
+		{"Download the latest Omnideck version", func() (string, error) {
 			msgs := make(chan string, 32)
 			go func() {
 				for range msgs {
@@ -101,24 +89,41 @@ func runUpdatePlain(eng engine.Engine, cfg *config.Config) error {
 			}()
 			err := eng.PullImage(next.Image, msgs)
 			close(msgs)
-			return err
+			return "", err
 		}},
-		{"Replace the container and save its settings", func() error {
-			return workflow.RecreateAndSave(eng, &current, &next, ConfigPath)
+		{"Replace the container and save its settings", func() (string, error) {
+			before = workflow.ExternalURLBeforeReplace(eng, &next)
+			return "", workflow.RecreateAndSave(eng, &current, &next, ConfigPath)
+		}},
+		{"MCP sign-in address", func() (string, error) {
+			report, err := workflow.VerifyExternalURL(eng, &next, before)
+			return report.Summary(), err
 		}},
 	}
 
 	for _, step := range steps {
 		fmt.Printf("  → %s... ", step.label)
-		if err := step.fn(); err != nil {
+		detail, err := step.fn()
+		if err != nil {
 			fmt.Printf("FAILED\n    %v\n", err)
 			return err
 		}
-		fmt.Println("ok")
+		if detail == "" {
+			detail = "ok"
+		}
+		fmt.Println(detail)
 	}
 
-	fmt.Printf("\n✓  Omnideck is up to date: http://localhost:%s\n", next.WebUIPortOrDefault())
+	fmt.Printf("\n✓  Omnideck is up to date: %s\n", next.BrowserURL())
 	return nil
+}
+
+// externalURLStageResult is the "result" of the external_url stage's done
+// event: what the update did to the container's OMNIDECK_EXTERNAL_URL.
+type externalURLStageResult struct {
+	State    string `json:"state"`
+	Expected string `json:"expected"`
+	Previous string `json:"previous,omitempty"`
 }
 
 // runUpdateJSON performs the same update as runUpdatePlain but emits NDJSON
@@ -131,14 +136,15 @@ func runUpdatePlain(eng engine.Engine, cfg *config.Config) error {
 // path a logical failure already takes. See JSON_MODE_SPEC.md's
 // "Cancellation and teardown".
 func runUpdateJSON(eng engine.Engine, cfg *config.Config) error {
-	current, next := updateTarget(cfg)
+	current, next := workflow.UpdateTarget(cfg)
 	nd := newNDJSONEncoder()
+	var before workflow.ExternalURLCheck
 
 	steps := []struct {
 		stage string
-		fn    func() error
+		fn    func() (any, error)
 	}{
-		{"pull_image", func() error {
+		{"pull_image", func() (any, error) {
 			msgs := make(chan string, 32)
 			forwarded := make(chan struct{})
 			go func() {
@@ -150,10 +156,22 @@ func runUpdateJSON(eng engine.Engine, cfg *config.Config) error {
 			err := eng.PullImage(next.Image, msgs)
 			close(msgs)
 			<-forwarded
-			return err
+			return nil, err
 		}},
-		{"recreate", func() error {
-			return workflow.RecreateAndSave(eng, &current, &next, ConfigPath)
+		{"recreate", func() (any, error) {
+			before = workflow.ExternalURLBeforeReplace(eng, &next)
+			return nil, workflow.RecreateAndSave(eng, &current, &next, ConfigPath)
+		}},
+		{"external_url", func() (any, error) {
+			report, err := workflow.VerifyExternalURL(eng, &next, before)
+			if err != nil {
+				return nil, err
+			}
+			return externalURLStageResult{
+				State:    string(report.Change),
+				Expected: report.Expected,
+				Previous: report.Previous,
+			}, nil
 		}},
 	}
 
@@ -162,19 +180,17 @@ func runUpdateJSON(eng engine.Engine, cfg *config.Config) error {
 			return errAborted
 		}
 		nd.start(step.stage)
-		if err := step.fn(); err != nil {
-			if errors.Is(err, context.Canceled) {
-				return nd.fail(step.stage, newJSONError(ErrCodeCancelled, err.Error()))
-			}
-			return nd.fail(step.stage, err)
+		result, err := step.fn()
+		if err != nil {
+			return nd.fail(step.stage, environmentStageJSONError(step.stage, err))
 		}
-		nd.done(step.stage)
+		nd.doneWithResult(step.stage, result)
 	}
 
 	if nd.broken() {
 		return errAborted
 	}
-	nd.complete(gatherStatusPayload(&next, eng))
+	nd.complete(gatherStatusPayload(loadedInstanceName(), &next, eng))
 	if nd.broken() {
 		return errAborted
 	}

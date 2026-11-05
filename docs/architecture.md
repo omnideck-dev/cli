@@ -90,7 +90,14 @@ semantics used everywhere:
   by Desktop and automation. It owns image pulls, volumes, replacement,
   rollback, and persistence.
 - `RunOptions` is the only config-to-container mapping. It leaves the
-  container-facing Ollama hostname to the selected engine and host platform.
+  container-facing Ollama hostname to the selected engine and host platform,
+  and passes `Config.BrowserURL()` as the OAuth callback origin
+  (`OMNIDECK_EXTERNAL_URL`).
+- `CheckExternalURL` compares a live container's `OMNIDECK_EXTERNAL_URL` with
+  `Config.BrowserURL()`. Update verifies it after replacing the container,
+  `EnsureInstance` replaces a container whose saved settings match but whose
+  value is missing or wrong, and Doctor reports drift. Start and restart never
+  recreate containers to fix it.
 - `Recreate` removes and replaces a container, then attempts to restore the
   previous container configuration if the replacement fails.
 - `NewInstanceDefaults` owns unique name and browser-port suggestions.

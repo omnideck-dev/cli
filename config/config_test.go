@@ -398,3 +398,22 @@ func TestMigrateImage(t *testing.T) {
 		})
 	}
 }
+
+func TestInstanceNameForPath(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	if got := InstanceNameForPath(InstancePath("desktop")); got != "desktop" {
+		t.Fatalf("instance path name = %q, want desktop", got)
+	}
+	if err := os.MkdirAll(InstancesDir(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(filepath.Dir(InstancesDir()))
+	if got := InstanceNameForPath(filepath.Join("instances", "work.yaml")); got != "work" {
+		t.Fatalf("relative instance path name = %q, want work", got)
+	}
+	for _, path := range []string{"", DefaultPath(), filepath.Join(t.TempDir(), "custom.yaml"), filepath.Join(InstancesDir(), "notes.txt")} {
+		if got := InstanceNameForPath(path); got != "" {
+			t.Fatalf("InstanceNameForPath(%q) = %q, want empty", path, got)
+		}
+	}
+}

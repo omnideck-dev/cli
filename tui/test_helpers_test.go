@@ -27,6 +27,9 @@ type mockEngine struct {
 	volumes         map[string]bool
 	removedVolumes  []string
 	lastRunOptions  engine.RunOptions
+	env             []string
+	envErr          error
+	startedNames    []string
 
 	statsCPU      string
 	statsCPUPct   float64
@@ -43,13 +46,16 @@ func (m *mockEngine) Name() string {
 	}
 	return "podman"
 }
-func (m *mockEngine) IsAvailable() bool                     { return true }
-func (m *mockEngine) HasPermission() bool                   { return true }
-func (m *mockEngine) Version() string                       { return "1.0" }
-func (m *mockEngine) ImageDigest(string) string             { return "" }
-func (m *mockEngine) PullImage(string, chan<- string) error { return nil }
+func (m *mockEngine) IsAvailable() bool                       { return true }
+func (m *mockEngine) HasPermission() bool                     { return true }
+func (m *mockEngine) Version() string                         { return "1.0" }
+func (m *mockEngine) ImageDigest(string) string               { return "" }
+func (m *mockEngine) PullImage(string, chan<- string) error   { return nil }
+func (m *mockEngine) ContainerEnv(string) ([]string, error)   { return m.env, m.envErr }
+func (m *mockEngine) ContainerImageID(string) (string, error) { return "sha256:mock", nil }
 func (m *mockEngine) RunContainer(opts engine.RunOptions) error {
 	m.lastRunOptions = opts
+	m.env = []string{"OMNIDECK_EXTERNAL_URL=" + opts.ExternalURL}
 	if len(m.runErrors) > 0 {
 		err := m.runErrors[0]
 		m.runErrors = m.runErrors[1:]
@@ -98,7 +104,8 @@ func (m *mockEngine) RemoveVolume(name string) error {
 	return nil
 }
 func (m *mockEngine) ExportVolume(string, io.Writer) error { return nil }
-func (m *mockEngine) StartContainer(string) error {
+func (m *mockEngine) StartContainer(name string) error {
+	m.startedNames = append(m.startedNames, name)
 	if m.startErr == nil {
 		m.containerStatus = "running"
 	}

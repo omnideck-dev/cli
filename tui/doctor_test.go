@@ -74,6 +74,7 @@ func TestVolumeCheckExists(t *testing.T) {
 
 func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
 	results, _ := workflow.DiagnoseWithProbes(
+		"omnideck",
 		&config.Config{ContainerName: "omnideck", WebUIPort: "2337"},
 		&mockEngine{name: "podman"},
 		[]engine.ProbeResult{
@@ -100,7 +101,7 @@ func TestDoctorUsesSharedRuntimeDiagnosisAndGuidedAction(t *testing.T) {
 
 func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{name: "podman", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
+	results, _ := workflow.DiagnoseWithProbes("omnideck", cfg, &mockEngine{name: "podman", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
 		{Name: "podman", State: engine.RuntimeReady, Version: "6.0.2"},
 	})
 	if results[0].Status != CheckPass {
@@ -115,9 +116,27 @@ func TestDoctorOffersStartForAStoppedInstance(t *testing.T) {
 	}
 }
 
+// Starting a container never adds a missing sign-in address, so Doctor must
+// report it for a stopped container too, not only after it is started.
+func TestDoctorChecksSignInAddressOfAStoppedInstance(t *testing.T) {
+	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
+	results, _ := workflow.DiagnoseWithProbes("omnideck", cfg, &mockEngine{
+		name: "podman", containerExists: true, containerStatus: "exited", env: []string{"PORT=8080"},
+	}, []engine.ProbeResult{{Name: "podman", State: engine.RuntimeReady, Version: "6.0.2"}})
+	for _, result := range results {
+		if result.Label == "MCP sign-in address" {
+			if result.Status != CheckWarn {
+				t.Fatalf("sign-in address result = %#v", result)
+			}
+			return
+		}
+	}
+	t.Fatalf("no sign-in address check for a stopped container: %#v", results)
+}
+
 func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{
+	results, _ := workflow.DiagnoseWithProbes("omnideck", cfg, &mockEngine{
 		name: "podman",
 		volumes: map[string]bool{
 			cfg.HomeVolumeName():  true,
@@ -137,7 +156,7 @@ func TestDoctorOffersRepairForAMissingContainer(t *testing.T) {
 
 func TestDoctorDoesNotOfferRepairWhenSavedStorageIsMissing(t *testing.T) {
 	cfg := &config.Config{ContainerName: "omnideck", WebUIPort: "2337", Image: "example:test"}
-	results, _ := workflow.DiagnoseWithProbes(cfg, &mockEngine{
+	results, _ := workflow.DiagnoseWithProbes("omnideck", cfg, &mockEngine{
 		name:    "podman",
 		volumes: map[string]bool{cfg.StateVolumeName(): true},
 	}, []engine.ProbeResult{{Name: "podman", State: engine.RuntimeReady}})
@@ -266,5 +285,74 @@ func TestDoctorActionNavigationSkipsInformationalRows(t *testing.T) {
 	}
 	if got := nextDoctorAction(results, 2, 1); got != 0 {
 		t.Fatalf("wrapped action = %d, want 0", got)
+	}
+}
+
+// Desktop's instance file is "desktop" while its container is
+// "omnideck-desktop"; Doctor's hints and actionValue must name the instance,
+// because that is what --name accepts.
+func TestDoctorHintsNameTheInstanceNotTheContainer(t *testing.T) {
+	cfg := &config.Config{ContainerName: "omnideck-desktop", WebUIPort: "2337", Image: "example:test"}
+	results, _ := workflow.DiagnoseWithProbes("desktop", cfg, &mockEngine{name: "podman", containerExists: true, containerStatus: "exited"}, []engine.ProbeResult{
+		{Name: "podman", State: engine.RuntimeReady, Version: "6.0.2"},
+	})
+	instance := results[1]
+	if instance.Hint != "Run: omnideck start --name desktop" || instance.ActionValue != "desktop" {
+		t.Fatalf("stopped instance result = %#v", instance)
+	}
+	if got := doctorActionCommand(instance); got != "run `omnideck start --name desktop`" {
+		t.Fatalf("plain report command = %q", got)
+	}
+}
+
+func TestDoctorStartActionStartsTheCheckedInstancesContainer(t *testing.T) {
+	eng := &mockEngine{name: "podman", containerExists: true, containerStatus: "exited"}
+	m := NewAppModel(eng, []config.InstanceInfo{{
+		Name:   "desktop",
+		Config: &config.Config{ContainerName: "omnideck-desktop", WebUIPort: "2337", Image: "example:test"},
+	}})
+	m.router.Replace(RouteDoctor)
+	m.doctorStage = doctorStageResults
+	m.doctorResults = []CheckResult{{
+		Label:       "Omnideck instance",
+		Status:      CheckFail,
+		Action:      DoctorActionStartInstance,
+		ActionLabel: "Start Omnideck",
+		ActionValue: "desktop",
+	}}
+	m.doctorFocus = 0
+
+	_, cmd := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("start action returned no work")
+	}
+	if msg, ok := cmd().(doctorActionDoneMsg); !ok || msg.err != nil {
+		t.Fatalf("start action result = %#v", msg)
+	}
+	if len(eng.startedNames) != 1 || eng.startedNames[0] != "omnideck-desktop" {
+		t.Fatalf("started %v, want the instance's container omnideck-desktop", eng.startedNames)
+	}
+}
+
+func TestDoctorStartActionExplainsUnreadableSettings(t *testing.T) {
+	eng := &mockEngine{name: "podman", containerExists: true, containerStatus: "exited"}
+	m := NewAppModel(eng, []config.InstanceInfo{{Name: "desktop"}})
+	m.router.Replace(RouteDoctor)
+	m.doctorStage = doctorStageResults
+	m.doctorResults = []CheckResult{{
+		Label:       "Omnideck instance",
+		Status:      CheckFail,
+		Action:      DoctorActionStartInstance,
+		ActionLabel: "Start Omnideck",
+		ActionValue: "desktop",
+	}}
+	m.doctorFocus = 0
+
+	updated, cmd := m.updateDoctor(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil || len(eng.startedNames) != 0 {
+		t.Fatalf("start ran without saved settings: cmd=%v started=%v", cmd != nil, eng.startedNames)
+	}
+	if got := updated.(AppModel).doctorMessage; !strings.Contains(got, "could not read") {
+		t.Fatalf("doctorMessage = %q, want an explanation", got)
 	}
 }

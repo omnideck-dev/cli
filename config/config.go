@@ -234,6 +234,24 @@ func InstancePath(name string) string {
 	return filepath.Join(InstancesDir(), name+".yaml")
 }
 
+// InstanceNameForPath returns the instance name `--name` accepts for a config
+// file in InstancesDir, or "" for any other path (a --config file or the legacy
+// single-instance file), which cannot be selected by name.
+func InstanceNameForPath(path string) string {
+	if path == "" {
+		return ""
+	}
+	path, err := filepath.Abs(expandHome(path))
+	if err != nil {
+		return ""
+	}
+	dir, err := filepath.Abs(InstancesDir())
+	if err != nil || filepath.Dir(path) != dir || !strings.HasSuffix(path, ".yaml") {
+		return ""
+	}
+	return strings.TrimSuffix(filepath.Base(path), ".yaml")
+}
+
 // LoadInventory scans InstancesDir and returns valid instances alongside any
 // files that could not be decoded.
 func LoadInventory() (Inventory, error) {
@@ -264,6 +282,15 @@ func LoadInventory() (Inventory, error) {
 		inventory.Instances = append(inventory.Instances, InstanceInfo{Name: name, Path: path, Config: cfg})
 	}
 	return inventory, nil
+}
+
+// InstanceFileExists reports whether an instance file named name is present,
+// including one that cannot be decoded (which ListInstances leaves out). Any
+// error other than "not found" counts as present, so callers never overwrite
+// a file they could not check.
+func InstanceFileExists(name string) bool {
+	_, err := os.Lstat(InstancePath(name))
+	return !os.IsNotExist(err)
 }
 
 // ListInstances is retained for callers that only need usable configurations.
@@ -336,6 +363,13 @@ func (c *Config) WebUIPortOrDefault() string {
 		return "2337"
 	}
 	return c.WebUIPort
+}
+
+// BrowserURL is the local address of this instance's web UI. It is also the
+// origin the app uses for OAuth callbacks (OMNIDECK_EXTERNAL_URL), so every
+// caller that prints or configures the address must use this one helper.
+func (c *Config) BrowserURL() string {
+	return "http://localhost:" + c.WebUIPortOrDefault()
 }
 
 // Load reads a YAML config file from path. Expands ~ in path.

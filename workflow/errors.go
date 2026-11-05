@@ -12,6 +12,9 @@ var (
 	// ErrMissingStorage identifies a saved instance whose expected data volume
 	// is absent. Repair must not silently create an empty replacement.
 	ErrMissingStorage = errors.New("saved storage missing")
+	// ErrExternalURL identifies a container whose OMNIDECK_EXTERNAL_URL does
+	// not match the instance's browser address after Omnideck configured it.
+	ErrExternalURL = errors.New("external URL mismatch")
 )
 
 type classifiedError struct {

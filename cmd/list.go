@@ -68,7 +68,7 @@ func runList(_ *cobra.Command, _ []string) error {
 		}
 		port := ""
 		if instance.Config != nil {
-			port = "http://localhost:" + instance.Config.WebUIPortOrDefault()
+			port = instance.Config.BrowserURL()
 		}
 		fmt.Fprintf(w, "%s\t%s\t%s\n", instance.Name, status, port)
 	}

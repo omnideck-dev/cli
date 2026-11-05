@@ -197,11 +197,14 @@ func NewSetupModel(req SetupRequest) SetupModel {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
-	// Cache existing container names to avoid blocking I/O during Update.
+	// Cache existing instance and container names to avoid blocking I/O
+	// during Update. A new instance is saved under its container name, so
+	// both must be free or setup would overwrite another instance's file.
 	existingNames := map[string]bool{}
 	existingPorts := map[string]bool{}
 	for _, inst := range req.ExistingInstances {
 		if inst.Config != nil {
+			existingNames[inst.Name] = true
 			existingNames[inst.Config.ContainerName] = true
 			existingPorts[inst.Config.WebUIPortOrDefault()] = true
 		}

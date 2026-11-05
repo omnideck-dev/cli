@@ -49,12 +49,17 @@ type CheckResult struct {
 // Diagnose checks the selected instance. Runtime health comes from
 // the same probes and setup plans as guided Setup, so the two flows cannot
 // disagree about what is installed or how to make it ready.
-func Diagnose(cfg *config.Config, eng engine.Engine) []CheckResult {
-	results, _ := DiagnoseWithProbes(cfg, eng, engine.ProbeAll())
+//
+// name is the instance name `--name` accepts (which can differ from
+// cfg.ContainerName); hints and ActionValue use it so a suggested command
+// selects this instance. An empty name means the instance cannot be selected
+// by name, and hints omit the flag.
+func Diagnose(name string, cfg *config.Config, eng engine.Engine) []CheckResult {
+	results, _ := DiagnoseWithProbes(name, cfg, eng, engine.ProbeAll())
 	return results
 }
 
-func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.ProbeResult) ([]CheckResult, engine.Engine) {
+func DiagnoseWithProbes(name string, cfg *config.Config, eng engine.Engine, probes []engine.ProbeResult) ([]CheckResult, engine.Engine) {
 	runtimeResult, usableEngine := doctorRuntimeCheck(eng, probes)
 	results := []CheckResult{runtimeResult}
 
@@ -87,7 +92,7 @@ func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.P
 
 	homeVolumeResult := CheckVolume("Saved files", cfg.HomeVolumeName(), usableEngine)
 	stateVolumeResult := CheckVolume("Saved app data", cfg.StateVolumeName(), usableEngine)
-	containerResult, running := doctorContainerCheck(cfg, usableEngine)
+	containerResult, running := doctorContainerCheck(name, cfg, usableEngine)
 	if containerResult.Action == DoctorActionRepairInstance &&
 		(homeVolumeResult.Status != CheckPass || stateVolumeResult.Status != CheckPass) {
 		containerResult.Action = DoctorActionNone
@@ -97,6 +102,11 @@ func DiagnoseWithProbes(cfg *config.Config, eng engine.Engine, probes []engine.P
 	}
 	results = append(results, containerResult)
 	results = append(results, doctorBrowserCheck(cfg, running))
+	// A stopped container keeps its environment, and starting it would not
+	// add a missing sign-in address, so check it whenever it exists.
+	if running || containerResult.Action == DoctorActionStartInstance {
+		results = append(results, doctorExternalURLCheck(name, cfg, usableEngine))
+	}
 	results = append(results,
 		homeVolumeResult,
 		stateVolumeResult,
@@ -155,6 +165,8 @@ func diagnosticID(label string) string {
 		return "instance.container"
 	case "Browser":
 		return "instance.browser"
+	case "MCP sign-in address":
+		return "instance.external_url"
 	case "Saved data":
 		return "storage.summary"
 	case "Saved files":
@@ -261,7 +273,16 @@ func doctorRuntimeCheck(eng engine.Engine, probes []engine.ProbeResult) (CheckRe
 	}, nil
 }
 
-func doctorContainerCheck(cfg *config.Config, eng engine.Engine) (CheckResult, bool) {
+// InstanceCommand formats an omnideck command that targets instance name,
+// omitting --name when the instance cannot be selected by name.
+func InstanceCommand(command, name string) string {
+	if name == "" {
+		return "omnideck " + command
+	}
+	return "omnideck " + command + " --name " + name
+}
+
+func doctorContainerCheck(name string, cfg *config.Config, eng engine.Engine) (CheckResult, bool) {
 	exists, err := eng.ContainerExists(cfg.ContainerName)
 	if err != nil {
 		return CheckResult{
@@ -279,7 +300,7 @@ func doctorContainerCheck(cfg *config.Config, eng engine.Engine) (CheckResult, b
 			Hint:        "Repair recreates the container and reconnects the same saved data volumes.",
 			Action:      DoctorActionRepairInstance,
 			ActionLabel: "Repair this installation",
-			ActionValue: cfg.ContainerName,
+			ActionValue: name,
 		}, false
 	}
 	status, err := eng.ContainerStatus(cfg.ContainerName)
@@ -298,10 +319,10 @@ func doctorContainerCheck(cfg *config.Config, eng engine.Engine) (CheckResult, b
 		Label:       "Omnideck instance",
 		Status:      CheckFail,
 		Detail:      cfg.ContainerName + " is " + friendlyContainerStatus(status),
-		Hint:        "Run: omnideck start --name " + cfg.ContainerName,
+		Hint:        "Run: " + InstanceCommand("start", name),
 		Action:      DoctorActionStartInstance,
 		ActionLabel: "Start Omnideck",
-		ActionValue: cfg.ContainerName,
+		ActionValue: name,
 	}, false
 }
 
@@ -317,7 +338,7 @@ func friendlyContainerStatus(status string) string {
 }
 
 func doctorBrowserCheck(cfg *config.Config, containerRunning bool) CheckResult {
-	address := "http://localhost:" + cfg.WebUIPortOrDefault()
+	address := cfg.BrowserURL()
 	if !containerRunning {
 		return CheckResult{Label: "Browser", Status: CheckInfo, Detail: "Not checked until Omnideck is running"}
 	}
@@ -332,6 +353,37 @@ func doctorBrowserCheck(cfg *config.Config, containerRunning bool) CheckResult {
 	}
 	_ = conn.Close()
 	return CheckResult{Label: "Browser", Status: CheckPass, Detail: address + " is responding"}
+}
+
+// doctorExternalURLCheck detects containers created without (or with a
+// different) OMNIDECK_EXTERNAL_URL, which silently hides MCP and Slack
+// integrations. Start and restart never recreate containers, so Doctor is
+// where this drift becomes visible outside of update.
+func doctorExternalURLCheck(name string, cfg *config.Config, eng ContainerEnvEngine) CheckResult {
+	const label = "MCP sign-in address"
+	check, err := CheckExternalURL(eng, cfg)
+	if err != nil {
+		return CheckResult{Label: label, Status: CheckWarn, Detail: "Could not check the address MCP integrations use to sign in", Hint: err.Error()}
+	}
+	hint := "Run: " + InstanceCommand("update", name) + " (saved data is kept)"
+	switch check.State {
+	case ExternalURLOK:
+		return CheckResult{Label: label, Status: CheckPass, Detail: "MCP sign-in address is " + check.Expected}
+	case ExternalURLMismatch:
+		return CheckResult{
+			Label:  label,
+			Status: CheckWarn,
+			Detail: "MCP integrations may fail to sign in: this installation uses " + check.Actual + " instead of " + check.Expected,
+			Hint:   hint,
+		}
+	default:
+		return CheckResult{
+			Label:  label,
+			Status: CheckWarn,
+			Detail: "MCP integrations are unavailable: this installation was created without its sign-in address",
+			Hint:   hint,
+		}
+	}
 }
 
 func doctorImageCheck(cfg *config.Config, eng engine.Engine) CheckResult {

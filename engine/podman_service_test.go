@@ -42,6 +42,44 @@ func TestPodmanServiceContainerInspect(t *testing.T) {
 	}
 }
 
+func TestPodmanServiceContainerEnv(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/containers/omnideck/json" {
+			t.Fatalf("request path = %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"State":{"Status":"running"},"Config":{"Env":["PORT=8080","QUERY=a=b|c","OMNIDECK_EXTERNAL_URL=http://localhost:2337"]}}`)
+	}))
+	defer server.Close()
+
+	client := &podmanServiceClient{client: server.Client(), baseURL: server.URL}
+	env, err := client.containerEnv("omnideck")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if value, ok := EnvValue(env, "OMNIDECK_EXTERNAL_URL"); !ok || value != "http://localhost:2337" {
+		t.Fatalf("OMNIDECK_EXTERNAL_URL = %q, %v; env = %#v", value, ok, env)
+	}
+	if value, _ := EnvValue(env, "QUERY"); value != "a=b|c" {
+		t.Fatalf("QUERY = %q", value)
+	}
+}
+
+func TestPodmanServiceContainerImageID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/containers/omnideck/json" {
+			t.Fatalf("request path = %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"Image":"sha256:4b1d","Config":{"Image":"ghcr.io/omnideck-dev/omnideck:latest"}}`)
+	}))
+	defer server.Close()
+
+	client := &podmanServiceClient{client: server.Client(), baseURL: server.URL}
+	id, err := client.containerImageID("omnideck")
+	if err != nil || id != "sha256:4b1d" {
+		t.Fatalf("containerImageID = %q, %v; want the image ID, not the tag", id, err)
+	}
+}
+
 func TestPodmanServiceContainerStats(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/v1.0.0/libpod/containers/stats" {

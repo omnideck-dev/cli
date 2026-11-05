@@ -221,6 +221,30 @@ try {
     Wait-WebUI
     Invoke-Cli @("status")
 
+    $CurrentStep = "replace container without MCP callback origin"
+    # Simulate an installation created by an older CLI: same name, port, and
+    # volumes, but no OMNIDECK_EXTERNAL_URL.
+    Invoke-External $Engine @("rm", "-f", $Instance)
+    Invoke-External $Engine @("run", "-d", "--name", $Instance, "-p", "127.0.0.1:${Port}:8080", "-v", "$Instance-home:/home/omnideck", "-v", "$Instance-state:/var/lib/omnideck", "-e", "PORT=8080", $FixtureImage)
+    if ((Invoke-AllowFailure $Engine @("exec", $Instance, "printenv", "OMNIDECK_EXTERNAL_URL")).ExitCode -eq 0) { throw "The simulated legacy container unexpectedly has OMNIDECK_EXTERNAL_URL." }
+
+    $CurrentStep = "doctor detects missing MCP callback origin"
+    $LegacyDoctor = & $CliPath --no-color --name $Instance doctor 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "doctor failed." }
+    $LegacyDoctor | Tee-Object -FilePath (Join-Path $OutputDirectory "doctor-legacy.log")
+    if (($LegacyDoctor -join "`n") -notlike "*created without its sign-in address*") { throw "doctor did not warn about the missing MCP callback origin." }
+
+    $CurrentStep = "update restores MCP callback origin"
+    $Update = & $CliPath --no-color --name $Instance update --plain 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "update failed." }
+    $Update | Tee-Object -FilePath (Join-Path $OutputDirectory "update.log")
+    if (($Update -join "`n") -notlike "*MCP sign-in address... set to http://localhost:$Port*") { throw "update did not report setting the MCP callback origin." }
+    $CallbackOrigin = & $Engine exec $Instance printenv OMNIDECK_EXTERNAL_URL
+    if ($LASTEXITCODE -ne 0 -or $CallbackOrigin.Trim() -ne "http://localhost:$Port") { throw "update did not set the MCP callback origin." }
+    Wait-WebUI
+    $Marker = & $Engine exec $Instance cat /home/omnideck/hardware-marker
+    if ($LASTEXITCODE -ne 0 -or $Marker.Trim() -ne "hardware-volume-marker") { throw "The home volume marker did not survive an update." }
+
     $CurrentStep = "doctor"
     $Doctor = & $CliPath --no-color --name $Instance doctor 2>&1
     if ($LASTEXITCODE -ne 0) { throw "doctor failed." }
