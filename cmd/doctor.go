@@ -35,7 +35,7 @@ func runDoctor(_ *cobra.Command, _ []string) error {
 	}
 	detectedEng, _ := detectReadyEngine()
 
-	results := workflow.Diagnose(LoadedConfig, detectedEng)
+	results := workflow.Diagnose(loadedInstanceName(), LoadedConfig, detectedEng)
 	results = append(results, workflow.DiagnoseInventoryIssues(inventory.Issues)...)
 
 	if jsonFlag {

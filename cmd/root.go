@@ -256,6 +256,12 @@ func readyEngineFromProbes(probes []engine.ProbeResult) (engine.Engine, error) {
 	return nil, fmt.Errorf("Podman is not ready\nRun `omnideck` for guided setup")
 }
 
+// loadedInstanceName is the instance name (what --name accepts) of the loaded
+// configuration, or "" when it was loaded from outside the instances directory.
+func loadedInstanceName() string {
+	return config.InstanceNameForPath(ConfigPath)
+}
+
 // requireConfigMulti is like requireConfig but also handles the multiple-instance
 // case: if multiple instances exist and no --name was given, it runs the
 // interactive picker so the user can choose one. Returns errAborted if the

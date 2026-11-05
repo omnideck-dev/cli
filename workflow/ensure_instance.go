@@ -12,6 +12,8 @@ import (
 // Omnideck instance match a desired configuration.
 type InstanceEnsureEngine interface {
 	ContainerEngine
+	ContainerEnvEngine
+	ContainerImageID(name string) (string, error)
 	CreateVolume(name string) (bool, error)
 	RemoveVolume(name string) error
 	VolumeExists(name string) (bool, error)
@@ -28,7 +30,16 @@ type EnsureInstanceOptions struct {
 type EnsureInstanceResult struct {
 	Changed bool
 	Action  string
+	// Reason explains a recreate the saved settings alone did not require,
+	// e.g. EnsureReasonExternalURLMissing. Empty otherwise.
+	Reason string
 }
+
+// Reasons EnsureInstance replaces a container whose saved settings match.
+const (
+	EnsureReasonExternalURLMissing  = "external_url_missing"
+	EnsureReasonExternalURLMismatch = "external_url_mismatch"
+)
 
 func (o EnsureInstanceOptions) stage(stage string) {
 	if o.OnStage != nil {
@@ -79,7 +90,19 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 		return result, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault()))
 	}
 
+	// Saved settings can claim a container is current although it was created
+	// by an older CLI (or by hand) without the sign-in address MCP needs.
+	// Replace it with the same settings and the exact image it runs; an
+	// unreadable container is left alone rather than risking a recreate on a
+	// transient inspection error.
 	if matching && exists {
+		reason, imageID, driftErr := externalURLDriftRepair(eng, desired)
+		if driftErr != nil {
+			return result, driftErr
+		}
+		if reason != "" {
+			return repairExternalURL(eng, desired, imageID, reason, opts)
+		}
 		opts.stage("start_container")
 		changed, startErr := EnsureStarted(eng, desired.ContainerName)
 		if startErr != nil {
@@ -188,4 +211,70 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 		return result, fmt.Errorf("saving settings: %w (the previous container was restored)", saveErr)
 	}
 	return EnsureInstanceResult{Changed: true, Action: "recreated"}, nil
+}
+
+// externalURLDriftRepair reports why a container whose saved settings match
+// must still be replaced, and the ID of the image it runs; reason is "" when
+// it should simply be started. Anything it cannot inspect leaves the
+// container alone rather than risking a recreate on a transient error. A
+// stopped container is only replaced when its port is free: Recreate removes
+// the old container first, and if another app holds the port neither the
+// replacement nor the rollback could start, losing the container.
+func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (reason, imageID string, err error) {
+	check, inspectErr := CheckExternalURL(eng, desired)
+	if inspectErr != nil {
+		return "", "", nil
+	}
+	switch check.State {
+	case ExternalURLMissing:
+		reason = EnsureReasonExternalURLMissing
+	case ExternalURLMismatch:
+		reason = EnsureReasonExternalURLMismatch
+	default:
+		return "", "", nil
+	}
+	status, inspectErr := eng.ContainerStatus(desired.ContainerName)
+	if inspectErr != nil {
+		return "", "", nil
+	}
+	if !IsActiveContainerStatus(status) && !checks.PortAvailable(desired.WebUIPortOrDefault()) {
+		return "", "", nil
+	}
+	imageID, inspectErr = eng.ContainerImageID(desired.ContainerName)
+	if inspectErr != nil {
+		return "", "", nil
+	}
+	// The replacement mounts the saved volume names, which a hand-made or
+	// older container may not use. Podman would create a missing one empty,
+	// so stop exactly as a full replacement does.
+	for _, volume := range []string{desired.HomeVolumeName(), desired.StateVolumeName()} {
+		present, volumeErr := eng.VolumeExists(volume)
+		if volumeErr != nil {
+			return "", "", nil
+		}
+		if !present {
+			return "", "", classifyError(
+				ErrMissingStorage,
+				fmt.Errorf("saved data volume %q is missing; automatic repair stopped to avoid creating an empty replacement", volume),
+			)
+		}
+	}
+	return reason, imageID, nil
+}
+
+// repairExternalURL replaces a container whose saved settings already match
+// with one that has the sign-in address. It runs the image ID the old
+// container was created from, never the saved tag: another instance's update
+// may have moved the tag, and following it would turn this repair into an
+// unreviewed application update. The saved settings are unchanged, so there
+// is nothing to save; externalURLDriftRepair has already confirmed the saved
+// volumes exist.
+func repairExternalURL(eng InstanceEnsureEngine, desired *config.Config, imageID, reason string, opts EnsureInstanceOptions) (EnsureInstanceResult, error) {
+	pinned := *desired
+	pinned.Image = imageID
+	opts.stage("replace_container")
+	if err := Recreate(eng, &pinned, &pinned); err != nil {
+		return EnsureInstanceResult{}, err
+	}
+	return EnsureInstanceResult{Changed: true, Action: "recreated", Reason: reason}, nil
 }

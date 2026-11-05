@@ -251,6 +251,12 @@ func TestMCPCallbackUsesPublishedPortOnEveryPlatform(t *testing.T) {
 				assertContains(t, args, "127.0.0.1:"+hostPort+":8080")
 				assertContains(t, args, "OMNIDECK_EXTERNAL_URL=http://localhost:"+hostPort)
 				assertContains(t, args, "PORT=8080")
+
+				// workflow.RunOptions passes the instance's browser address;
+				// the engine must write exactly that value.
+				externalURL := "http://localhost:" + hostPort
+				args = buildPodmanRunArgs(RunOptions{Platform: platform, WebUIPort: port, ExternalURL: externalURL})
+				assertContains(t, args, "OMNIDECK_EXTERNAL_URL="+externalURL)
 			})
 		}
 	}
@@ -446,4 +452,63 @@ func assertContainsPrefix(t *testing.T, slice []string, prefix string) {
 		}
 	}
 	t.Errorf("args %v: expected an element with prefix %q", slice, prefix)
+}
+
+func TestParseContainerImageID(t *testing.T) {
+	if id, err := parseContainerImageID([]byte("4b1d\n")); err != nil || id != "4b1d" {
+		t.Fatalf("parseContainerImageID = %q, %v", id, err)
+	}
+	if _, err := parseContainerImageID([]byte("  \n")); err == nil {
+		t.Fatal("an empty image ID must be an error")
+	}
+}
+
+func TestParseContainerEnv(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		out  string
+		want []string
+	}{
+		{"empty array", "[]\n", []string{}},
+		{"null", "null\n", nil},
+		{"blank", "", nil},
+		{"values with = and |", `["PATH=/usr/bin","QUERY=a=b|c","OMNIDECK_EXTERNAL_URL=http://localhost:2339"]` + "\n", []string{"PATH=/usr/bin", "QUERY=a=b|c", "OMNIDECK_EXTERNAL_URL=http://localhost:2339"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseContainerEnv([]byte(tc.out))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(got) != len(tc.want) {
+				t.Fatalf("env = %#v, want %#v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("env[%d] = %q, want %q", i, got[i], tc.want[i])
+				}
+			}
+		})
+	}
+	if _, err := parseContainerEnv([]byte("FOO=bar")); err == nil {
+		t.Fatal("non-JSON output should fail")
+	}
+}
+
+func TestEnvValue(t *testing.T) {
+	env := []string{"OMNIDECK_EXTERNAL_URL_OLD=x", "QUERY=a=b|c", "EMPTY=", "DUP=1", "DUP=2"}
+	for _, tc := range []struct {
+		key   string
+		want  string
+		found bool
+	}{
+		{"QUERY", "a=b|c", true},
+		{"EMPTY", "", true},
+		{"DUP", "2", true},
+		{"OMNIDECK_EXTERNAL_URL", "", false},
+	} {
+		got, found := EnvValue(env, tc.key)
+		if got != tc.want || found != tc.found {
+			t.Fatalf("EnvValue(%q) = %q, %v; want %q, %v", tc.key, got, found, tc.want, tc.found)
+		}
+	}
 }

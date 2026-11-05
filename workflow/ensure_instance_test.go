@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net"
+	"slices"
 	"strconv"
 	"testing"
 
@@ -18,10 +19,11 @@ type fakeEnsureEngine struct {
 	removedVolume []string
 	pulls         []string
 	pullErr       error
+	volumeErr     error
 }
 
 func (f *fakeEnsureEngine) VolumeExists(name string) (bool, error) {
-	return f.volumes[name], nil
+	return f.volumes[name], f.volumeErr
 }
 
 func (f *fakeEnsureEngine) CreateVolume(name string) (bool, error) {
@@ -99,7 +101,11 @@ func TestEnsureInstanceMatchingRunningEnvironmentIsANoop(t *testing.T) {
 	desired := desiredTestConfig(t)
 	current := *desired
 	eng := &fakeEnsureEngine{
-		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running"},
+		fakeContainerEngine: fakeContainerEngine{
+			exists: true,
+			status: "running",
+			env:    []string{"OMNIDECK_EXTERNAL_URL=" + desired.BrowserURL()},
+		},
 		volumes: map[string]bool{
 			desired.HomeVolumeName():  true,
 			desired.StateVolumeName(): true,
@@ -215,5 +221,133 @@ func TestEnsureInstanceUpgradesContainerWiringOnceWithoutRemovingStorage(t *test
 	}, EnsureInstanceOptions{})
 	if err != nil || result.Action != "unchanged" || len(eng.runOptions) != 1 {
 		t.Fatalf("second reconciliation result=%#v err=%v runs=%d", result, err, len(eng.runOptions))
+	}
+}
+
+func TestEnsureInstanceRecreatesMatchingContainerWithoutExternalURL(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		env        []string
+		wantReason string
+	}{
+		{"missing", []string{"PORT=8080"}, EnsureReasonExternalURLMissing},
+		{"mismatch", []string{"OMNIDECK_EXTERNAL_URL=http://localhost:9999"}, EnsureReasonExternalURLMismatch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			desired := desiredTestConfig(t)
+			current := *desired
+			eng := &fakeEnsureEngine{
+				fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: tc.env, imageID: "sha256:running"},
+				volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+			}
+			var stages []string
+			result, err := EnsureInstance(eng, &current, desired, func() error {
+				t.Fatal("repairing the sign-in address should not rewrite config")
+				return nil
+			}, EnsureInstanceOptions{OnStage: func(stage string) { stages = append(stages, stage) }})
+			if err != nil || result.Action != "recreated" || result.Reason != tc.wantReason {
+				t.Fatalf("result=%#v err=%v", result, err)
+			}
+			if want := []string{"check_environment", "replace_container"}; !slices.Equal(stages, want) {
+				t.Fatalf("stages = %v, want %v", stages, want)
+			}
+			if len(eng.created) != 0 || len(eng.removedVolume) != 0 || len(eng.runOptions) != 1 {
+				t.Fatalf("created=%v removed=%v runs=%d", eng.created, eng.removedVolume, len(eng.runOptions))
+			}
+			if len(eng.pulls) != 0 {
+				t.Fatalf("repairing the sign-in address pulled %v; it must reuse the current image", eng.pulls)
+			}
+			if eng.runOptions[0].ExternalURL != desired.BrowserURL() {
+				t.Fatalf("replacement ExternalURL = %q, want %q", eng.runOptions[0].ExternalURL, desired.BrowserURL())
+			}
+			// Another instance's update may have moved the saved tag; the
+			// repair must keep running the exact image, not follow the tag.
+			if eng.runOptions[0].Image != "sha256:running" {
+				t.Fatalf("replacement image = %q, want the running image ID", eng.runOptions[0].Image)
+			}
+			result, err = EnsureInstance(eng, &current, desired, func() error {
+				t.Fatal("a corrected container should not rewrite config")
+				return nil
+			}, EnsureInstanceOptions{})
+			if err != nil || result.Action != "unchanged" || len(eng.runOptions) != 1 {
+				t.Fatalf("second reconciliation result=%#v err=%v runs=%d", result, err, len(eng.runOptions))
+			}
+		})
+	}
+}
+
+func TestEnsureInstanceLeavesContainerAloneWhenEnvironmentIsUnreadable(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", envErr: errors.New("inspect timed out")},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if err != nil || result.Action != "unchanged" || len(eng.runOptions) != 0 {
+		t.Fatalf("result=%#v err=%v runs=%d", result, err, len(eng.runOptions))
+	}
+}
+
+func TestEnsureInstanceLeavesContainerAloneWhenImageIsUnreadable(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"PORT=8080"}, imageIDErr: errors.New("inspect timed out")},
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if err != nil || result.Action != "unchanged" || len(eng.runOptions) != 0 || len(eng.pulls) != 0 {
+		t.Fatalf("result=%#v err=%v runs=%d pulls=%v", result, err, len(eng.runOptions), eng.pulls)
+	}
+}
+
+// A transient storage check error must not fail ensure for a healthy
+// container: it is left alone and started as before.
+func TestEnsureInstanceLeavesDriftedContainerAloneWhenStorageIsUnreadable(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"PORT=8080"}, imageID: "sha256:running"},
+		volumeErr:           errors.New("machine connection timed out"),
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if err != nil || result.Action != "unchanged" || len(eng.runOptions) != 0 {
+		t.Fatalf("result=%#v err=%v runs=%d", result, err, len(eng.runOptions))
+	}
+}
+
+// A drifted container that does not mount the saved volumes must not be
+// replaced: Podman would create the missing volume empty.
+func TestEnsureInstanceStopsSignInRepairWhenSavedVolumeIsMissing(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"PORT=8080"}, imageID: "sha256:running"},
+		volumes:             map[string]bool{current.HomeVolumeName(): true},
+	}
+	_, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if !errors.Is(err, ErrMissingStorage) || eng.removed != 0 || len(eng.runOptions) != 0 {
+		t.Fatalf("err=%v removed=%d runs=%d", err, eng.removed, len(eng.runOptions))
+	}
+}
+
+func TestEnsureInstanceKeepsStoppedDriftedContainerWhenPortIsTaken(t *testing.T) {
+	desired := desiredTestConfig(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:"+desired.WebUIPortOrDefault())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "exited", env: []string{"PORT=8080"}},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eng.removed != 0 || len(eng.runOptions) != 0 || result.Action != "started" {
+		t.Fatalf("result=%#v removed=%d runs=%d; a busy port must not risk removing the container", result, eng.removed, len(eng.runOptions))
 	}
 }

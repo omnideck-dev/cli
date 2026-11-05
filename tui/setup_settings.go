@@ -9,18 +9,26 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/checks"
+	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
 )
+
+// nameTaken reports whether a new instance named name would collide with an
+// existing instance or container name, or overwrite an instance file that
+// could not be decoded and so is missing from existingNames.
+func (m *SetupModel) nameTaken(name string) bool {
+	return m.existingNames[name] || config.InstanceFileExists(name)
+}
 
 func (m *SetupModel) ensureRecommendedSettingsAvailable() {
 	if m.eng != nil {
 		candidate := strings.TrimSpace(m.inputs[inputContainerName].Value())
 		exists, err := m.eng.ContainerExists(candidate)
-		if err == nil && (exists || m.existingNames[candidate]) {
+		if err == nil && (exists || m.nameTaken(candidate)) {
 			for suffix := 2; suffix < 10000; suffix++ {
 				candidate = "omnideck" + strconv.Itoa(suffix)
 				exists, err = m.eng.ContainerExists(candidate)
-				if err == nil && !exists && !m.existingNames[candidate] {
+				if err == nil && !exists && !m.nameTaken(candidate) {
 					break
 				}
 			}
@@ -114,7 +122,7 @@ func (m *SetupModel) validateCurrentInput() bool {
 			m.inputErrs[m.inputFocus] = "only letters, digits, underscores, hyphens, and dots allowed"
 			return false
 		}
-		if m.existingNames[val] {
+		if m.nameTaken(val) {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
 			return false
 		}

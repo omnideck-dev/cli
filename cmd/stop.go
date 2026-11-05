@@ -32,7 +32,7 @@ func runStop(_ *cobra.Command, _ []string) error {
 	}
 
 	if jsonFlag {
-		return runLifecycleJSON(cfg, eng, func() error {
+		return runLifecycleJSON(loadedInstanceName(), cfg, eng, func() error {
 			_, actionErr := workflow.EnsureStopped(eng, cfg.ContainerName)
 			return actionErr
 		})

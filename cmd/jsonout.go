@@ -208,6 +208,12 @@ type stageEvent struct {
 
 func (n *ndjsonEncoder) start(stage string) { n.emit(stageEvent{Stage: stage, State: "start"}) }
 func (n *ndjsonEncoder) done(stage string)  { n.emit(stageEvent{Stage: stage, State: "done"}) }
+
+// doneWithResult is done with an optional stage-specific result; a nil result
+// emits exactly what done does.
+func (n *ndjsonEncoder) doneWithResult(stage string, result any) {
+	n.emit(stageEvent{Stage: stage, State: "done", Result: result})
+}
 func (n *ndjsonEncoder) progress(stage, detail string) {
 	n.emit(stageEvent{Stage: stage, State: "progress", Detail: detail})
 }
@@ -261,8 +267,13 @@ type statusPayload struct {
 // gatherStatusPayload concurrently gathers the same data cmd/status.go's
 // human-readable table renders (container status, Ollama reachability,
 // volume existence), for reuse by every --json shape documented as "same
-// shape as status --json".
-func gatherStatusPayload(cfg *config.Config, eng engine.Engine) statusPayload {
+// shape as status --json". instance is the name --name accepts; when it is
+// unknown (a configuration loaded from outside the instances directory) the
+// container name stands in, as it always matched for such installations.
+func gatherStatusPayload(instance string, cfg *config.Config, eng engine.Engine) statusPayload {
+	if instance == "" {
+		instance = cfg.ContainerName
+	}
 	var (
 		containerStatus   string
 		ollamaOK          bool
@@ -295,7 +306,7 @@ func gatherStatusPayload(cfg *config.Config, eng engine.Engine) statusPayload {
 	}
 
 	return statusPayload{
-		Name:        cfg.ContainerName,
+		Name:        instance,
 		Container:   cfg.ContainerName,
 		Status:      containerStatus,
 		Image:       cfg.Image,
@@ -548,11 +559,11 @@ type removeResultPayload struct {
 // the same shape as status --json gathered fresh afterward — so a caller
 // can re-render its UI from one response without an immediate follow-up
 // status call. On failure it emits the standard structured error.
-func runLifecycleJSON(cfg *config.Config, eng engine.Engine, action func() error) error {
+func runLifecycleJSON(instance string, cfg *config.Config, eng engine.Engine, action func() error) error {
 	if err := action(); err != nil {
 		return writeJSONError(environmentJSONError(err))
 	}
-	writeJSON(gatherStatusPayload(cfg, eng))
+	writeJSON(gatherStatusPayload(instance, cfg, eng))
 	return nil
 }
 

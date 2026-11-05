@@ -95,7 +95,14 @@ func (m AppModel) runDoctorAction(result CheckResult) (tea.Model, tea.Cmd) {
 			m.doctorMessage = "The container runtime must be ready before Omnideck can start."
 			return m, nil
 		}
-		name := result.ActionValue
+		// ActionValue is the instance name for command hints; the runtime
+		// needs the container of the instance Doctor checked, like Repair.
+		inst := m.CurrentInstance()
+		if inst == nil || inst.Info.Config == nil {
+			m.doctorMessage = "Omnideck could not read this installation's saved settings. Press r to check again."
+			return m, nil
+		}
+		name := inst.Info.Config.ContainerName
 		eng := m.eng
 		m.doctorStage = doctorStageActing
 		m.doctorMessage = "Starting Omnideck…"

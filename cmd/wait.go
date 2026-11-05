@@ -31,7 +31,7 @@ var waitCmd = &cobra.Command{
 			return startupTextError(err)
 		}
 		if jsonFlag {
-			writeJSON(gatherStatusPayload(LoadedConfig, eng))
+			writeJSON(gatherStatusPayload(loadedInstanceName(), LoadedConfig, eng))
 		} else {
 			fmt.Println("omnideck is ready.")
 		}

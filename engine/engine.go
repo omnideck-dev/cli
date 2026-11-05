@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +24,9 @@ type RunOptions struct {
 	Restart     string // "always"
 	OllamaHost  string // optional explicit host URL
 	WebUIPort   string // host port for the web UI (e.g. "8080")
+	// ExternalURL is the browser origin the app uses for OAuth callbacks
+	// (OMNIDECK_EXTERNAL_URL). Empty falls back to http://localhost:<WebUIPort>.
+	ExternalURL string
 	Platform    string // runtime.GOOS
 }
 
@@ -74,6 +78,12 @@ type Engine interface {
 	FetchLogs(name string, tail int) ([]string, error)
 	// ContainerInspect returns status and metadata about a container.
 	ContainerInspect(name string) (InspectData, error)
+	// ContainerEnv returns the container's configured environment as
+	// KEY=VALUE pairs.
+	ContainerEnv(name string) ([]string, error)
+	// ContainerImageID returns the ID of the image the container was created
+	// from, which stays fixed when its tag later moves to a newer image.
+	ContainerImageID(name string) (string, error)
 }
 
 // Detect returns the Podman engine when it is ready. Omnideck deliberately
@@ -189,4 +199,39 @@ func parseInspectLine(s string) (InspectData, error) {
 		d.HealthStatus = ""
 	}
 	return d, nil
+}
+
+// EnvValue returns the value of key in a KEY=VALUE environment list. The last
+// assignment wins, matching how a process sees duplicate entries.
+func EnvValue(env []string, key string) (string, bool) {
+	value, found := "", false
+	prefix := key + "="
+	for _, entry := range env {
+		if strings.HasPrefix(entry, prefix) {
+			value, found = strings.TrimPrefix(entry, prefix), true
+		}
+	}
+	return value, found
+}
+
+// parseContainerImageID validates the `{{.Image}}` inspect output.
+func parseContainerImageID(out []byte) (string, error) {
+	id := strings.TrimSpace(string(out))
+	if id == "" {
+		return "", fmt.Errorf("podman inspect returned no image ID")
+	}
+	return id, nil
+}
+
+// parseContainerEnv decodes the `{{json .Config.Env}}` inspect output.
+func parseContainerEnv(out []byte) ([]string, error) {
+	trimmed := strings.TrimSpace(string(out))
+	if trimmed == "" || trimmed == "null" {
+		return nil, nil
+	}
+	var env []string
+	if err := json.Unmarshal([]byte(trimmed), &env); err != nil {
+		return nil, fmt.Errorf("unexpected container environment output: %w", err)
+	}
+	return env, nil
 }

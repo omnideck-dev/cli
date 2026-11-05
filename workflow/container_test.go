@@ -18,6 +18,18 @@ type fakeContainerEngine struct {
 	runOptions  []engine.RunOptions
 	runErrors   []error
 	existsError error
+	// env is the container's environment; a successful RunContainer writes
+	// the sign-in address it was asked for, like the real engine.
+	env    []string
+	envErr error
+	// imageID is the image the container was created from.
+	imageID    string
+	imageIDErr error
+}
+
+func (f *fakeContainerEngine) ContainerEnv(string) ([]string, error) { return f.env, f.envErr }
+func (f *fakeContainerEngine) ContainerImageID(string) (string, error) {
+	return f.imageID, f.imageIDErr
 }
 
 func (f *fakeContainerEngine) ContainerExists(string) (bool, error)   { return f.exists, f.existsError }
@@ -45,6 +57,7 @@ func (f *fakeContainerEngine) RunContainer(opts engine.RunOptions) error {
 	}
 	f.exists = true
 	f.status = "running"
+	f.env = []string{"PORT=8080", "OMNIDECK_EXTERNAL_URL=" + opts.ExternalURL}
 	return nil
 }
 

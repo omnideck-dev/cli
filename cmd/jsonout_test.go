@@ -56,7 +56,7 @@ func TestGatherStatusPayload(t *testing.T) {
 		},
 	}
 
-	payload := gatherStatusPayload(cfg, eng)
+	payload := gatherStatusPayload("", cfg, eng)
 
 	if payload.Name != "main" || payload.Container != "main" {
 		t.Fatalf("name/container = %q/%q, want main/main", payload.Name, payload.Container)
@@ -75,6 +75,19 @@ func TestGatherStatusPayload(t *testing.T) {
 	}
 }
 
+func TestGatherStatusPayloadNamesTheInstance(t *testing.T) {
+	cfg := &config.Config{ContainerName: "omnideck-desktop", Image: "img", WebUIPort: "2338"}
+	eng := &mockEngine{containerStatus: map[string]string{"omnideck-desktop": "running"}}
+
+	payload := gatherStatusPayload("desktop", cfg, eng)
+	if payload.Name != "desktop" || payload.Container != "omnideck-desktop" {
+		t.Fatalf("name/container = %q/%q, want desktop/omnideck-desktop", payload.Name, payload.Container)
+	}
+	if payload.Status != "running" {
+		t.Fatalf("status = %q, want running", payload.Status)
+	}
+}
+
 func TestGatherStatusPayloadStopped(t *testing.T) {
 	cfg := &config.Config{ContainerName: "main", Image: "img", WebUIPort: "2337"}
 	eng := &mockEngine{
@@ -82,7 +95,7 @@ func TestGatherStatusPayloadStopped(t *testing.T) {
 		containerStatus: map[string]string{"main": "exited"},
 		volumes:         map[string]bool{"main-home": true, "main-state": true},
 	}
-	payload := gatherStatusPayload(cfg, eng)
+	payload := gatherStatusPayload("", cfg, eng)
 	if payload.Status != "exited" {
 		t.Fatalf("status = %q, want exited", payload.Status)
 	}
@@ -192,7 +205,7 @@ func TestGatherStatusPayloadUnknownWhenContainerMissing(t *testing.T) {
 	cfg := &config.Config{ContainerName: "ghost"}
 	eng := &mockEngine{containerStatusErr: map[string]error{"ghost": errors.New("no such container")}}
 
-	payload := gatherStatusPayload(cfg, eng)
+	payload := gatherStatusPayload("", cfg, eng)
 	if payload.Status != "unknown" {
 		t.Fatalf("status = %q, want unknown", payload.Status)
 	}
@@ -421,7 +434,7 @@ func TestRunLifecycleJSONSuccessReusesStatusShape(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runLifecycleJSON(cfg, eng, func() error { return nil })
+		runErr = runLifecycleJSON("", cfg, eng, func() error { return nil })
 	})
 	if runErr != nil {
 		t.Fatalf("runLifecycleJSON: %v", runErr)
@@ -441,7 +454,7 @@ func TestRunLifecycleJSONFailureEmitsStructuredError(t *testing.T) {
 
 	var runErr error
 	out := captureStdout(t, func() {
-		runErr = runLifecycleJSON(cfg, eng, func() error { return errors.New("boom") })
+		runErr = runLifecycleJSON("", cfg, eng, func() error { return errors.New("boom") })
 	})
 	if runErr != errAborted {
 		t.Fatalf("expected errAborted, got %v", runErr)

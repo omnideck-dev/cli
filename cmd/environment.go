@@ -49,6 +49,7 @@ func init() {
 type environmentEnsurePayload struct {
 	Changed bool          `json:"changed"`
 	Action  string        `json:"action"`
+	Reason  string        `json:"reason,omitempty"`
 	Status  statusPayload `json:"status"`
 }
 
@@ -58,7 +59,10 @@ func desiredEnvironmentConfig(current *config.Config) (*config.Config, error) {
 		copy := *current
 		desired = &copy
 	}
-	if nameFlag != "" {
+	// --name names the instance. A new instance's container takes the same
+	// name; an existing one keeps its saved container, which may differ (for
+	// example instance "desktop" with container "omnideck-desktop").
+	if current == nil && nameFlag != "" {
 		desired.ContainerName = nameFlag
 	}
 	if environmentImageFlag != "" {
@@ -135,6 +139,9 @@ func environmentJSONError(err error) *jsonCmdError {
 		strings.Contains(lower, "cannot listen on the tcp port") ||
 		strings.Contains(lower, "ports are not available") {
 		return newJSONError(ErrCodePortInUse, message).withHint("Choose another local port and retry.")
+	}
+	if errors.Is(err, workflow.ErrExternalURL) {
+		return newJSONError(ErrCodeInternal, message).withHint("The update was applied and saved. Retry it; if the address is still wrong, run omnideck doctor.")
 	}
 	if errors.Is(err, workflow.ErrContainerConflict) || strings.Contains(lower, "already uses the name") {
 		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name or remove the unrelated container.")
@@ -229,7 +236,8 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	payload := environmentEnsurePayload{
 		Changed: result.Changed,
 		Action:  result.Action,
-		Status:  gatherStatusPayload(desired, eng),
+		Reason:  result.Reason,
+		Status:  gatherStatusPayload(nameFlag, desired, eng),
 	}
 	if nd != nil {
 		nd.done(lastStage)

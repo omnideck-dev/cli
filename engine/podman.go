@@ -272,7 +272,11 @@ func buildPodmanRunArgs(opts RunOptions) []string {
 	args = append(args, "-e", "PORT=8080")
 	// OAuth redirects must use the host browser's published port, not the
 	// container port or a request Host header. No user configuration is needed.
-	args = append(args, "-e", "OMNIDECK_EXTERNAL_URL=http://localhost:"+hostPort)
+	externalURL := opts.ExternalURL
+	if externalURL == "" {
+		externalURL = "http://localhost:" + hostPort
+	}
+	args = append(args, "-e", "OMNIDECK_EXTERNAL_URL="+externalURL)
 	// The host browser or native Desktop shell owns the UI. Do not start a
 	// second desktop process inside the application container.
 	args = append(args, "-e", "ENABLE_DESKTOP=false")
@@ -338,6 +342,36 @@ func (e *PodmanEngine) ContainerInspect(name string) (InspectData, error) {
 		return InspectData{}, fmt.Errorf("podman inspect: %w", err)
 	}
 	return parseInspectLine(strings.TrimSpace(string(out)))
+}
+
+// ContainerEnv returns the container's configured environment. It uses a
+// dedicated JSON inspect instead of the pipe-delimited ContainerInspect format
+// because environment values may contain any character.
+func (e *PodmanEngine) ContainerEnv(name string) ([]string, error) {
+	if service, ok := hostPodmanServiceClient(); ok {
+		return service.containerEnv(name)
+	}
+
+	cmd := buildCmd("podman", "inspect", "--format", "{{json .Config.Env}}", name)
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("podman inspect: %w", err)
+	}
+	return parseContainerEnv(out)
+}
+
+// ContainerImageID returns the ID of the image the container was created from.
+func (e *PodmanEngine) ContainerImageID(name string) (string, error) {
+	if service, ok := hostPodmanServiceClient(); ok {
+		return service.containerImageID(name)
+	}
+
+	cmd := buildCmd("podman", "inspect", "--format", "{{.Image}}", name)
+	out, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("podman inspect: %w", err)
+	}
+	return parseContainerImageID(out)
 }
 
 // FetchLogs returns the last tail lines of container log output (stdout + stderr).

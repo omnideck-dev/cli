@@ -35,7 +35,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	}
 
 	if jsonFlag {
-		payload := gatherStatusPayload(cfg, eng)
+		payload := gatherStatusPayload(loadedInstanceName(), cfg, eng)
 		writeJSON(payload)
 		if payload.Status != "running" {
 			// Same exit-code convention as the human path below: non-zero
@@ -121,7 +121,7 @@ func runStatus(_ *cobra.Command, _ []string) error {
 	fmt.Printf("  %s %s  %s\n", label.Render("Home volume"), value.Render(cfg.HomeVolumeName()), homeVolumeStatus)
 	fmt.Printf("  %s %s  %s\n", label.Render("State volume"), value.Render(cfg.StateVolumeName()), stateVolumeStatus)
 	fmt.Printf("  %s %s\n", label.Render("Ollama"), ollamaStatus)
-	fmt.Printf("  %s %s\n", label.Render("Web UI"), value.Render("http://localhost:"+cfg.WebUIPortOrDefault()))
+	fmt.Printf("  %s %s\n", label.Render("Web UI"), value.Render(cfg.BrowserURL()))
 	fmt.Println()
 
 	if !running {

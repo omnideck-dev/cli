@@ -18,6 +18,7 @@ func NewInstanceDefaults(instances []config.InstanceInfo) *config.Config {
 		if instance.Config == nil {
 			continue
 		}
+		takenNames[instance.Name] = true
 		takenNames[instance.Config.ContainerName] = true
 		takenPorts[instance.Config.WebUIPortOrDefault()] = true
 		if port, err := strconv.Atoi(instance.Config.WebUIPortOrDefault()); err == nil && port > maxPort {
@@ -31,7 +32,7 @@ func NewInstanceDefaults(instances []config.InstanceInfo) *config.Config {
 		if suffix > 1 {
 			name = fmt.Sprintf("omnideck%d", suffix)
 		}
-		if !takenNames[name] {
+		if !takenNames[name] && !config.InstanceFileExists(name) {
 			cfg.ContainerName = name
 			break
 		}

@@ -10,13 +10,15 @@ import (
 // runDoctorCmd runs doctor checks for the current instance.
 func (m AppModel) runDoctorCmd() tea.Cmd {
 	var cfg *config.Config
+	name := ""
 	if inst := m.CurrentInstance(); inst != nil {
 		cfg = inst.Info.Config
+		name = inst.Info.Name
 	}
 	eng := m.eng
 	issues := append([]config.InstanceIssue(nil), m.inventoryIssues...)
 	return func() tea.Msg {
-		results, usableEngine := workflow.DiagnoseWithProbes(cfg, eng, engine.ProbeAll())
+		results, usableEngine := workflow.DiagnoseWithProbes(name, cfg, eng, engine.ProbeAll())
 		results = append(results, workflow.DiagnoseInventoryIssues(issues)...)
 		return doctorResultsMsg{results: results, eng: usableEngine}
 	}

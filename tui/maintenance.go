@@ -56,17 +56,23 @@ type MaintenanceModel struct {
 	spinnerModel SpinnerModel
 	stepLabels   []string
 	errorMsg     string
+	// externalURL carries the pre-replacement sign-in address from the
+	// replace step to the verify step. It is a pointer because steps run in
+	// tea.Cmd goroutines against copies of the model; Bubble Tea sequences the
+	// steps, so the write happens before the read.
+	externalURL *workflow.ExternalURLCheck
+	// externalURLSummary is the verified outcome shown on completion.
+	externalURLSummary string
 }
 
 // NewMaintenanceModel creates a review-first maintenance workflow. No container or file
 // changes happen until the user confirms the review screen.
 func NewMaintenanceModel(req MaintenanceRequest) MaintenanceModel {
-	current := *req.Config
-	next := current
-	next.MigrateImage()
+	current, next := workflow.UpdateTarget(req.Config)
 	stepLabels := []string{
 		"Download the latest Omnideck version",
 		"Replace the container and save its settings",
+		"Check the MCP sign-in address",
 	}
 	if req.Mode == MaintenanceRepair {
 		stepLabels = []string{
@@ -121,9 +127,19 @@ func (m MaintenanceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case StepDoneMsg:
 		var cmd tea.Cmd
 		m.spinnerModel, cmd = m.spinnerModel.Update(msg)
+		if msg.Index == 1 {
+			// The container is replaced and its settings saved. Keep the
+			// in-memory config aligned with the YAML even if the sign-in
+			// address check fails, and make a retry start from what is saved.
+			*m.cfg = m.next
+			m.current = m.next
+		}
 		nextStep := msg.Index + 1
 		if nextStep < len(m.stepLabels) {
 			return m, tea.Batch(cmd, m.startMaintenanceStep(nextStep))
+		}
+		if m.Mode == MaintenanceUpdate {
+			m.externalURLSummary = msg.Detail
 		}
 		*m.cfg = m.next
 		m.Stage = MaintenanceStageComplete
@@ -147,6 +163,8 @@ func (m MaintenanceModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m MaintenanceModel) begin() (tea.Model, tea.Cmd) {
 	m.Stage = MaintenanceStageApplying
 	m.errorMsg = ""
+	m.externalURLSummary = ""
+	m.externalURL = &workflow.ExternalURLCheck{}
 	m.spinnerModel = NewSpinnerModel(m.stepLabels, defaultFlavorMessages)
 	return m, tea.Batch(m.spinnerModel.Init(), m.startMaintenanceStep(0))
 }
@@ -174,8 +192,25 @@ func (m *MaintenanceModel) startMaintenanceStep(i int) tea.Cmd {
 			return "", err
 		})
 	case 1:
+		before := m.externalURL
 		workCmd = StepCmd(i, func() (string, error) {
+			if m.Mode == MaintenanceUpdate && before != nil {
+				*before = workflow.ExternalURLBeforeReplace(m.eng, &m.next)
+			}
 			return "", workflow.RecreateAndSave(m.eng, &m.current, &m.next, m.configPath)
+		})
+	case 2:
+		before := m.externalURL
+		workCmd = StepCmd(i, func() (string, error) {
+			var check workflow.ExternalURLCheck
+			if before != nil {
+				check = *before
+			}
+			report, err := workflow.VerifyExternalURL(m.eng, &m.next, check)
+			if err != nil {
+				return "", err
+			}
+			return "MCP sign-in address " + report.Summary(), nil
 		})
 	}
 	return tea.Sequence(startCmd, workCmd)
@@ -225,6 +260,9 @@ func (m MaintenanceModel) TUIView(_ int) string {
 		sb.WriteString("  " + styles.TUISecondaryText.Render("Press Enter to "+m.actionVerb()+", or Esc to go back without changing anything.") + "\n")
 	case MaintenanceStageComplete:
 		sb.WriteString("\n  " + styles.TUISuccessText.Render("✓") + "  " + styles.TUIPrimaryBold.Render(m.completeText()) + "\n\n")
+		if m.externalURLSummary != "" {
+			sb.WriteString("  " + styles.TUISecondaryText.Render(m.externalURLSummary) + "\n\n")
+		}
 		sb.WriteString("  " + styles.TUISecondaryText.Render("Press any key to return to the previous screen.") + "\n")
 	case MaintenanceStageFailed:
 		sb.WriteString("\n  " + styles.TUIDangerText.Render("✗") + "  " + styles.TUIDangerText.Render(m.failureText()) + "\n\n")
@@ -246,7 +284,11 @@ func (m MaintenanceModel) View() string {
 	case MaintenanceStageReview:
 		return styles.Header("OMNIDECK", m.title(), m.WindowWidth) + "\n  " + m.reviewText() + "\n\n" + styles.Dim.Render("  Press Enter to "+m.actionVerb()+", or Esc to cancel.")
 	case MaintenanceStageComplete:
-		return "\n" + styles.Success.Render("  ✓  "+m.completeText()) + "\n\n" + styles.Dim.Render("  Press any key to exit.")
+		summary := ""
+		if m.externalURLSummary != "" {
+			summary = "  " + m.externalURLSummary + "\n\n"
+		}
+		return "\n" + styles.Success.Render("  ✓  "+m.completeText()) + "\n\n" + summary + styles.Dim.Render("  Press any key to exit.")
 	case MaintenanceStageFailed:
 		return "\n" + styles.Error.Render("  ✗  "+m.failureText()) + "\n\n  " + m.errorMsg + "\n\n" + styles.Dim.Render("  Press r to try again, or Esc to exit.")
 	default:
