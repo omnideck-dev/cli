@@ -1,12 +1,19 @@
 package workflow
 
-import "errors"
+import (
+	"errors"
+	"fmt"
+)
 
 var (
 	// ErrPortInUse identifies a requested browser port that cannot be used.
 	ErrPortInUse = errors.New("port in use")
 	// ErrContainerConflict identifies an unrelated container using a requested name.
 	ErrContainerConflict = errors.New("container conflict")
+	// ErrInstanceNameTaken identifies a name or data volume that belongs to
+	// another saved Omnideck installation. Unlike ErrContainerConflict, the
+	// existing container must never be suggested for removal.
+	ErrInstanceNameTaken = errors.New("instance name taken")
 	// ErrImageDownload identifies a failed application-image pull.
 	ErrImageDownload = errors.New("image download failed")
 	// ErrMissingStorage identifies a saved instance whose expected data volume
@@ -28,6 +35,18 @@ type classifiedError struct {
 func (e *classifiedError) Error() string { return e.err.Error() }
 func (e *classifiedError) Unwrap() []error {
 	return []error{e.kind, e.err}
+}
+
+// InstanceNameTakenError reports that name belongs to another saved Omnideck
+// installation.
+func InstanceNameTakenError(name string) error {
+	return classifyError(ErrInstanceNameTaken, fmt.Errorf("another Omnideck installation already uses the name %q; choose a different --name", name))
+}
+
+// ContainerConflictError reports that a container Omnideck did not save
+// already uses name.
+func ContainerConflictError(name string) error {
+	return classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q; choose a different --name", name))
 }
 
 func classifyError(kind, err error) error {

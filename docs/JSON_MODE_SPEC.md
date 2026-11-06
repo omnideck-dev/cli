@@ -135,7 +135,7 @@ a code outside this list; adding one is a contract change.
 | `UNSUPPORTED` | This computer cannot run Omnideck's runtime setup. |
 | `RUNTIME_SETUP_FAILED` | Any other runtime setup failure. |
 | `PORT_IN_USE` | The requested local port is taken. |
-| `CONTAINER_CONFLICT` | An unrelated container, or another saved instance, already uses the requested name. |
+| `CONTAINER_CONFLICT` | An unrelated container, or another saved instance, already uses the requested name, or another saved instance already uses one of its data volumes. The hint says not to remove the container when it belongs to another saved instance. |
 | `MIGRATION_FAILED` | The application's migration barrier stopped startup. `detail` names the failed migration; it never contains saved records, credentials, or raw logs. |
 | `APP_STARTUP_FAILED` | The application exited, or did not answer before the deadline, without a recognized migration failure. |
 | `INTERNAL_ERROR` | Anything not classified above. |
@@ -436,7 +436,8 @@ need and which must equal the browser address `http://localhost:<webUiPort>`:
 ```
 
 `state` is `set` (the old container had no value), `corrected` (`previous`
-holds the replaced value), `confirmed` (it was already right), or `verified`
+holds the replaced value), `confirmed` (it was already right, including an old
+address that differed only because the update applies a saved port change), or `verified`
 (the new container is right, but the old one could not be read, so whether
 anything changed is unknown). The value is read back from the
 new container; if it is wrong or cannot be read, the stage fails. By then the
@@ -521,10 +522,15 @@ instance's update moved is not followed), reuses the volumes it mounts, and
 leaves the saved settings unchanged. If the container or its volumes cannot
 be inspected, ensure leaves it alone and starts it as usual; if a saved volume
 is missing, it stops with an error naming that volume rather than let Podman
-create an empty one. A stopped container is left in place when another app holds its
-port. Saved data volumes are never removed; if one is missing, ensure stops
+create an empty one. An address on a different port than the saved one is a
+saved `config set` port change that only `update` applies, so ensure leaves
+that container alone and starts it as usual. A stopped container is left in
+place when another app holds its port; a running one is stopped to check the
+port and, if another app holds it, started again and reported `unchanged`.
+Saved data volumes are never removed; if one is missing, ensure stops
 with `MISSING_STORAGE` rather than create an empty replacement. Invalid flag
-values are `INVALID_SETTING`.
+values are `INVALID_SETTING`. A container name or data volume that belongs to
+another saved instance is `CONTAINER_CONFLICT`, checked before any runtime call.
 
 ### `omnideck repair --json`
 

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -248,6 +249,72 @@ func TestRepairJSONErrorFollowsAStart(t *testing.T) {
 	events := decodeNDJSON(t, out)
 	if len(events) != 2 || events[0]["state"] != "start" || events[1]["state"] != "error" || events[0]["stage"] != events[1]["stage"] {
 		t.Fatalf("events = %v, want one start then its error", events)
+	}
+}
+
+// requirePairedStages checks the NDJSON rule that every stage emits start
+// before its done or error, and finishes before the next stage starts. The
+// terminal complete event has no start.
+func requirePairedStages(t *testing.T, events []map[string]any) {
+	t.Helper()
+	open := ""
+	for _, event := range events {
+		stage, _ := event["stage"].(string)
+		if stage == "complete" {
+			if open != "" {
+				t.Fatalf("complete while %q was still running: %v", open, events)
+			}
+			continue
+		}
+		switch event["state"] {
+		case "start":
+			if open != "" {
+				t.Fatalf("%q started while %q was still running: %v", stage, open, events)
+			}
+			open = stage
+		case "done", "error":
+			if stage != open {
+				t.Fatalf("%s for %q, but the running stage is %q: %v", event["state"], stage, open, events)
+			}
+			open = ""
+		}
+	}
+}
+
+func TestRepairJSONReportsTheStartupWaitAsItsOwnStage(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		waitErr   error
+		wantFinal string
+	}{
+		{"ready", nil, "done"},
+		{"fails", &workflow.StartupFailure{Code: ErrCodeAppStartupFailed}, "error"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{
+				ContainerName: "omnideck-desktop", Memory: "2g", ShmSize: "1g",
+				WebUIPort: freePort(t), Image: config.DefaultImage, LayoutVersion: config.CurrentContainerLayout,
+			}
+			withRepairState(t, cfg)
+			repairWaitForApplication = func(context.Context, workflow.StartupEngine, *config.Config) error { return tc.waitErr }
+			eng := &mockEngine{
+				volumes:     map[string]bool{cfg.HomeVolumeName(): true, cfg.StateVolumeName(): true},
+				localImages: map[string]bool{config.DefaultImage: true},
+			}
+
+			out := captureStdout(t, func() { _ = repairInstance(context.Background(), eng, cfg) })
+			events := decodeNDJSON(t, out)
+			requirePairedStages(t, events)
+			var startup []string
+			for _, event := range events {
+				if event["stage"] == "startup" {
+					startup = append(startup, event["state"].(string))
+				}
+			}
+			if want := []string{"start", tc.wantFinal}; !slices.Equal(startup, want) {
+				t.Fatalf("startup events = %v, want %v\n%s", startup, want, out)
+			}
+		})
 	}
 }
 

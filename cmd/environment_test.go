@@ -96,3 +96,54 @@ func TestDesiredEnvironmentConfigAllowsSharedMemoryAtMemoryLimit(t *testing.T) {
 		t.Fatalf("desiredEnvironmentConfig() error = %v", err)
 	}
 }
+
+func TestValidateEnvironmentOwnershipRefusesAnotherInstallationsContainerOrData(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	other := &config.Config{ContainerName: "omnideck-desktop", Memory: "2g", ShmSize: "1g", WebUIPort: "2337", Image: config.DefaultImage}
+	if err := config.Save(config.InstancePath("desktop"), other); err != nil {
+		t.Fatal(err)
+	}
+	originalName := nameFlag
+	t.Cleanup(func() { nameFlag = originalName })
+
+	for _, tc := range []struct {
+		name      string
+		instance  string
+		container string
+		home      string
+		wantTaken bool
+	}{
+		{"new instance named after its container", "omnideck-desktop", "omnideck-desktop", "", true},
+		{"new instance reusing its home volume", "work", "work", "omnideck-desktop-home", true},
+		{"the installation itself", "desktop", "omnideck-desktop", "", false},
+		{"unrelated new instance", "work", "work", "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			nameFlag = tc.instance
+			desired := &config.Config{ContainerName: tc.container, HomeVolume: tc.home, Memory: "2g", ShmSize: "1g", WebUIPort: "2400", Image: config.DefaultImage}
+			err := validateEnvironmentOwnership(desired)
+			if taken := errors.Is(err, workflow.ErrInstanceNameTaken); taken != tc.wantTaken {
+				t.Fatalf("err = %v, want ErrInstanceNameTaken %v", err, tc.wantTaken)
+			}
+			if !tc.wantTaken && err != nil {
+				t.Fatalf("err = %v", err)
+			}
+		})
+	}
+}
+
+// The hint decides whether a GUI offers to delete a container, so it must
+// follow the error's type, never its wording.
+func TestEnvironmentJSONErrorNeverSuggestsRemovingAnotherInstallation(t *testing.T) {
+	taken := environmentJSONError(workflow.InstanceNameTakenError("omnideck-desktop")).payload
+	if taken.Code != ErrCodeContainerConflict || !strings.Contains(taken.Hint, "do not remove it") || strings.Contains(taken.Hint, "remove the unrelated container") {
+		t.Fatalf("instance name taken = %+v", taken)
+	}
+	unrelated := environmentJSONError(workflow.ContainerConflictError("work")).payload
+	if unrelated.Code != ErrCodeContainerConflict || !strings.Contains(unrelated.Hint, "remove the unrelated container") {
+		t.Fatalf("unrelated container = %+v", unrelated)
+	}
+	if code := environmentJSONError(errors.New("another container already uses the name \"work\"")).payload.Code; code != ErrCodeInternal {
+		t.Fatalf("untyped wording classified as %q; only the error type may choose the conflict hint", code)
+	}
+}

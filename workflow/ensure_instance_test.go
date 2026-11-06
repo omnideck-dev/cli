@@ -238,11 +238,15 @@ func TestEnsureInstanceRecreatesMatchingContainerWithoutExternalURL(t *testing.T
 		wantReason string
 	}{
 		{"missing", []string{"PORT=8080"}, EnsureReasonExternalURLMissing},
-		{"mismatch", []string{"OMNIDECK_EXTERNAL_URL=http://localhost:9999"}, EnsureReasonExternalURLMismatch},
+		{"mismatch", nil, EnsureReasonExternalURLMismatch},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			desired := desiredTestConfig(t)
 			current := *desired
+			if tc.env == nil {
+				// Same port, wrong origin: a real drift, not a saved port change.
+				tc.env = []string{"OMNIDECK_EXTERNAL_URL=http://127.0.0.1:" + desired.WebUIPortOrDefault()}
+			}
 			eng := &fakeEnsureEngine{
 				fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: tc.env, imageID: "sha256:running"},
 				volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
@@ -356,6 +360,52 @@ func TestEnsureInstanceKeepsStoppedDriftedContainerWhenPortIsTaken(t *testing.T)
 	}
 	if eng.removed != 0 || len(eng.runOptions) != 0 || result.Action != "started" {
 		t.Fatalf("result=%#v removed=%d runs=%d; a busy port must not risk removing the container", result, eng.removed, len(eng.runOptions))
+	}
+}
+
+func TestEnsureInstanceLeavesSavedPortChangeForUpdate(t *testing.T) {
+	desired := desiredTestConfig(t)
+	current := *desired
+	// `config set web_ui_port` saved a new port; the container still runs on
+	// the old one. Only `update` applies saved settings.
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"OMNIDECK_EXTERNAL_URL=http://localhost:1"}, imageID: "sha256:running"},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if err != nil || result.Action != "unchanged" || result.Reason != "" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+	if eng.stopped != 0 || eng.removed != 0 || len(eng.runOptions) != 0 {
+		t.Fatalf("stopped=%d removed=%d runs=%d; a saved port change is not drift", eng.stopped, eng.removed, len(eng.runOptions))
+	}
+}
+
+func TestEnsureInstanceKeepsRunningDriftedContainerWhenPortIsTaken(t *testing.T) {
+	desired := desiredTestConfig(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:"+desired.WebUIPortOrDefault())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"PORT=8080"}, imageID: "sha256:running"},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	var stages []string
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{OnStage: func(stage string) { stages = append(stages, stage) }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eng.removed != 0 || len(eng.runOptions) != 0 || result.Changed {
+		t.Fatalf("result=%#v removed=%d runs=%d; another app on the port must not cost the container", result, eng.removed, len(eng.runOptions))
+	}
+	if eng.stopped != 1 || eng.started != 1 {
+		t.Fatalf("stopped=%d started=%d, want the container stopped to check its port and started again", eng.stopped, eng.started)
+	}
+	if want := []string{"check_environment", "start_container"}; !slices.Equal(stages, want) {
+		t.Fatalf("stages = %v, want %v", stages, want)
 	}
 }
 
