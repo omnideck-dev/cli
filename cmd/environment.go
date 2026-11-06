@@ -227,6 +227,7 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	if ensureErr != nil {
 		return stream.fail(ensureErr)
 	}
+	stream.startup()
 	if err := workflow.WaitForApplication(cmd.Context(), eng, desired); err != nil {
 		return stream.failStartup(err)
 	}
@@ -256,27 +257,36 @@ func newEnsureStream(json bool) *ensureStream {
 
 func (s *ensureStream) options() workflow.EnsureInstanceOptions {
 	return workflow.EnsureInstanceOptions{
-		OnStage: func(stage string) {
-			// A repeated stage (repair announces check_environment before
-			// EnsureInstance does) continues the running one.
-			if s.started && s.lastStage == stage {
-				return
-			}
-			if s.nd != nil && s.started {
-				s.nd.done(s.lastStage)
-			}
-			s.lastStage = stage
-			s.started = true
-			if s.nd != nil {
-				s.nd.start(stage)
-			}
-		},
+		OnStage: s.stage,
 		OnPullProgress: func(line string) {
 			if s.nd != nil {
 				s.nd.progress("pull_image", line)
 			}
 		},
 	}
+}
+
+// stage finishes the running stage and starts the next one.
+func (s *ensureStream) stage(stage string) {
+	// A repeated stage (repair announces check_environment before
+	// EnsureInstance does) continues the running one.
+	if s.started && s.lastStage == stage {
+		return
+	}
+	if s.nd != nil && s.started {
+		s.nd.done(s.lastStage)
+	}
+	s.lastStage = stage
+	s.started = true
+	if s.nd != nil {
+		s.nd.start(stage)
+	}
+}
+
+// startup starts the stage that spans the wait for the application to
+// answer, so the last workflow stage is not left open during it.
+func (s *ensureStream) startup() {
+	s.stage("startup")
 }
 
 // fail ends the stream with err on the stage that was running, or returns
@@ -297,6 +307,8 @@ func (s *ensureStream) failStartup(err error) error {
 	if s.nd == nil {
 		return startupTextError(err)
 	}
+	// Every error event follows a start for the same stage.
+	s.startup()
 	return s.nd.fail("startup", environmentJSONError(err))
 }
 
