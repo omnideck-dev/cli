@@ -12,8 +12,15 @@ import (
 	"github.com/omnideck-dev/cli/workflow"
 )
 
+// hostFree reports every port as free and no saved instance files, so
+// defaults tests do not depend on the machine running them.
+var hostFree = workflow.InstanceDefaultsOptions{
+	PortAvailable:  func(string) bool { return true },
+	InstanceExists: func(string) bool { return false },
+}
+
 func TestSuggestInstallDefaultsForFirstInstance(t *testing.T) {
-	cfg := workflow.NewInstanceDefaults(nil)
+	cfg := workflow.NewInstanceDefaultsWith(nil, hostFree)
 	if cfg.ContainerName != "omnideck" || cfg.WebUIPort != "2337" {
 		t.Fatalf("first instance defaults = %s:%s, want omnideck:2337", cfg.ContainerName, cfg.WebUIPort)
 	}
@@ -24,7 +31,7 @@ func TestSuggestInstallDefaultsForAdditionalInstance(t *testing.T) {
 		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337"}},
 		{Name: "omnideck2", Config: &config.Config{ContainerName: "omnideck2", WebUIPort: "2338"}},
 	}
-	cfg := workflow.NewInstanceDefaults(instances)
+	cfg := workflow.NewInstanceDefaultsWith(instances, hostFree)
 	if cfg.ContainerName != "omnideck3" || cfg.WebUIPort != "2339" {
 		t.Fatalf("additional instance defaults = %s:%s, want omnideck3:2339", cfg.ContainerName, cfg.WebUIPort)
 	}

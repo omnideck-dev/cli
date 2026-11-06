@@ -60,7 +60,7 @@ func TestPortAvailableAndNextAvailablePort(t *testing.T) {
 	if start == 65535 {
 		t.Skip("ephemeral listener received the last TCP port")
 	}
-	next, ok := NextAvailablePort(start, map[string]bool{})
+	next, ok := NextAvailablePort(start, map[string]bool{}, nil)
 	if !ok || next == occupied {
 		t.Fatalf("NextAvailablePort(%d) = %q, %v", start, next, ok)
 	}

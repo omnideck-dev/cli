@@ -65,14 +65,18 @@ func PortAvailable(value string) bool {
 }
 
 // NextAvailablePort returns the first valid, unused port at or above start
-// that is not reserved by an existing Omnideck configuration.
-func NextAvailablePort(start int, reserved map[string]bool) (string, bool) {
+// that is not reserved by an existing Omnideck configuration. available
+// probes the host; nil uses PortAvailable.
+func NextAvailablePort(start int, reserved map[string]bool, available func(string) bool) (string, bool) {
+	if available == nil {
+		available = PortAvailable
+	}
 	if start < 1 {
 		start = 1
 	}
 	for port := start; port <= 65535; port++ {
 		value := strconv.Itoa(port)
-		if !reserved[value] && PortAvailable(value) {
+		if !reserved[value] && available(value) {
 			return value, true
 		}
 	}
