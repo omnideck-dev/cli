@@ -102,7 +102,7 @@ func TestGatherStatusPayloadStopped(t *testing.T) {
 }
 
 // TestClosedErrorCodeSetIsStable pins the exact set of documented error
-// codes from JSON_MODE_SPEC.md's "Structured error shape" table — adding,
+// codes from JSON_MODE_SPEC.md §3 "Closed error codes" table — adding,
 // removing, or renaming one here is a breaking JSON contract change and
 // should come with a jsonContract bump.
 func TestClosedErrorCodeSetIsStable(t *testing.T) {
@@ -172,9 +172,10 @@ func TestClosedErrorCodeSetIsStable(t *testing.T) {
 }
 
 // TestEveryJSONErrorResolvesToAClosedCode is the regression guard for
-// JSON_MODE_SPEC.md's "every error path must resolve to one of these
-// codes, never an unstructured failure": both a hand-built jsonCmdError and
-// an arbitrary plain error must marshal with one of the closed codes.
+// JSON_MODE_SPEC.md §3's rule that the CLI never emits a code outside the
+// closed set (anything unclassified is INTERNAL_ERROR): both a hand-built
+// jsonCmdError and an arbitrary plain error must marshal with one of the
+// closed codes.
 func TestEveryJSONErrorResolvesToAClosedCode(t *testing.T) {
 	closed := map[string]bool{
 		ErrCodeAmbiguousInstance: true, ErrCodeNotInstalled: true, ErrCodeEngineNotFound: true,
@@ -287,8 +288,8 @@ func TestGatherListEntryPausedHasLiveFields(t *testing.T) {
 }
 
 // TestGatherListEntryStoppedHasNullLiveFields is the regression guard for
-// JSON_MODE_SPEC.md's "every object has the same set of keys, always" rule:
-// live-stat fields must marshal to explicit null, never be omitted and
+// JSON_MODE_SPEC.md §4 list --json "every entry has the same set of keys"
+// rule: live-stat fields must marshal to explicit null, never be omitted and
 // never fall back to a zero value that looks like a real reading.
 func TestGatherListEntryStoppedHasNullLiveFields(t *testing.T) {
 	instance := config.InstanceInfo{
@@ -575,8 +576,8 @@ func TestJSONCheckResultsMapsFieldsAndEnums(t *testing.T) {
 }
 
 // TestAllChecksPassIgnoresWarnAndInfo is the regression guard for
-// JSON_MODE_SPEC.md's "Ollama stays optional" invariant: doctor --json's
-// allPass must only be affected by CheckFail, matching
+// JSON_MODE_SPEC.md §4 doctor --json "Ollama is optional" invariant:
+// doctor --json's allPass must only be affected by CheckFail, matching
 // tui.RenderDoctorReport's existing logic exactly.
 func TestAllChecksPassIgnoresWarnAndInfo(t *testing.T) {
 	results := []workflow.CheckResult{

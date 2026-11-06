@@ -78,12 +78,12 @@ func runLogs(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
-// resolveLogsFollow applies JSON_MODE_SPEC.md's default-follow safety
-// valve: --follow/-f defaults to true for interactive use (tail -f-style),
-// but a naive `logs --json` shouldn't silently block in an open-ended
-// stream — so under --json, follow defaults to false unless the caller
-// explicitly passed --follow (or -f). An explicit flag always wins, and
-// non-`--json` behavior is untouched.
+// resolveLogsFollow applies the default-follow safety valve from
+// JSON_MODE_SPEC.md §4 logs --json: --follow/-f defaults to true for
+// interactive use (tail -f-style), but a naive `logs --json` shouldn't
+// silently block in an open-ended stream — so under --json, follow
+// defaults to false unless the caller explicitly passed --follow (or -f).
+// An explicit flag always wins, and non-`--json` behavior is untouched.
 func resolveLogsFollow(cmd *cobra.Command, jsonMode bool, requested bool) bool {
 	if jsonMode && !cmd.Flags().Changed("follow") {
 		return false

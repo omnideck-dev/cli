@@ -256,7 +256,7 @@ type suggestDefaultsPayload struct {
 // container/volumes this run already created — nothing else will ever
 // discover them otherwise, since list/doctor/remove are all keyed off the
 // saved config file that a cancelled run never gets to write. See
-// JSON_MODE_SPEC.md's "Cancellation and teardown".
+// JSON_MODE_SPEC.md §5 add --json "Cancellation and teardown".
 func runSetupJSON(instances []config.InstanceInfo) error {
 	eng, _, err := selectSetupEngine()
 	if err != nil {

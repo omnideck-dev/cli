@@ -45,7 +45,7 @@ steps as independent manual coverage.
 9. Exit normally and run the same bare executable again. Confirm it opens the
    dashboard rather than creating another instance.
 10. Run `--json list`, `--json runtime status`, and named `--json status`.
-    Validate JSON contract 3 and runtime schema 4. Use the results and saved
+    Validate JSON contract 5 and runtime schema 4. Use the results and saved
     configuration to record the automatically selected runtime, name, port,
     memory, shared memory, volumes, and image.
 11. Confirm those values match the documented recommended defaults, exactly one

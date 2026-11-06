@@ -137,8 +137,8 @@ func TestRunUpdateJSONCompleteNamesTheInstance(t *testing.T) {
 }
 
 // TestRunUpdateJSONCancellationReportsCancelled is the regression guard for
-// JSON_MODE_SPEC.md's update cancellation handling: a step failing with a
-// context.Canceled-wrapped error must be reported as CANCELLED, not
+// JSON_MODE_SPEC.md §5 update --json cancellation handling: a step failing
+// with a context.Canceled-wrapped error must be reported as CANCELLED, not
 // INTERNAL_ERROR, so a GUI can tell "the user/app cancelled this" apart
 // from "this actually failed."
 func TestRunUpdateJSONCancellationReportsCancelled(t *testing.T) {
