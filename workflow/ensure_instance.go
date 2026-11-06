@@ -209,10 +209,12 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 // externalURLDriftRepair reports why a container whose saved settings match
 // must still be replaced, and the ID of the image it runs; reason is "" when
 // it should simply be started. Anything it cannot inspect leaves the
-// container alone rather than risking a recreate on a transient error. A
-// stopped container is only replaced when its port is free: Recreate removes
-// the old container first, and if another app holds the port neither the
-// replacement nor the rollback could start, losing the container.
+// container alone rather than risking a recreate on a transient error. An
+// address on a different port is a saved port change that only `update`
+// applies, not drift. A stopped container is only replaced when its port is
+// free: Recreate removes the old container first, and if another app holds
+// the port neither the replacement nor the rollback could start, losing the
+// container. repairExternalURL makes the same check for a running one.
 func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (reason, imageID string, err error) {
 	check, inspectErr := CheckExternalURL(eng, desired)
 	if inspectErr != nil {
@@ -222,6 +224,9 @@ func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (r
 	case ExternalURLMissing:
 		reason = EnsureReasonExternalURLMissing
 	case ExternalURLMismatch:
+		if check.PortChanged() {
+			return "", "", nil
+		}
 		reason = EnsureReasonExternalURLMismatch
 	default:
 		return "", "", nil
@@ -262,9 +267,28 @@ func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (r
 // unreviewed application update. The saved settings are unchanged, so there
 // is nothing to save; externalURLDriftRepair has already confirmed the saved
 // volumes exist.
+//
+// A running container holds its own port, so the port can only be checked
+// once it is stopped. If another app holds it then, the replacement and the
+// rollback would both fail after the old container was removed; the
+// container is started again and left in place instead.
 func repairExternalURL(eng InstanceEnsureEngine, desired *config.Config, imageID, reason string, opts EnsureInstanceOptions) (EnsureInstanceResult, error) {
 	pinned := *desired
 	pinned.Image = imageID
+	wasRunning, err := EnsureStopped(eng, desired.ContainerName)
+	if err != nil {
+		return EnsureInstanceResult{}, err
+	}
+	if !checks.PortAvailable(desired.WebUIPortOrDefault()) {
+		if !wasRunning {
+			return EnsureInstanceResult{}, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault()))
+		}
+		opts.stage("start_container")
+		if _, err := EnsureStarted(eng, desired.ContainerName); err != nil {
+			return EnsureInstanceResult{}, err
+		}
+		return EnsureInstanceResult{Action: "unchanged"}, nil
+	}
 	opts.stage("replace_container")
 	if err := Recreate(eng, &pinned, &pinned); err != nil {
 		return EnsureInstanceResult{}, err
