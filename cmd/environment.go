@@ -105,13 +105,20 @@ func loadEnvironmentConfig(path string) (*config.Config, error) {
 	return nil, fmt.Errorf("reading the saved environment: %w", err)
 }
 
-func validateEnvironmentPort(desired *config.Config) error {
+// validateEnvironmentOwnership refuses a container, data volume, or port that
+// belongs to another saved installation. The instance being ensured is
+// skipped by its instance name: skipping by container name would let a new
+// instance adopt another installation's container and data.
+func validateEnvironmentOwnership(desired *config.Config) error {
 	instances, err := config.ListInstances()
 	if err != nil {
 		return fmt.Errorf("checking existing installations: %w", err)
 	}
+	if err := workflow.CheckInstanceOwnership(instances, nameFlag, desired); err != nil {
+		return err
+	}
 	for _, instance := range instances {
-		if instance.Config == nil || instance.Config.ContainerName == desired.ContainerName {
+		if instance.Config == nil || instance.Name == nameFlag {
 			continue
 		}
 		if instance.Config.WebUIPortOrDefault() == desired.WebUIPortOrDefault() {
@@ -153,10 +160,10 @@ func environmentJSONError(err error) *jsonCmdError {
 	if errors.Is(err, workflow.ErrExternalURL) {
 		return newJSONError(ErrCodeInternal, message).withHint("The update was applied and saved. Retry it; if the address is still wrong, run omnideck doctor.")
 	}
-	if strings.Contains(lower, "another omnideck installation already uses the name") {
-		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name. That name belongs to an existing Omnideck installation; do not remove it.")
+	if errors.Is(err, workflow.ErrInstanceNameTaken) {
+		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name. That name or its data belongs to an existing Omnideck installation; do not remove it.")
 	}
-	if errors.Is(err, workflow.ErrContainerConflict) || strings.Contains(lower, "already uses the name") {
+	if errors.Is(err, workflow.ErrContainerConflict) {
 		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name or remove the unrelated container.")
 	}
 	return newJSONError(ErrCodeInternal, message)
@@ -202,7 +209,7 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	}
 	desired, err := desiredEnvironmentConfig(current)
 	if err == nil {
-		err = validateEnvironmentPort(desired)
+		err = validateEnvironmentOwnership(desired)
 	}
 	if err != nil {
 		if jsonFlag {

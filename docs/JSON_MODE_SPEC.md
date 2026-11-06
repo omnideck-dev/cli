@@ -135,7 +135,7 @@ a code outside this list; adding one is a contract change.
 | `UNSUPPORTED` | This computer cannot run Omnideck's runtime setup. |
 | `RUNTIME_SETUP_FAILED` | Any other runtime setup failure. |
 | `PORT_IN_USE` | The requested local port is taken. |
-| `CONTAINER_CONFLICT` | An unrelated container, or another saved instance, already uses the requested name. |
+| `CONTAINER_CONFLICT` | An unrelated container, or another saved instance, already uses the requested name, or another saved instance already uses one of its data volumes. The hint says not to remove the container when it belongs to another saved instance. |
 | `MIGRATION_FAILED` | The application's migration barrier stopped startup. `detail` names the failed migration; it never contains saved records, credentials, or raw logs. |
 | `APP_STARTUP_FAILED` | The application exited, or did not answer before the deadline, without a recognized migration failure. |
 | `INTERNAL_ERROR` | Anything not classified above. |
@@ -529,7 +529,8 @@ place when another app holds its port; a running one is stopped to check the
 port and, if another app holds it, started again and reported `unchanged`.
 Saved data volumes are never removed; if one is missing, ensure stops
 with `MISSING_STORAGE` rather than create an empty replacement. Invalid flag
-values are `INVALID_SETTING`.
+values are `INVALID_SETTING`. A container name or data volume that belongs to
+another saved instance is `CONTAINER_CONFLICT`, checked before any runtime call.
 
 ### `omnideck repair --json`
 
