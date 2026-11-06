@@ -268,7 +268,8 @@ func runRemovePlain(eng engine.Engine, instance config.InstanceInfo, opts workfl
 // {"stage","state"} convention as add/update. Unlike add, no cleanup-on-
 // cancel logic is needed: a partially-removed instance (e.g. container
 // removed but volumes not yet deleted) is exactly the state doctor/a
-// retried remove already handles. See JSON_MODE_SPEC.md §8.
+// retried remove already handles. See JSON_MODE_SPEC.md §5 remove --json
+// and §8.
 func runRemoveJSON(eng engine.Engine, instance config.InstanceInfo, opts workflow.RemoveInstanceOptions) error {
 	nd := newNDJSONEncoder()
 

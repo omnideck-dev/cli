@@ -23,7 +23,7 @@ import (
 const jsonContract = 5
 
 // Closed set of --json error codes. Every error surfaced under --json must
-// resolve to one of these — see JSON_MODE_SPEC.md's "Structured error shape".
+// resolve to one of these — see JSON_MODE_SPEC.md §3 "Closed error codes".
 const (
 	ErrCodeAmbiguousInstance     = "AMBIGUOUS_INSTANCE"
 	ErrCodeNotInstalled          = "NOT_INSTALLED"

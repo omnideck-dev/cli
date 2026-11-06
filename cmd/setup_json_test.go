@@ -140,10 +140,10 @@ func TestRunSetupStepsJSONClassifiesDownloadFailure(t *testing.T) {
 }
 
 // TestRunSetupStepsJSONCancellationCleansUpAndReportsCancelled is the
-// regression guard for JSON_MODE_SPEC.md's "Cancellation and teardown": a
-// run cancelled after creating real resources (both volumes here) but
-// before the container/config exist must best-effort remove what it already
-// created, and report CANCELLED rather than INTERNAL_ERROR.
+// regression guard for JSON_MODE_SPEC.md §5 add --json "Cancellation and
+// teardown": a run cancelled after creating real resources (both volumes
+// here) but before the container/config exist must best-effort remove what
+// it already created, and report CANCELLED rather than INTERNAL_ERROR.
 //
 // The shared process context is actually cancelled here, then run_container
 // is made to fail the way a real killed docker/podman subprocess does — a

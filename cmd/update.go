@@ -133,8 +133,8 @@ type externalURLStageResult struct {
 // Unlike add, a cancelled update doesn't need bespoke cleanup:
 // workflow.RecreateAndSave/Recreate already roll back a failed replacement
 // or a failed save to the previous, already-saved container — the same
-// path a logical failure already takes. See JSON_MODE_SPEC.md's
-// "Cancellation and teardown".
+// path a logical failure already takes. See JSON_MODE_SPEC.md §5
+// update --json.
 func runUpdateJSON(eng engine.Engine, cfg *config.Config) error {
 	current, next := workflow.UpdateTarget(cfg)
 	nd := newNDJSONEncoder()

@@ -288,10 +288,10 @@ func TestJSONSyntaxErrorsStayMachineReadable(t *testing.T) {
 }
 
 // TestJSONModeNeverHangsOnAmbiguousInstance is the non-interactive-safety
-// regression guard from JSON_MODE_SPEC.md's Testing section: every command
-// that would otherwise open the interactive picker must fail fast with the
-// structured AMBIGUOUS_INSTANCE error under --json + closed stdin, never
-// hang waiting on tui.RunPicker.
+// regression guard for JSON_MODE_SPEC.md §1's "never prompts" rule: every
+// command that would otherwise open the interactive picker must fail fast
+// with the structured AMBIGUOUS_INSTANCE error under --json + closed stdin,
+// never hang waiting on tui.RunPicker.
 func TestJSONModeNeverHangsOnAmbiguousInstance(t *testing.T) {
 	configDir := t.TempDir()
 	writeInstanceFixture(t, configDir, "one")
@@ -415,7 +415,7 @@ func TestSuggestDefaultsJSON(t *testing.T) {
 }
 
 // TestRemoveJSONRequiresExplicitFlags is the end-to-end guard for
-// JSON_MODE_SPEC.md's "no silent default for a destructive choice": remove
+// JSON_MODE_SPEC.md §5 remove --json required-flags rule: remove
 // --json with none of --yes/--keep-volumes/--delete-volumes set must fail
 // fast with MISSING_REQUIRED_FLAG, never prompt.
 func TestRemoveJSONRequiresExplicitFlags(t *testing.T) {

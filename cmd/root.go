@@ -133,8 +133,8 @@ func init() {
 		}
 		if jsonFlag {
 			// --json must never fall through to a TUI or plain-text help,
-			// regardless of what stdin looks like — see JSON_MODE_SPEC.md's
-			// "Bare omnideck --json (no subcommand)".
+			// regardless of what stdin looks like — see JSON_MODE_SPEC.md §3
+			// MISSING_SUBCOMMAND.
 			return writeJSONError(newJSONError(ErrCodeMissingSubcommand, "omnideck requires a subcommand in --json mode; run --help for the list"))
 		}
 		// RunOnce may start the CLI without an inherited terminal handle. The
@@ -303,8 +303,8 @@ func requireConfigMulti() error {
 			names = append(names, instance.Name)
 		}
 		// --json never opens the interactive picker, regardless of whether
-		// stdin looks like a terminal — see JSON_MODE_SPEC.md's
-		// requireConfigMulti() bypass.
+		// stdin looks like a terminal — see JSON_MODE_SPEC.md §1 and §2
+		// instance resolution.
 		if jsonFlag {
 			return writeJSONError(newJSONError(ErrCodeAmbiguousInstance, "Multiple instances found — specify --name").withInstances(names))
 		}
