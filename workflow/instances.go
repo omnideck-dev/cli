@@ -36,10 +36,11 @@ func NewInstanceDefaultsWith(instances []config.InstanceInfo, opts InstanceDefau
 	takenPorts := map[string]bool{}
 	maxPort := 2336
 	for _, instance := range instances {
+		// An unreadable config still owns its name.
+		takenNames[instance.Name] = true
 		if instance.Config == nil {
 			continue
 		}
-		takenNames[instance.Name] = true
 		takenNames[instance.Config.ContainerName] = true
 		takenPorts[instance.Config.WebUIPortOrDefault()] = true
 		if port, err := strconv.Atoi(instance.Config.WebUIPortOrDefault()); err == nil && port > maxPort {
@@ -58,7 +59,7 @@ func NewInstanceDefaultsWith(instances []config.InstanceInfo, opts InstanceDefau
 			break
 		}
 	}
-	if port, ok := checks.NextAvailablePortFunc(maxPort+1, takenPorts, portAvailable); ok {
+	if port, ok := checks.NextAvailablePort(maxPort+1, takenPorts, portAvailable); ok {
 		cfg.WebUIPort = port
 	}
 	return cfg

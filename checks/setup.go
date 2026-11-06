@@ -65,14 +65,12 @@ func PortAvailable(value string) bool {
 }
 
 // NextAvailablePort returns the first valid, unused port at or above start
-// that is not reserved by an existing Omnideck configuration.
-func NextAvailablePort(start int, reserved map[string]bool) (string, bool) {
-	return NextAvailablePortFunc(start, reserved, PortAvailable)
-}
-
-// NextAvailablePortFunc is NextAvailablePort with the host port probe
-// supplied by the caller, so tests do not depend on what is listening.
-func NextAvailablePortFunc(start int, reserved map[string]bool, available func(string) bool) (string, bool) {
+// that is not reserved by an existing Omnideck configuration. available
+// probes the host; nil uses PortAvailable.
+func NextAvailablePort(start int, reserved map[string]bool, available func(string) bool) (string, bool) {
+	if available == nil {
+		available = PortAvailable
+	}
 	if start < 1 {
 		start = 1
 	}

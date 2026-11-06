@@ -44,7 +44,7 @@ func (m *SetupModel) ensureRecommendedSettingsAvailable() {
 	if err != nil {
 		start = 2337
 	}
-	if available, ok := checks.NextAvailablePort(start+1, m.existingPorts); ok {
+	if available, ok := checks.NextAvailablePort(start+1, m.existingPorts, nil); ok {
 		m.inputs[inputWebUIPort].SetValue(available)
 	}
 }
