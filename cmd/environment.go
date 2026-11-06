@@ -84,7 +84,7 @@ func desiredEnvironmentConfig(current *config.Config) (*config.Config, error) {
 		desired.StateVolume = environmentStateVolumeFlag
 	}
 	desired.LayoutVersion = config.CurrentContainerLayout
-	if err := workflow.ValidateInstanceConfig(desired); err != nil {
+	if err := workflow.ValidateInstanceChange(current, desired); err != nil {
 		return nil, setupValidationError(err)
 	}
 	if desired.InstalledAt.IsZero() {

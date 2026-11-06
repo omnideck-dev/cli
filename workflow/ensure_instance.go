@@ -74,7 +74,7 @@ func SameInstanceConfig(a, b *config.Config) bool {
 // repairs a missing container, or safely replaces a container whose desired
 // settings changed. Existing data volumes are never removed.
 func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, save func() error, opts EnsureInstanceOptions) (result EnsureInstanceResult, err error) {
-	if err := ValidateInstanceConfig(desired); err != nil {
+	if err := ValidateInstanceChange(current, desired); err != nil {
 		return result, err
 	}
 	defer func() { err = engine.WrapIfCancelled(err) }()
