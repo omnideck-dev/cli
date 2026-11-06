@@ -86,7 +86,7 @@ non-destructive commands with closed stdin and a temporary
 - root and subcommand help surfaces;
 - bare non-interactive behavior;
 - structured JSON success and error output with clean stderr;
-- JSON contract 3 and runtime status schema 4;
+- JSON contract 5 and runtime status schema 4;
 - early argument and dispatch errors remain machine-readable;
 - ambiguous instance selection never prompts in automation; and
 - destructive removal requires explicit flags.
@@ -392,7 +392,7 @@ An RC requires every beta gate plus recorded evidence for:
 - multiple simultaneous instances;
 - instance removal with both keep and delete choices;
 - local Ollama connectivity where applicable; and
-- Desktop/Tauri compatibility with JSON contract 4 and runtime schema 4,
+- Desktop/Tauri compatibility with JSON contract 5 and runtime schema 4,
   including valid status JSON accompanied by a nonzero process exit where the
   command reports a non-ready state.
 
@@ -455,8 +455,8 @@ removed after that purpose is satisfied.
 `workflow/startup_test.go` covers timestamped Podman logs, the boundary between
 old failures and a new user retry, automatic restart loops, HTTP readiness, and
 cancellation. `cmd/startup_test.go` checks matching plain-text and JSON errors;
-the release-contract checks now validate JSON contract 4, including the new
-startup error codes.
+the release-contract checks validate JSON contract 5, including the startup
+error codes added in contract 4.
 
 For a native proof, use a cleanup-owning VM-lab lease and a development app image
 that emits version-1 startup records. Seed an invalid migration record in only
