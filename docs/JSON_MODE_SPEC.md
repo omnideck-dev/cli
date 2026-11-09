@@ -452,6 +452,10 @@ holds the port, `CONTAINER_CONFLICT`, and `CANCELLED`.
 
 ### `omnideck remove <name> --json`
 
+The instance is the positional `<name>` or `--name`, like every other instance
+command. Removal never picks one implicitly: giving neither, or two different
+names, is `MISSING_REQUIRED_FLAG`.
+
 `remove` is destructive, so under `--json` these flags are required, and a
 missing one is `MISSING_REQUIRED_FLAG` before any runtime call:
 

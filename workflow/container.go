@@ -49,8 +49,11 @@ type ContainerEngine interface {
 
 // RecreateAndSave applies next and persists it as one application transaction.
 // A save failure restores the previous container so the runtime and YAML file
-// continue to describe the same installation.
+// continue to describe the same installation. The replacement is built with
+// the current container wiring, so next records the current layout; otherwise
+// a later `environment ensure` would see stale settings and replace it again.
 func RecreateAndSave(eng ContainerEngine, current, next *config.Config, path string) error {
+	next.LayoutVersion = config.CurrentContainerLayout
 	if err := Recreate(eng, current, next); err != nil {
 		return err
 	}

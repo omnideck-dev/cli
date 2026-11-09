@@ -179,7 +179,7 @@ omnideck <command> [flags]
 | `config set <key> <value>` | Save one setting and explain how to apply it |
 | `config path` | Print the config file path |
 | `environment ensure` | Reconcile an exact desired instance for Desktop or automation (`--json`) |
-| `remove NAME` | Remove one instance; keep its data by default or explicitly back up and delete it (`--backup-dir` chooses the backup folder; `uninstall` remains an alias; `--plain` for non-interactive) |
+| `remove NAME` | Remove one instance (`--name NAME` also works); keep its data by default or explicitly back up and delete it (`--backup-dir` chooses the backup folder; `uninstall` remains an alias; `--plain` for non-interactive) |
 
 ### Global flags
 

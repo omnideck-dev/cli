@@ -260,7 +260,7 @@ func TestJSONSyntaxErrorsStayMachineReadable(t *testing.T) {
 	for _, args := range [][]string{
 		{"--json", "definitely-not-a-command"},
 		{"--json", "--definitely-not-a-flag"},
-		{"--json", "remove"},
+		{"--json", "remove", "one", "two"},
 	} {
 		name := strings.Join(args[1:], " ")
 		t.Run(name, func(t *testing.T) {
@@ -455,5 +455,43 @@ func TestBinaryIsExecutable(t *testing.T) {
 		if info.Mode()&0111 == 0 {
 			t.Fatal("binary is not executable")
 		}
+	}
+}
+
+// remove accepts --name like every other instance command (#32), and a
+// missing or contradictory name is a structured error, never INTERNAL_ERROR.
+func TestRemoveJSONAcceptsNameFlag(t *testing.T) {
+	configDir := t.TempDir()
+	writeInstanceFixture(t, configDir, "solo")
+	env := []string{"OMNIDECK_CONFIG_DIR=" + configDir}
+
+	for _, tc := range []struct {
+		name        string
+		args        []string
+		want        string
+		wantMessage string
+	}{
+		// Failing on the missing --yes, not the missing name, proves --name
+		// selected "solo".
+		{"name flag", []string{"remove", "--name", "solo", "--json"}, "MISSING_REQUIRED_FLAG", "--yes is required"},
+		{"unknown name flag", []string{"remove", "--name", "ghost", "--json", "--yes", "--keep-volumes"}, "NOT_INSTALLED", "ghost"},
+		{"no name", []string{"remove", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG", "requires the instance"},
+		{"two names", []string{"remove", "solo", "--name", "other", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG", "two different instances"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := runEnv(env, tc.args...)
+			if code == 0 || strings.TrimSpace(stderr) != "" {
+				t.Fatalf("code=%d stderr=%q stdout=%s", code, stderr, stdout)
+			}
+			var payload struct {
+				Error struct {
+					Code    string `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil || payload.Error.Code != tc.want || !strings.Contains(payload.Error.Message, tc.wantMessage) {
+				t.Fatalf("error = %+v (err %v), want %s mentioning %q\n%s", payload.Error, err, tc.want, tc.wantMessage, stdout)
+			}
+		})
 	}
 }

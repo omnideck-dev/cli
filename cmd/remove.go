@@ -27,10 +27,10 @@ var (
 )
 
 var removeCmd = &cobra.Command{
-	Use:          "remove NAME",
+	Use:          "remove [NAME]",
 	Aliases:      []string{"uninstall"},
-	Short:        "Remove one Omnideck instance",
-	Args:         cobra.ExactArgs(1),
+	Short:        "Remove one Omnideck instance (NAME or --name)",
+	Args:         cobra.MaximumNArgs(1),
 	SilenceUsage: true,
 	RunE:         runInstanceRemove,
 }
@@ -47,7 +47,14 @@ func init() {
 }
 
 func runInstanceRemove(_ *cobra.Command, args []string) error {
-	instance, err := savedInstanceNamed(args[0])
+	name, nameErr := removeInstanceName(args)
+	if nameErr != nil {
+		if jsonFlag {
+			return writeJSONError(nameErr)
+		}
+		return fmt.Errorf("%s\n%s", nameErr.payload.Message, nameErr.payload.Hint)
+	}
+	instance, err := savedInstanceNamed(name)
 	if err != nil {
 		if jsonFlag {
 			return writeJSONError(newJSONError(ErrCodeNotInstalled, err.Error()))
@@ -307,6 +314,26 @@ func runRemoveJSON(eng engine.Engine, instance config.InstanceInfo, opts workflo
 		return errAborted
 	}
 	return nil
+}
+
+// removeInstanceName takes the instance from NAME or --name, like every other
+// instance command. Removal is destructive, so it never picks one implicitly,
+// and two different names are refused rather than guessed between.
+func removeInstanceName(args []string) (string, *jsonCmdError) {
+	positional := ""
+	if len(args) == 1 {
+		positional = args[0]
+	}
+	switch {
+	case positional == "" && nameFlag == "":
+		return "", newJSONError(ErrCodeMissingRequiredFlag, "remove requires the instance to remove: omnideck remove NAME, or --name NAME").withHint("Run omnideck list to see saved instances.")
+	case positional != "" && nameFlag != "" && positional != nameFlag:
+		return "", newJSONError(ErrCodeMissingRequiredFlag, fmt.Sprintf("remove was given two different instances (%q and --name %q); pass only one", positional, nameFlag)).withHint("Pass the instance once, as NAME or --name.")
+	case positional != "":
+		return positional, nil
+	default:
+		return nameFlag, nil
+	}
 }
 
 func savedInstanceNamed(name string) (config.InstanceInfo, error) {
