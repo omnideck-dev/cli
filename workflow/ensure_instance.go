@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
@@ -89,7 +90,7 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 	}
 	matching := SameInstanceConfig(current, desired)
 	if current == nil && exists {
-		return result, classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q", desired.ContainerName))
+		return result, ContainerConflictError(desired.ContainerName)
 	}
 	if (!exists || current == nil || current.WebUIPortOrDefault() != desired.WebUIPortOrDefault()) && !checks.PortAvailable(desired.WebUIPortOrDefault()) {
 		return result, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault()))
@@ -101,12 +102,12 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 	// unreadable container is left alone rather than risking a recreate on a
 	// transient inspection error.
 	if matching && exists {
-		reason, imageID, driftErr := externalURLDriftRepair(eng, desired)
+		repair, driftErr := externalURLDriftRepair(eng, desired)
 		if driftErr != nil {
 			return result, driftErr
 		}
-		if reason != "" {
-			return repairExternalURL(eng, desired, imageID, reason, opts)
+		if repair.Reason != "" {
+			return repairExternalURL(eng, desired, repair, opts)
 		}
 		opts.stage("start_container")
 		changed, startErr := EnsureStarted(eng, desired.ContainerName)
@@ -206,58 +207,95 @@ func EnsureInstance(eng InstanceEnsureEngine, current, desired *config.Config, s
 	return EnsureInstanceResult{Changed: true, Action: "recreated"}, nil
 }
 
-// externalURLDriftRepair reports why a container whose saved settings match
-// must still be replaced, and the ID of the image it runs; reason is "" when
-// it should simply be started. Anything it cannot inspect leaves the
-// container alone rather than risking a recreate on a transient error. An
-// address on a different port is a saved port change that only `update`
-// applies, not drift. A stopped container is only replaced when its port is
-// free: Recreate removes the old container first, and if another app holds
-// the port neither the replacement nor the rollback could start, losing the
-// container. repairExternalURL makes the same check for a running one.
-func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (reason, imageID string, err error) {
+// externalURLDriftRepair reports whether a container whose saved settings
+// match must still be replaced, why, and the ID of the image it runs; an empty
+// Reason means it should simply be started. Anything it cannot inspect leaves
+// the container alone rather than risking a recreate on a transient error.
+//
+// An address on a different port usually means `config set web_ui_port` saved
+// a port the container does not use yet. Starting it as is would leave the
+// application on the old port while ensure waits on the saved one, so it is
+// replaced like any other drift. The container still holds its old port, so
+// the saved one is checked before anything is touched.
+//
+// Otherwise a stopped container is only replaced when its port is free:
+// Recreate removes the old container first, and if another app holds the port
+// neither the replacement nor the rollback could start, losing the container.
+// The replacement step makes the same check for a running one.
+func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (repair externalURLRepair, err error) {
 	check, inspectErr := CheckExternalURL(eng, desired)
 	if inspectErr != nil {
-		return "", "", nil
+		return externalURLRepair{}, nil
 	}
 	switch check.State {
 	case ExternalURLMissing:
-		reason = EnsureReasonExternalURLMissing
+		repair.Reason = EnsureReasonExternalURLMissing
 	case ExternalURLMismatch:
-		if check.PortChanged() {
-			return "", "", nil
-		}
-		reason = EnsureReasonExternalURLMismatch
+		repair.Reason = EnsureReasonExternalURLMismatch
 	default:
-		return "", "", nil
+		return externalURLRepair{}, nil
 	}
-	status, inspectErr := eng.ContainerStatus(desired.ContainerName)
+	repair.PortChanged = check.PortChanged()
+	if repair.PortChanged {
+		if !checks.PortAvailable(desired.WebUIPortOrDefault()) {
+			return externalURLRepair{}, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s, so the saved port could not be applied; the container was left unchanged", desired.WebUIPortOrDefault()))
+		}
+	} else {
+		status, inspectErr := eng.ContainerStatus(desired.ContainerName)
+		if inspectErr != nil {
+			return externalURLRepair{}, nil
+		}
+		if !IsActiveContainerStatus(status) && !checks.PortAvailable(desired.WebUIPortOrDefault()) {
+			return externalURLRepair{}, nil
+		}
+	}
+	imageID, inspectErr := eng.ContainerImageID(desired.ContainerName)
 	if inspectErr != nil {
-		return "", "", nil
+		return externalURLRepair{}, nil
 	}
-	if !IsActiveContainerStatus(status) && !checks.PortAvailable(desired.WebUIPortOrDefault()) {
-		return "", "", nil
-	}
-	imageID, inspectErr = eng.ContainerImageID(desired.ContainerName)
-	if inspectErr != nil {
-		return "", "", nil
-	}
+	repair.ImageID = imageID
 	// The replacement mounts the saved volume names, which a hand-made or
 	// older container may not use. Podman would create a missing one empty,
 	// so stop exactly as a full replacement does.
 	for _, volume := range []string{desired.HomeVolumeName(), desired.StateVolumeName()} {
 		present, volumeErr := eng.VolumeExists(volume)
 		if volumeErr != nil {
-			return "", "", nil
+			return externalURLRepair{}, nil
 		}
 		if !present {
-			return "", "", classifyError(
+			return externalURLRepair{}, classifyError(
 				ErrMissingStorage,
 				fmt.Errorf("saved data volume %q is missing; automatic repair stopped to avoid creating an empty replacement", volume),
 			)
 		}
 	}
-	return reason, imageID, nil
+	return repair, nil
+}
+
+// externalURLRepair describes a sign-in address replacement. PortChanged means
+// the container still uses another port, so the saved port was checked
+// without stopping it.
+type externalURLRepair struct {
+	Reason      string
+	ImageID     string
+	PortChanged bool
+}
+
+// portReleaseWait bounds how long a stopped container's port may stay bound:
+// rootless Podman and Podman machines can release it shortly after stop.
+var portReleaseWait = 5 * time.Second
+
+func waitForPortRelease(port string) bool {
+	deadline := time.Now().Add(portReleaseWait)
+	for {
+		if checks.PortAvailable(port) {
+			return true
+		}
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(250 * time.Millisecond)
+	}
 }
 
 // repairExternalURL replaces a container whose saved settings already match
@@ -268,32 +306,34 @@ func externalURLDriftRepair(eng InstanceEnsureEngine, desired *config.Config) (r
 // is nothing to save; externalURLDriftRepair has already confirmed the saved
 // volumes exist.
 //
-// A running container holds its own port, so the port can only be checked
-// once it is stopped. If another app holds it then, the replacement and the
-// rollback would both fail after the old container was removed; the
-// container is started again and left in place instead.
-func repairExternalURL(eng InstanceEnsureEngine, desired *config.Config, imageID, reason string, opts EnsureInstanceOptions) (EnsureInstanceResult, error) {
+// A running container on the saved port holds that port, so it can only be
+// checked once the container is stopped. If another app holds it then, the
+// replacement and the rollback would both fail after the old container was
+// removed; the container is started again and left in place instead.
+func repairExternalURL(eng InstanceEnsureEngine, desired *config.Config, repair externalURLRepair, opts EnsureInstanceOptions) (EnsureInstanceResult, error) {
 	pinned := *desired
-	pinned.Image = imageID
-	wasRunning, err := EnsureStopped(eng, desired.ContainerName)
-	if err != nil {
-		return EnsureInstanceResult{}, err
-	}
-	if !checks.PortAvailable(desired.WebUIPortOrDefault()) {
-		if !wasRunning {
-			return EnsureInstanceResult{}, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault()))
-		}
-		opts.stage("start_container")
-		if _, err := EnsureStarted(eng, desired.ContainerName); err != nil {
+	pinned.Image = repair.ImageID
+	if !repair.PortChanged {
+		wasRunning, err := EnsureStopped(eng, desired.ContainerName)
+		if err != nil {
 			return EnsureInstanceResult{}, err
 		}
-		return EnsureInstanceResult{Action: "unchanged"}, nil
+		if !waitForPortRelease(desired.WebUIPortOrDefault()) {
+			if !wasRunning {
+				return EnsureInstanceResult{}, classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s", desired.WebUIPortOrDefault()))
+			}
+			opts.stage("start_container")
+			if _, err := EnsureStarted(eng, desired.ContainerName); err != nil {
+				return EnsureInstanceResult{}, err
+			}
+			return EnsureInstanceResult{Action: "unchanged"}, nil
+		}
 	}
 	opts.stage("replace_container")
 	if err := Recreate(eng, &pinned, &pinned); err != nil {
 		return EnsureInstanceResult{}, err
 	}
-	return EnsureInstanceResult{Changed: true, Action: "recreated", Reason: reason}, nil
+	return EnsureInstanceResult{Changed: true, Action: "recreated", Reason: repair.Reason}, nil
 }
 
 func imageStored(eng InstanceEnsureEngine, image string) bool {

@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
@@ -363,25 +364,73 @@ func TestEnsureInstanceKeepsStoppedDriftedContainerWhenPortIsTaken(t *testing.T)
 	}
 }
 
-func TestEnsureInstanceLeavesSavedPortChangeForUpdate(t *testing.T) {
+func TestEnsureInstanceAppliesSavedPortChange(t *testing.T) {
 	desired := desiredTestConfig(t)
 	current := *desired
 	// `config set web_ui_port` saved a new port; the container still runs on
-	// the old one. Only `update` applies saved settings.
+	// the old one. Starting it as is would leave the app on the old port while
+	// ensure waits on the saved one.
 	eng := &fakeEnsureEngine{
 		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"OMNIDECK_EXTERNAL_URL=http://localhost:1"}, imageID: "sha256:running"},
 		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
 	}
-	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
-	if err != nil || result.Action != "unchanged" || result.Reason != "" {
+	result, err := EnsureInstance(eng, &current, desired, func() error {
+		t.Fatal("applying the saved port must not rewrite config")
+		return nil
+	}, EnsureInstanceOptions{})
+	if err != nil || result.Action != "recreated" || result.Reason != EnsureReasonExternalURLMismatch {
 		t.Fatalf("result=%#v err=%v", result, err)
 	}
+	if len(eng.runOptions) != 1 || eng.runOptions[0].WebUIPort != desired.WebUIPortOrDefault() || eng.runOptions[0].Image != "sha256:running" {
+		t.Fatalf("runs = %+v, want one on the saved port from the running image", eng.runOptions)
+	}
+}
+
+func TestEnsureInstanceRefusesSavedPortChangeWhenThePortIsTaken(t *testing.T) {
+	desired := desiredTestConfig(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:"+desired.WebUIPortOrDefault())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"OMNIDECK_EXTERNAL_URL=http://localhost:1"}, imageID: "sha256:running"},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	_, err = EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if !errors.Is(err, ErrPortInUse) {
+		t.Fatalf("err = %v, want ErrPortInUse", err)
+	}
 	if eng.stopped != 0 || eng.removed != 0 || len(eng.runOptions) != 0 {
-		t.Fatalf("stopped=%d removed=%d runs=%d; a saved port change is not drift", eng.stopped, eng.removed, len(eng.runOptions))
+		t.Fatalf("stopped=%d removed=%d runs=%d; the container must be left untouched", eng.stopped, eng.removed, len(eng.runOptions))
+	}
+}
+
+// Rootless Podman and Podman machines can release a stopped container's port
+// shortly after stop returns; the repair waits for it instead of giving up.
+func TestEnsureInstanceWaitsForAStoppedContainersPort(t *testing.T) {
+	desired := desiredTestConfig(t)
+	listener, err := net.Listen("tcp", "127.0.0.1:"+desired.WebUIPortOrDefault())
+	if err != nil {
+		t.Fatal(err)
+	}
+	time.AfterFunc(300*time.Millisecond, func() { listener.Close() })
+	current := *desired
+	eng := &fakeEnsureEngine{
+		fakeContainerEngine: fakeContainerEngine{exists: true, status: "running", env: []string{"PORT=8080"}, imageID: "sha256:running"},
+		volumes:             map[string]bool{current.HomeVolumeName(): true, current.StateVolumeName(): true},
+	}
+	result, err := EnsureInstance(eng, &current, desired, func() error { return nil }, EnsureInstanceOptions{})
+	if err != nil || result.Action != "recreated" || len(eng.runOptions) != 1 {
+		t.Fatalf("result=%#v err=%v runs=%d", result, err, len(eng.runOptions))
 	}
 }
 
 func TestEnsureInstanceKeepsRunningDriftedContainerWhenPortIsTaken(t *testing.T) {
+	original := portReleaseWait
+	t.Cleanup(func() { portReleaseWait = original })
+	portReleaseWait = 0
 	desired := desiredTestConfig(t)
 	listener, err := net.Listen("tcp", "127.0.0.1:"+desired.WebUIPortOrDefault())
 	if err != nil {

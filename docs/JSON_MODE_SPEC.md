@@ -526,11 +526,14 @@ instance's update moved is not followed), reuses the volumes it mounts, and
 leaves the saved settings unchanged. If the container or its volumes cannot
 be inspected, ensure leaves it alone and starts it as usual; if a saved volume
 is missing, it stops with an error naming that volume rather than let Podman
-create an empty one. An address on a different port than the saved one is a
-saved `config set` port change that only `update` applies, so ensure leaves
-that container alone and starts it as usual. A stopped container is left in
-place when another app holds its port; a running one is stopped to check the
-port and, if another app holds it, started again and reported `unchanged`.
+create an empty one. An address on a different port than the saved one is
+usually a saved `config set` port change: ensure applies it the same way,
+from the running image, after checking that the saved port is free while the
+old container keeps running; if another app holds it, ensure fails with
+`PORT_IN_USE` and leaves the container unchanged. Otherwise a stopped container
+is left in place when another app holds its port; a running one is stopped to
+check the port (waiting a few seconds for the runtime to release it) and, if
+another app still holds it, started again and reported `unchanged`.
 Saved data volumes are never removed; if one is missing, ensure stops
 with `MISSING_STORAGE` rather than create an empty replacement. Invalid flag
 values are `INVALID_SETTING`. A container name or data volume that belongs to
