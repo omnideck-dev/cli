@@ -84,7 +84,7 @@ func desiredEnvironmentConfig(current *config.Config) (*config.Config, error) {
 		desired.StateVolume = environmentStateVolumeFlag
 	}
 	desired.LayoutVersion = config.CurrentContainerLayout
-	if err := workflow.ValidateInstanceConfig(desired); err != nil {
+	if err := workflow.ValidateInstanceChange(current, desired); err != nil {
 		return nil, setupValidationError(err)
 	}
 	if desired.InstalledAt.IsZero() {
@@ -105,13 +105,20 @@ func loadEnvironmentConfig(path string) (*config.Config, error) {
 	return nil, fmt.Errorf("reading the saved environment: %w", err)
 }
 
-func validateEnvironmentPort(desired *config.Config) error {
+// validateEnvironmentOwnership refuses a container, data volume, or port that
+// belongs to another saved installation. The instance being ensured is
+// skipped by its instance name: skipping by container name would let a new
+// instance adopt another installation's container and data.
+func validateEnvironmentOwnership(desired *config.Config) error {
 	instances, err := config.ListInstances()
 	if err != nil {
 		return fmt.Errorf("checking existing installations: %w", err)
 	}
+	if err := workflow.CheckInstanceOwnership(instances, nameFlag, desired); err != nil {
+		return err
+	}
 	for _, instance := range instances {
-		if instance.Config == nil || instance.Config.ContainerName == desired.ContainerName {
+		if instance.Config == nil || instance.Name == nameFlag {
 			continue
 		}
 		if instance.Config.WebUIPortOrDefault() == desired.WebUIPortOrDefault() {
@@ -153,10 +160,10 @@ func environmentJSONError(err error) *jsonCmdError {
 	if errors.Is(err, workflow.ErrExternalURL) {
 		return newJSONError(ErrCodeInternal, message).withHint("The update was applied and saved. Retry it; if the address is still wrong, run omnideck doctor.")
 	}
-	if strings.Contains(lower, "another omnideck installation already uses the name") {
-		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name. That name belongs to an existing Omnideck installation; do not remove it.")
+	if errors.Is(err, workflow.ErrInstanceNameTaken) {
+		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name. That name or its data belongs to an existing Omnideck installation; do not remove it.")
 	}
-	if errors.Is(err, workflow.ErrContainerConflict) || strings.Contains(lower, "already uses the name") {
+	if errors.Is(err, workflow.ErrContainerConflict) {
 		return newJSONError(ErrCodeContainerConflict, message).withHint("Choose another instance name or remove the unrelated container.")
 	}
 	return newJSONError(ErrCodeInternal, message)
@@ -202,7 +209,7 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	}
 	desired, err := desiredEnvironmentConfig(current)
 	if err == nil {
-		err = validateEnvironmentPort(desired)
+		err = validateEnvironmentOwnership(desired)
 	}
 	if err != nil {
 		if jsonFlag {
@@ -227,6 +234,7 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	if ensureErr != nil {
 		return stream.fail(ensureErr)
 	}
+	stream.startup()
 	if err := workflow.WaitForApplication(cmd.Context(), eng, desired); err != nil {
 		return stream.failStartup(err)
 	}
@@ -256,27 +264,36 @@ func newEnsureStream(json bool) *ensureStream {
 
 func (s *ensureStream) options() workflow.EnsureInstanceOptions {
 	return workflow.EnsureInstanceOptions{
-		OnStage: func(stage string) {
-			// A repeated stage (repair announces check_environment before
-			// EnsureInstance does) continues the running one.
-			if s.started && s.lastStage == stage {
-				return
-			}
-			if s.nd != nil && s.started {
-				s.nd.done(s.lastStage)
-			}
-			s.lastStage = stage
-			s.started = true
-			if s.nd != nil {
-				s.nd.start(stage)
-			}
-		},
+		OnStage: s.stage,
 		OnPullProgress: func(line string) {
 			if s.nd != nil {
 				s.nd.progress("pull_image", line)
 			}
 		},
 	}
+}
+
+// stage finishes the running stage and starts the next one.
+func (s *ensureStream) stage(stage string) {
+	// A repeated stage (repair announces check_environment before
+	// EnsureInstance does) continues the running one.
+	if s.started && s.lastStage == stage {
+		return
+	}
+	if s.nd != nil && s.started {
+		s.nd.done(s.lastStage)
+	}
+	s.lastStage = stage
+	s.started = true
+	if s.nd != nil {
+		s.nd.start(stage)
+	}
+}
+
+// startup starts the stage that spans the wait for the application to
+// answer, so the last workflow stage is not left open during it.
+func (s *ensureStream) startup() {
+	s.stage("startup")
 }
 
 // fail ends the stream with err on the stage that was running, or returns
@@ -297,6 +314,8 @@ func (s *ensureStream) failStartup(err error) error {
 	if s.nd == nil {
 		return startupTextError(err)
 	}
+	// Every error event follows a start for the same stage.
+	s.startup()
 	return s.nd.fail("startup", environmentJSONError(err))
 }
 

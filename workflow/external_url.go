@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/omnideck-dev/cli/config"
@@ -63,14 +64,34 @@ func normalizeExternalURL(value string) string {
 	return strings.TrimSuffix(strings.TrimSpace(value), "/")
 }
 
+// PortChanged reports whether a mismatched sign-in address names a different
+// port than the browser address. `config set` only saves, so this is a port
+// change waiting for `update`, not a wrong address.
+func (c ExternalURLCheck) PortChanged() bool {
+	if c.State != ExternalURLMismatch {
+		return false
+	}
+	actual, actualErr := url.Parse(normalizeExternalURL(c.Actual))
+	expected, expectedErr := url.Parse(c.Expected)
+	if actualErr != nil || expectedErr != nil || actual.Port() == "" {
+		return false
+	}
+	return actual.Port() != expected.Port()
+}
+
 // ExternalURLBeforeReplace records a container's sign-in address before an
 // update replaces it. An inspection failure (including a missing container)
 // is reported as unknown rather than stopping the update: the replacement
-// writes the correct value anyway.
+// writes the correct value anyway. An address that differs only because the
+// update applies a saved port change was right for its container, so it is
+// not reported as corrected.
 func ExternalURLBeforeReplace(eng ContainerEnvEngine, cfg *config.Config) ExternalURLCheck {
 	check, err := CheckExternalURL(eng, cfg)
 	if err != nil {
 		return ExternalURLCheck{State: ExternalURLUnknown, Expected: cfg.BrowserURL()}
+	}
+	if check.PortChanged() {
+		check.State = ExternalURLOK
 	}
 	return check
 }

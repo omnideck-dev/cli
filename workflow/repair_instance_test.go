@@ -108,3 +108,18 @@ func TestRepairInstanceRemovesTheContainerWhenSavingFails(t *testing.T) {
 		t.Fatalf("returned layout = %d, want the unchanged saved settings", repaired.LayoutVersion)
 	}
 }
+
+// Older CLIs saved shared memory above memory. Repair keeps those settings,
+// so it must not refuse them; Doctor offers it as the guided fix.
+func TestRepairInstanceAcceptsSavedSharedMemoryAboveMemory(t *testing.T) {
+	saved := desiredTestConfig(t)
+	saved.Memory, saved.ShmSize = "1g", "2g"
+	eng := &fakeEnsureEngine{
+		volumes:     map[string]bool{saved.HomeVolumeName(): true, saved.StateVolumeName(): true},
+		localImages: map[string]bool{saved.Image: true},
+	}
+	result, _, err := RepairInstance(eng, saved, func(*config.Config) error { return nil }, EnsureInstanceOptions{})
+	if err != nil || result.Action != "repaired" {
+		t.Fatalf("result=%#v err=%v", result, err)
+	}
+}

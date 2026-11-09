@@ -187,8 +187,11 @@ func TestRunUpdateJSONReportsExternalURLChange(t *testing.T) {
 		wantPrevious string
 	}{
 		{"set", []string{"PORT=8080"}, "set", ""},
-		{"corrected", []string{"OMNIDECK_EXTERNAL_URL=http://localhost:9999"}, "corrected", "http://localhost:9999"},
+		{"corrected", []string{"OMNIDECK_EXTERNAL_URL=http://127.0.0.1:2339"}, "corrected", "http://127.0.0.1:2339"},
 		{"confirmed", []string{"OMNIDECK_EXTERNAL_URL=http://localhost:2339"}, "confirmed", ""},
+		// A saved `config set web_ui_port` the update now applies: the old
+		// address was right for its container, so nothing was corrected.
+		{"port change", []string{"OMNIDECK_EXTERNAL_URL=http://localhost:2337"}, "confirmed", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
@@ -282,7 +285,7 @@ func TestRunUpdatePlainReportsExternalURL(t *testing.T) {
 	eng := &mockEngine{
 		containerExists: map[string]bool{"work": true},
 		containerStatus: map[string]string{"work": "running"},
-		env:             map[string][]string{"work": {"OMNIDECK_EXTERNAL_URL=http://localhost:9999"}},
+		env:             map[string][]string{"work": {"OMNIDECK_EXTERNAL_URL=http://127.0.0.1:2339"}},
 	}
 	var runErr error
 	out := captureStdout(t, func() {
@@ -291,7 +294,7 @@ func TestRunUpdatePlainReportsExternalURL(t *testing.T) {
 	if runErr != nil {
 		t.Fatalf("runUpdatePlain: %v\noutput=%s", runErr, out)
 	}
-	if !strings.Contains(out, "MCP sign-in address... corrected http://localhost:9999 → http://localhost:2339") {
+	if !strings.Contains(out, "MCP sign-in address... corrected http://127.0.0.1:2339 → http://localhost:2339") {
 		t.Fatalf("plain output missing sign-in address outcome:\n%s", out)
 	}
 }
