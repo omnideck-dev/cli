@@ -52,7 +52,7 @@ func runInstanceRemove(_ *cobra.Command, args []string) error {
 		if jsonFlag {
 			return writeJSONError(nameErr)
 		}
-		return nameErr
+		return fmt.Errorf("%s\n%s", nameErr.payload.Message, nameErr.payload.Hint)
 	}
 	instance, err := savedInstanceNamed(name)
 	if err != nil {
@@ -328,7 +328,7 @@ func removeInstanceName(args []string) (string, *jsonCmdError) {
 	case positional == "" && nameFlag == "":
 		return "", newJSONError(ErrCodeMissingRequiredFlag, "remove requires the instance to remove: omnideck remove NAME, or --name NAME").withHint("Run omnideck list to see saved instances.")
 	case positional != "" && nameFlag != "" && positional != nameFlag:
-		return "", newJSONError(ErrCodeMissingRequiredFlag, fmt.Sprintf("remove was given two different instances (%q and --name %q); pass only one", positional, nameFlag))
+		return "", newJSONError(ErrCodeMissingRequiredFlag, fmt.Sprintf("remove was given two different instances (%q and --name %q); pass only one", positional, nameFlag)).withHint("Pass the instance once, as NAME or --name.")
 	case positional != "":
 		return positional, nil
 	default:

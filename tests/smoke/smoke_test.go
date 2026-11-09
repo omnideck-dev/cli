@@ -466,15 +466,17 @@ func TestRemoveJSONAcceptsNameFlag(t *testing.T) {
 	env := []string{"OMNIDECK_CONFIG_DIR=" + configDir}
 
 	for _, tc := range []struct {
-		name string
-		args []string
-		want string
+		name        string
+		args        []string
+		want        string
+		wantMessage string
 	}{
-		// Reaching the destructive-flag check proves --name selected "solo".
-		{"name flag", []string{"remove", "--name", "solo", "--json"}, "MISSING_REQUIRED_FLAG"},
-		{"unknown name flag", []string{"remove", "--name", "ghost", "--json", "--yes", "--keep-volumes"}, "NOT_INSTALLED"},
-		{"no name", []string{"remove", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG"},
-		{"two names", []string{"remove", "solo", "--name", "other", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG"},
+		// Failing on the missing --yes, not the missing name, proves --name
+		// selected "solo".
+		{"name flag", []string{"remove", "--name", "solo", "--json"}, "MISSING_REQUIRED_FLAG", "--yes is required"},
+		{"unknown name flag", []string{"remove", "--name", "ghost", "--json", "--yes", "--keep-volumes"}, "NOT_INSTALLED", "ghost"},
+		{"no name", []string{"remove", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG", "requires the instance"},
+		{"two names", []string{"remove", "solo", "--name", "other", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG", "two different instances"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			stdout, stderr, code := runEnv(env, tc.args...)
@@ -483,11 +485,12 @@ func TestRemoveJSONAcceptsNameFlag(t *testing.T) {
 			}
 			var payload struct {
 				Error struct {
-					Code string `json:"code"`
+					Code    string `json:"code"`
+					Message string `json:"message"`
 				} `json:"error"`
 			}
-			if err := json.Unmarshal([]byte(stdout), &payload); err != nil || payload.Error.Code != tc.want {
-				t.Fatalf("error code = %q (err %v), want %s\n%s", payload.Error.Code, err, tc.want, stdout)
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil || payload.Error.Code != tc.want || !strings.Contains(payload.Error.Message, tc.wantMessage) {
+				t.Fatalf("error = %+v (err %v), want %s mentioning %q\n%s", payload.Error, err, tc.want, tc.wantMessage, stdout)
 			}
 		})
 	}
