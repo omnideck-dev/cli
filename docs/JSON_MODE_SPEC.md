@@ -456,6 +456,11 @@ The instance is the positional `<name>` or `--name`, like every other instance
 command. Removal never picks one implicitly: giving neither, or two different
 names, is `MISSING_REQUIRED_FLAG`.
 
+If another saved instance uses the same container, the container is left
+running and only this instance's settings are removed. `--delete-volumes` on a
+data volume another saved instance uses is `CONTAINER_CONFLICT` and removes
+nothing.
+
 `remove` is destructive, so under `--json` these flags are required, and a
 missing one is `MISSING_REQUIRED_FLAG` before any runtime call:
 

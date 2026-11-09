@@ -38,6 +38,10 @@ type RemoveInstanceOptions struct {
 	// only the phases that actually apply for these options fire. Callers
 	// that don't need progress reporting can leave this nil.
 	OnStage func(stage string)
+	// ListInstances returns every saved instance, so removal never deletes
+	// a container or data volume another one still uses. Nil uses
+	// config.ListInstances.
+	ListInstances func() ([]config.InstanceInfo, error)
 }
 
 func (o RemoveInstanceOptions) reportStage(stage string) {
@@ -92,6 +96,36 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 		}
 	}
 
+	// An earlier ensure could save a second instance file for another
+	// installation's container and data. Removing this record must not take
+	// them from the other one: its data is never deleted, and a shared
+	// container is left in place while only this record is removed.
+	list := opts.ListInstances
+	if list == nil {
+		list = config.ListInstances
+	}
+	instances, err := list()
+	if err != nil {
+		return result, fmt.Errorf("checking other saved instances before removal: %w", err)
+	}
+	sharedContainer := false
+	for _, other := range instances {
+		if other.Config == nil || sameInstanceFile(other.Path, instance.Path) {
+			continue
+		}
+		if other.Config.ContainerName == cfg.ContainerName {
+			sharedContainer = true
+		}
+		if !opts.DeleteData {
+			continue
+		}
+		for _, volume := range volumes {
+			if volume == other.Config.HomeVolumeName() || volume == other.Config.StateVolumeName() {
+				return result, classifyError(ErrInstanceNameTaken, fmt.Errorf("another Omnideck installation (%s) also uses the data volume %q, so nothing was removed; remove this instance and keep its data instead", other.Name, volume))
+			}
+		}
+	}
+
 	existingVolumes := make([]string, 0, len(volumes))
 	if opts.DeleteData {
 		for _, volume := range volumes {
@@ -105,12 +139,14 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 		}
 	}
 
-	opts.reportStage("stop_container")
-	stopped, err := EnsureStopped(eng, cfg.ContainerName)
-	if err != nil {
-		return result, err
+	if !sharedContainer {
+		opts.reportStage("stop_container")
+		stopped, err := EnsureStopped(eng, cfg.ContainerName)
+		if err != nil {
+			return result, err
+		}
+		result.ContainerStopped = stopped
 	}
-	result.ContainerStopped = stopped
 
 	if opts.DeleteData && opts.BackupData && len(existingVolumes) > 0 {
 		opts.reportStage("backup")
@@ -121,12 +157,14 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 		result.BackupPath = backupPath
 	}
 
-	opts.reportStage("remove_container")
-	removed, err := EnsureRemoved(eng, cfg.ContainerName)
-	if err != nil {
-		return result, fmt.Errorf("the container could not be removed, so its saved settings were kept: %w", err)
+	if !sharedContainer {
+		opts.reportStage("remove_container")
+		removed, err := EnsureRemoved(eng, cfg.ContainerName)
+		if err != nil {
+			return result, fmt.Errorf("the container could not be removed, so its saved settings were kept: %w", err)
+		}
+		result.ContainerRemoved = removed
 	}
-	result.ContainerRemoved = removed
 
 	if len(existingVolumes) > 0 {
 		opts.reportStage("delete_volumes")
@@ -142,6 +180,16 @@ func RemoveInstance(eng InstanceRemovalEngine, instance config.InstanceInfo, opt
 		return result, fmt.Errorf("removing saved instance settings: %w", err)
 	}
 	return result, nil
+}
+
+// sameInstanceFile reports whether a and b name the same settings file.
+func sameInstanceFile(a, b string) bool {
+	if a == b {
+		return true
+	}
+	aInfo, aErr := os.Stat(a)
+	bInfo, bErr := os.Stat(b)
+	return aErr == nil && bErr == nil && os.SameFile(aInfo, bInfo)
 }
 
 func validateRemovalConfigPath(path string) error {

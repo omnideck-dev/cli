@@ -293,6 +293,9 @@ func runRemoveJSON(eng engine.Engine, instance config.InstanceInfo, opts workflo
 		if errors.Is(err, context.Canceled) {
 			return nd.fail(lastStage, newJSONError(ErrCodeCancelled, err.Error()))
 		}
+		if errors.Is(err, workflow.ErrInstanceNameTaken) {
+			return nd.fail(lastStage, environmentJSONError(err))
+		}
 		return nd.fail(lastStage, err)
 	}
 	nd.done(lastStage)
