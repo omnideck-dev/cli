@@ -92,6 +92,45 @@ test('requires a reason for release-note:none', () => {
   assert.deepEqual(errors, []);
 });
 
+test('Dependabot dependency-only updates need no release-note decision', () => {
+  const update = {
+    title: 'chore(deps): bump the go-dependencies group with 2 updates',
+    author: 'dependabot[bot]',
+    changedFiles: [
+      { status: 'M', path: 'go.mod' },
+      { status: 'M', path: 'go.sum' },
+      { status: 'M', path: '.github/workflows/release.yml' },
+    ],
+  };
+  assert.deepEqual(validatePullRequest(update), []);
+
+  // The title rule still applies.
+  assert.match(
+    validatePullRequest({ ...update, title: 'Bump x from 1 to 2' }).join('\n'),
+    /Conventional Commits/,
+  );
+  // Any other path needs the usual decision.
+  assert.match(
+    validatePullRequest({
+      ...update,
+      changedFiles: [...update.changedFiles, { status: 'M', path: 'cmd/root.go' }],
+    }).join('\n'),
+    /Add a release-notes/,
+  );
+  // Only the Dependabot app account is exempt.
+  assert.match(
+    validatePullRequest({ ...update, author: 'someone' }).join('\n'),
+    /Add a release-notes/,
+  );
+  assert.match(
+    validatePullRequest({
+      ...update,
+      changedFiles: [{ status: 'M', path: '.github/workflows/nested/x.yml' }],
+    }).join('\n'),
+    /Add a release-notes/,
+  );
+});
+
 test('features and breaking changes cannot opt out of release notes', () => {
   const featureErrors = validatePullRequest({
     title: 'feat(chat): add folders',

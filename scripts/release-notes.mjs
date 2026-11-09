@@ -110,6 +110,28 @@ function releaseNoteSection(body) {
   return section.join('\n').trim();
 }
 
+// Dependabot rewrites the pull request body on every rebase, so it cannot keep
+// a release-note:none reason. Its version bumps that touch only these paths
+// have no user-visible behavior of their own; anything else it changes still
+// needs an explicit decision.
+export const DEPENDABOT_LOGIN = 'dependabot[bot]';
+
+function isDependencyOnlyPath(path) {
+  return (
+    path === 'go.mod' ||
+    path === 'go.sum' ||
+    /^\.github\/workflows\/[^/]+\.ya?ml$/.test(path)
+  );
+}
+
+export function isDependabotDependencyUpdate(author, changedFiles) {
+  return (
+    author === DEPENDABOT_LOGIN &&
+    changedFiles.length > 0 &&
+    changedFiles.every(({ path }) => isDependencyOnlyPath(path))
+  );
+}
+
 function isFragmentPath(path) {
   return (
     path.startsWith('release-notes.d/') &&
@@ -119,7 +141,7 @@ function isFragmentPath(path) {
 }
 
 export function validatePullRequest(
-  { title, body = '', labels = [], changedFiles = [] },
+  { title, body = '', labels = [], changedFiles = [], author = '' },
   { readFragment = (path) => readFileSync(join(repositoryRoot, path), 'utf8') } = {},
 ) {
   const errors = [];
@@ -128,6 +150,9 @@ export function validatePullRequest(
     errors.push(
       'PR title must use Conventional Commits, for example feat(desktop): add native zoom',
     );
+  }
+  if (isDependabotDependencyUpdate(author, changedFiles)) {
+    return errors;
   }
 
   const fragments = changedFiles.filter(
@@ -257,6 +282,7 @@ function validatePrCommand() {
     body: event.pull_request.body || '',
     labels: event.pull_request.labels.map((label) => label.name),
     changedFiles: changedFilesForEvent(event.pull_request),
+    author: event.pull_request.user?.login || '',
   });
 
   if (errors.length) {
