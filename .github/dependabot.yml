@@ -1,4 +1,6 @@
 version: 2
+# Titles must pass the release-note policy's Conventional Commits check; see
+# docs/release-notes.md for how Dependabot updates are exempt from fragments.
 updates:
   - package-ecosystem: gomod
     directory: /
@@ -8,8 +10,8 @@ updates:
       time: "09:00"
       timezone: America/Chicago
     open-pull-requests-limit: 10
-    labels:
-      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
     groups:
       go-dependencies:
         patterns:
@@ -23,8 +25,8 @@ updates:
       time: "09:15"
       timezone: America/Chicago
     open-pull-requests-limit: 10
-    labels:
-      - dependencies
+    commit-message:
+      prefix: "chore(deps)"
     groups:
       github-actions:
         patterns:

@@ -15,6 +15,12 @@ check accepts exactly one of:
 
 Features and breaking changes cannot use `release-note:none`.
 
+Dependabot pull requests that change only `go.mod`, `go.sum`, or files directly
+under `.github/workflows/` need neither. Dependabot rewrites the pull request
+body on every rebase, so it cannot keep a `None:` reason, and those version
+bumps have no user-visible behavior of their own. Their titles must still use
+Conventional Commits; any other file they change needs the usual decision.
+
 ## Pull request titles
 
 The pull request title is the canonical machine-readable description and must
