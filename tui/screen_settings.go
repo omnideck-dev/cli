@@ -78,8 +78,9 @@ func (m *AppModel) validateSettingFields() error {
 		}
 	}
 	// Name memory only when it is the one being changed, so the error points
-	// at the field the person edited.
-	changed := "shm_size"
+	// at the field the person edited. As with `config set`, a pair saved by
+	// an older CLI is only checked once one of them is edited.
+	changed := ""
 	for _, field := range m.settingFields {
 		if field.Changed && field.Key == "shm_size" {
 			changed = "shm_size"
@@ -88,6 +89,9 @@ func (m *AppModel) validateSettingFields() error {
 		if field.Changed && field.Key == "memory" {
 			changed = "memory"
 		}
+	}
+	if changed == "" {
+		return nil
 	}
 	return workflow.CheckMemoryLimits(&candidate, changed)
 }

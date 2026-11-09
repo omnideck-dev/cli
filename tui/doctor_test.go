@@ -429,3 +429,20 @@ func TestSettingsNameTheMemoryFieldThatChanged(t *testing.T) {
 		t.Fatalf("err = %v, want it to name memory", err)
 	}
 }
+
+// Older CLIs saved shared memory above memory. Like `config set`, Settings
+// only applies the rule once memory or shm_size is edited.
+func TestSettingsAcceptUnrelatedEditsToOlderMemorySettings(t *testing.T) {
+	m := NewAppModel(&mockEngine{name: "podman"}, []config.InstanceInfo{{
+		Name:   "work",
+		Config: &config.Config{ContainerName: "work", Memory: "1g", ShmSize: "2g", WebUIPort: "2337", Image: "example:test"},
+	}})
+	m.settingFields = []settingField{{Key: "image", Value: "example:v2", Changed: true}}
+	if err := m.validateSettingFields(); err != nil {
+		t.Fatalf("an unrelated edit was rejected: %v", err)
+	}
+	m.settingFields = []settingField{{Key: "shm_size", Value: "3g", Changed: true}}
+	if err := m.validateSettingFields(); err == nil {
+		t.Fatal("editing shm_size above memory was accepted")
+	}
+}
