@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"errors"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -153,5 +154,23 @@ func TestRecreateAndSaveRestoresContainerWhenSaveFails(t *testing.T) {
 	}
 	if len(eng.runOptions) != 2 || eng.runOptions[0].Memory != "4g" || eng.runOptions[1].Memory != oldCfg.Memory {
 		t.Fatalf("run sequence = %#v", eng.runOptions)
+	}
+}
+
+// Settings changes go through RecreateAndSave too; they must record the
+// wiring the new container was built with, or Desktop's next ensure
+// replaces it again.
+func TestRecreateAndSaveRecordsTheCurrentLayout(t *testing.T) {
+	oldCfg := config.DefaultConfig()
+	oldCfg.LayoutVersion = 1
+	newCfg := *oldCfg
+	newCfg.WebUIPort = "2400"
+	path := filepath.Join(t.TempDir(), "work.yaml")
+	if err := RecreateAndSave(&fakeContainerEngine{exists: true, status: "running"}, oldCfg, &newCfg, path); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := config.Load(path)
+	if err != nil || saved.LayoutVersion != config.CurrentContainerLayout || newCfg.LayoutVersion != config.CurrentContainerLayout {
+		t.Fatalf("saved layout = %+v err = %v, in memory = %d", saved, err, newCfg.LayoutVersion)
 	}
 }

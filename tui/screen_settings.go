@@ -79,7 +79,7 @@ func (m *AppModel) validateSettingFields() error {
 	}
 	// Name memory only when it is the one being changed, so the error points
 	// at the field the person edited.
-	changed := "shm_size"
+	changed := ""
 	for _, field := range m.settingFields {
 		if field.Changed && field.Key == "shm_size" {
 			changed = "shm_size"

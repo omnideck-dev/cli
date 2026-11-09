@@ -65,8 +65,12 @@ func ApplySetting(cfg *config.Config, key, value string) error {
 // container is next created, so older saved settings stay editable.
 //
 // changed is the setting the caller is changing ("memory" or "shm_size"), so
-// the error names it; any other value names shm_size.
+// the error names it. Any other value means neither changed: a pair saved by
+// an older CLI is only judged once one of them is edited.
 func CheckMemoryLimits(cfg *config.Config, changed string) error {
+	if changed != "memory" && changed != "shm_size" {
+		return nil
+	}
 	memoryMB, memoryOK := checks.MemorySizeMB(cfg.Memory)
 	shmMB, shmOK := checks.MemorySizeMB(cfg.ShmSize)
 	if !memoryOK || !shmOK || shmMB <= memoryMB {

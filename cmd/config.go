@@ -98,7 +98,7 @@ func runConfigSet(_ *cobra.Command, args []string) error {
 	}
 	candidate := *LoadedConfig
 	err := workflow.ApplySetting(&candidate, key, value)
-	if err == nil && (key == "memory" || key == "shm_size") {
+	if err == nil {
 		err = workflow.CheckMemoryLimits(&candidate, key)
 	}
 	if err != nil {
