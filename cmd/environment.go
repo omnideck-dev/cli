@@ -107,18 +107,40 @@ func loadEnvironmentConfig(path string) (*config.Config, error) {
 
 // validateEnvironmentOwnership refuses a container, data volume, or port that
 // belongs to another saved installation. The instance being ensured is
-// skipped by its instance name: skipping by container name would let a new
-// instance adopt another installation's container and data.
-func validateEnvironmentOwnership(desired *config.Config) error {
+// recognised by its settings file, not its container name: skipping by
+// container name would let a new instance adopt another installation's
+// container and data, and an exact name match misses `--name Desktop` for
+// desktop.yaml on a case-insensitive file system.
+//
+// An existing instance's container is fixed, so its ownership is only checked
+// when its data volumes change; installations that already share data must
+// still start.
+func validateEnvironmentOwnership(current, desired *config.Config) error {
 	instances, err := config.ListInstances()
 	if err != nil {
 		return fmt.Errorf("checking existing installations: %w", err)
 	}
-	if err := workflow.CheckInstanceOwnership(instances, nameFlag, desired); err != nil {
-		return err
+	self := nameFlag
+	for _, instance := range instances {
+		if sameFile(instance.Path, config.InstancePath(nameFlag)) {
+			self = instance.Name
+			break
+		}
+	}
+	volumesChanged := current == nil ||
+		current.HomeVolumeName() != desired.HomeVolumeName() ||
+		current.StateVolumeName() != desired.StateVolumeName()
+	if volumesChanged {
+		if err := workflow.CheckInstanceOwnership(instances, self, desired); err != nil {
+			return err
+		}
 	}
 	for _, instance := range instances {
-		if instance.Config == nil || instance.Name == nameFlag {
+		if instance.Config == nil || instance.Name == self {
+			continue
+		}
+		// A second record for this same container is not a competing port.
+		if current != nil && instance.Config.ContainerName == current.ContainerName {
 			continue
 		}
 		if instance.Config.WebUIPortOrDefault() == desired.WebUIPortOrDefault() {
@@ -126,6 +148,13 @@ func validateEnvironmentOwnership(desired *config.Config) error {
 		}
 	}
 	return nil
+}
+
+// sameFile reports whether a and b name the same existing file.
+func sameFile(a, b string) bool {
+	aInfo, aErr := os.Stat(a)
+	bInfo, bErr := os.Stat(b)
+	return aErr == nil && bErr == nil && os.SameFile(aInfo, bInfo)
 }
 
 func environmentJSONError(err error) *jsonCmdError {
@@ -209,7 +238,7 @@ func runEnvironmentEnsure(cmd *cobra.Command, _ []string) error {
 	}
 	desired, err := desiredEnvironmentConfig(current)
 	if err == nil {
-		err = validateEnvironmentOwnership(desired)
+		err = validateEnvironmentOwnership(current, desired)
 	}
 	if err != nil {
 		if jsonFlag {
