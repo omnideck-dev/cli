@@ -21,6 +21,30 @@ func (e *ConfigValidationError) Error() string { return e.Message }
 // ValidateInstanceConfig applies the cross-surface configuration policy used
 // by setup, environment reconciliation, and the underlying lifecycle.
 func ValidateInstanceConfig(cfg *config.Config) error {
+	return ValidateInstanceChange(nil, cfg)
+}
+
+// ValidateInstanceChange validates desired as a change from the saved current
+// (nil for a new instance). Older CLIs allowed shared memory above memory, so,
+// as with `config set`, that rule applies only when memory or shm_size
+// changes; repairing or restarting an existing instance must not be refused
+// over a pair the user did not touch.
+func ValidateInstanceChange(current, desired *config.Config) error {
+	if err := validateInstanceFields(desired); err != nil {
+		return err
+	}
+	if current != nil && current.Memory == desired.Memory && current.ShmSize == desired.ShmSize {
+		return nil
+	}
+	memoryMB, _ := checks.MemorySizeMB(desired.Memory)
+	shmMB, _ := checks.MemorySizeMB(desired.ShmSize)
+	if shmMB > memoryMB {
+		return &ConfigValidationError{Field: "shm_size", Message: "shared memory cannot be larger than memory"}
+	}
+	return nil
+}
+
+func validateInstanceFields(cfg *config.Config) error {
 	if cfg == nil {
 		return &ConfigValidationError{Field: "config", Message: "instance configuration is required"}
 	}
@@ -35,11 +59,6 @@ func ValidateInstanceConfig(cfg *config.Config) error {
 	}
 	if !checks.ValidMemorySize(cfg.ShmSize) {
 		return &ConfigValidationError{Field: "shm_size", Message: "shared memory must be a positive number and unit, such as 512m"}
-	}
-	memoryMB, _ := checks.MemorySizeMB(cfg.Memory)
-	shmMB, _ := checks.MemorySizeMB(cfg.ShmSize)
-	if shmMB > memoryMB {
-		return &ConfigValidationError{Field: "shm_size", Message: "shared memory cannot be larger than memory"}
 	}
 	if strings.TrimSpace(cfg.Image) == "" {
 		return &ConfigValidationError{Field: "image", Message: "image cannot be empty"}

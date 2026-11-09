@@ -38,6 +38,27 @@ func TestCheckExternalURL(t *testing.T) {
 
 // An unreadable old container must not be reported as "set": it may already
 // have had the right value.
+func TestExternalURLPortChanged(t *testing.T) {
+	for _, tc := range []struct {
+		state  ExternalURLState
+		actual string
+		want   bool
+	}{
+		{ExternalURLMismatch, "http://localhost:2337", true},
+		{ExternalURLMismatch, "http://localhost:2337/", true},
+		{ExternalURLMismatch, "http://127.0.0.1:2339", false},
+		{ExternalURLMismatch, "http://localhost", false},
+		{ExternalURLMismatch, "not a url %zz", false},
+		{ExternalURLMissing, "", false},
+		{ExternalURLOK, "http://localhost:2339", false},
+	} {
+		check := ExternalURLCheck{State: tc.state, Actual: tc.actual, Expected: "http://localhost:2339"}
+		if got := check.PortChanged(); got != tc.want {
+			t.Errorf("PortChanged(%s %q) = %v, want %v", tc.state, tc.actual, got, tc.want)
+		}
+	}
+}
+
 func TestExternalURLBeforeReplaceTreatsInspectionFailureAsUnknown(t *testing.T) {
 	cfg := &config.Config{ContainerName: "work", WebUIPort: "2339"}
 	check := ExternalURLBeforeReplace(&fakeContainerEngine{envErr: errors.New("inspect timed out")}, cfg)

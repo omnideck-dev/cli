@@ -112,7 +112,7 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, existsErr)
 	}
 	if exists {
-		return classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName))
+		return ContainerConflictError(cfg.ContainerName)
 	}
 	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
 		return classifyError(ErrPortInUse, fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault()))

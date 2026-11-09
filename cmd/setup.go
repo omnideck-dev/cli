@@ -414,14 +414,14 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 	// instance file with that name, even an unreadable one, must not be
 	// overwritten either.
 	if config.InstanceFileExists(cfg.ContainerName) {
-		return fmt.Errorf("another Omnideck installation already uses the name %q; choose a different --name", cfg.ContainerName)
+		return workflow.InstanceNameTakenError(cfg.ContainerName)
+	}
+	if err := workflow.CheckInstanceOwnership(instances, "", cfg); err != nil {
+		return err
 	}
 	for _, instance := range instances {
 		if instance.Config == nil {
 			continue
-		}
-		if instance.Config.ContainerName == cfg.ContainerName {
-			return fmt.Errorf("another Omnideck installation already uses the name %q; choose a different --name", cfg.ContainerName)
 		}
 		if instance.Config.WebUIPortOrDefault() == cfg.WebUIPortOrDefault() {
 			return fmt.Errorf("another Omnideck installation already uses port %s; choose a different --port", cfg.WebUIPortOrDefault())
@@ -432,7 +432,7 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, err)
 	}
 	if exists {
-		return fmt.Errorf("another container already uses the name %q; choose a different --name", cfg.ContainerName)
+		return workflow.ContainerConflictError(cfg.ContainerName)
 	}
 	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
 		return fmt.Errorf("another app is already using port %s; choose a different --port", cfg.WebUIPortOrDefault())

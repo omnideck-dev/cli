@@ -55,6 +55,7 @@ func repairInstance(ctx context.Context, eng engine.Engine, current *config.Conf
 		return stream.fail(err)
 	}
 	*current = repaired
+	stream.startup()
 	if err := repairWaitForApplication(ctx, eng, &repaired); err != nil {
 		return stream.failStartup(err)
 	}
