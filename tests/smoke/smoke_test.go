@@ -260,7 +260,7 @@ func TestJSONSyntaxErrorsStayMachineReadable(t *testing.T) {
 	for _, args := range [][]string{
 		{"--json", "definitely-not-a-command"},
 		{"--json", "--definitely-not-a-flag"},
-		{"--json", "remove"},
+		{"--json", "remove", "one", "two"},
 	} {
 		name := strings.Join(args[1:], " ")
 		t.Run(name, func(t *testing.T) {
@@ -455,5 +455,40 @@ func TestBinaryIsExecutable(t *testing.T) {
 		if info.Mode()&0111 == 0 {
 			t.Fatal("binary is not executable")
 		}
+	}
+}
+
+// remove accepts --name like every other instance command (#32), and a
+// missing or contradictory name is a structured error, never INTERNAL_ERROR.
+func TestRemoveJSONAcceptsNameFlag(t *testing.T) {
+	configDir := t.TempDir()
+	writeInstanceFixture(t, configDir, "solo")
+	env := []string{"OMNIDECK_CONFIG_DIR=" + configDir}
+
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		// Reaching the destructive-flag check proves --name selected "solo".
+		{"name flag", []string{"remove", "--name", "solo", "--json"}, "MISSING_REQUIRED_FLAG"},
+		{"unknown name flag", []string{"remove", "--name", "ghost", "--json", "--yes", "--keep-volumes"}, "NOT_INSTALLED"},
+		{"no name", []string{"remove", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG"},
+		{"two names", []string{"remove", "solo", "--name", "other", "--json", "--yes", "--keep-volumes"}, "MISSING_REQUIRED_FLAG"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stdout, stderr, code := runEnv(env, tc.args...)
+			if code == 0 || strings.TrimSpace(stderr) != "" {
+				t.Fatalf("code=%d stderr=%q stdout=%s", code, stderr, stdout)
+			}
+			var payload struct {
+				Error struct {
+					Code string `json:"code"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(stdout), &payload); err != nil || payload.Error.Code != tc.want {
+				t.Fatalf("error code = %q (err %v), want %s\n%s", payload.Error.Code, err, tc.want, stdout)
+			}
+		})
 	}
 }

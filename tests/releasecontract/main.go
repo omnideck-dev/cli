@@ -436,7 +436,7 @@ func checkInvalidInvocations(binary, contractsDir string) error {
 	for _, args := range [][]string{
 		{"--json", "definitely-not-a-command"},
 		{"--json", "--definitely-not-a-flag"},
-		{"--json", "remove"},
+		{"--json", "remove", "one", "two"},
 	} {
 		result, err := invoke(binary, nil, args...)
 		if err != nil {
