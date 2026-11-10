@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 // --- QuickCheck result messages ---
@@ -115,6 +116,7 @@ type SetupModel struct {
 	homeVolumeCreated  bool            // true only when this setup created the volume
 	stateVolumeCreated bool            // true only when this setup created the volume
 	existingNames      map[string]bool // container names already in use (cached at init)
+	existingVolumes    map[string]bool // data volumes saved instances use (cached at init)
 	existingPorts      map[string]bool // browser ports already reserved by Omnideck
 
 	// Image override (from --image flag, not shown in TUI).
@@ -229,6 +231,7 @@ func NewSetupModel(req SetupRequest) SetupModel {
 		quickCheckSpinner: sp,
 		lastCompletedStep: -1,
 		existingNames:     existingNames,
+		existingVolumes:   workflow.OwnedVolumes(req.ExistingInstances),
 		existingPorts:     existingPorts,
 		imageOverride:     req.ImageOverride,
 		hostPlatform:      hostPlatform,

@@ -126,8 +126,14 @@ func (m SetupModel) updateApplying(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.Index == setupStepAvailability && errors.Is(msg.Err, workflow.ErrContainerConflict) {
 			inputErr = &setupInputError{field: inputContainerName, message: "another container already uses this name; choose a different name"}
 		}
+		if msg.Index == setupStepAvailability && errors.Is(msg.Err, workflow.ErrInstanceNameTaken) {
+			inputErr = &setupInputError{field: inputContainerName, message: "this name or its saved data belongs to another Omnideck installation; choose a different name"}
+		}
 		if msg.Index == setupStepAvailability && errors.Is(msg.Err, workflow.ErrPortInUse) {
 			inputErr = &setupInputError{field: inputWebUIPort, message: "another app is already using this browser address number"}
+			if errors.Is(msg.Err, workflow.ErrPortOwned) {
+				inputErr.message = "another Omnideck installation already uses this browser address number"
+			}
 		}
 		if inputErr == nil {
 			_ = errors.As(msg.Err, &inputErr)

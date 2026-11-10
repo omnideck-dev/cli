@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 func TestValidMemSize(t *testing.T) {
@@ -772,5 +773,61 @@ func TestWSLCgroupFailureShowsRecoveryWithoutCallingItATimeout(t *testing.T) {
 		if strings.Contains(view, "exit status 127") != showDetails {
 			t.Fatalf("diagnostic visibility differs: %s", view)
 		}
+	}
+}
+
+func TestSetupTreatsANameWhoseVolumesAreTakenAsTaken(t *testing.T) {
+	m := NewSetupModel(SetupRequest{Mode: SetupAdditionalInstance, ExistingInstances: []config.InstanceInfo{{
+		Name:   "omnideck",
+		Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337", HomeVolume: "omnideck2-home"},
+	}}})
+	if !m.nameTaken("omnideck2") {
+		t.Fatal("omnideck2 would reuse omnideck's home volume")
+	}
+	if m.nameTaken("omnideck3") {
+		t.Fatal("omnideck3 is free")
+	}
+}
+
+// CreateInstance can refuse a name or port another installation took after
+// Setup cached the inventory; the user returns to that field with an error
+// that names the real owner.
+func TestAvailabilityRefusalsReturnToTheField(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		err       error
+		wantField int
+		wantText  string
+	}{
+		{"name taken", workflow.InstanceNameTakenError("omnideck2"), inputContainerName, "another Omnideck installation"},
+		{"port of another installation", workflow.InstallationPortError("2338"), inputWebUIPort, "another Omnideck installation"},
+		{"port of another app", workflow.PortInUseError("2338"), inputWebUIPort, "another app"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("HOME", t.TempDir())
+			m := NewSetupModel(SetupRequest{})
+			m.Stage = SetupStageApplying
+			m.spinnerModel = NewSpinnerModel(setupStepLabels, nil)
+			newModel, _ := m.updateApplying(StepFailedMsg{Index: setupStepAvailability, Err: tc.err})
+			nm := newModel.(SetupModel)
+			if nm.Stage != SetupStageSettings || nm.inputFocus != tc.wantField {
+				t.Fatalf("stage = %d, focus = %d; want settings field %d", nm.Stage, nm.inputFocus, tc.wantField)
+			}
+			if msg := nm.inputErrs[tc.wantField]; !strings.Contains(msg, tc.wantText) || strings.Contains(msg, "--") {
+				t.Fatalf("field error = %q, want it to mention %q and no CLI flags", msg, tc.wantText)
+			}
+		})
+	}
+}
+
+func TestSetupExplainsANameWhoseDataIsTaken(t *testing.T) {
+	m := NewSetupModel(SetupRequest{Mode: SetupAdditionalInstance, ExistingInstances: []config.InstanceInfo{{
+		Name:   "omnideck",
+		Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337", HomeVolume: "omnideck2-home"},
+	}}})
+	m.inputFocus = inputContainerName
+	m.inputs[inputContainerName].SetValue("omnideck2")
+	if m.validateCurrentInput() || !strings.Contains(m.inputErrs[inputContainerName], "saved data") {
+		t.Fatalf("error = %q, want it to explain the data conflict", m.inputErrs[inputContainerName])
 	}
 }

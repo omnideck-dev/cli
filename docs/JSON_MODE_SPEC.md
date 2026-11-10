@@ -406,8 +406,10 @@ Stages: `check_availability` → `create_home_volume` → `create_state_volume` 
 Flags: `--name`, `--port`, `--memory`, `--shm-size`, `--image`, `--runtime`.
 An invalid flag value is `INVALID_SETTING` (for example `--port` →
 `setting: "web_ui_port"`); a name already used by a container or a saved
-instance is `CONTAINER_CONFLICT`; a taken port is `PORT_IN_USE`. All of these
-are single error values reported before any stage starts.
+instance, or whose data volumes another saved instance uses, is
+`CONTAINER_CONFLICT`; a port another saved instance or another app uses is
+`PORT_IN_USE`. All of these are single error values reported before any stage
+starts. Without `--name`, `add` picks a name that avoids all of them.
 
 `add --suggest-defaults --json` is a non-mutating single value that previews
 what a plain `add` would pick:

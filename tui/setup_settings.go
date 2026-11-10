@@ -11,13 +11,15 @@ import (
 	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 // nameTaken reports whether a new instance named name would collide with an
-// existing instance or container name, or overwrite an instance file that
-// could not be decoded and so is missing from existingNames.
+// existing instance or container name, reuse another instance's data
+// volumes, or overwrite an instance file that could not be decoded and so is
+// missing from existingNames.
 func (m *SetupModel) nameTaken(name string) bool {
-	return m.existingNames[name] || config.InstanceFileExists(name)
+	return m.existingNames[name] || !workflow.DefaultVolumesFree(m.existingVolumes, name) || config.InstanceFileExists(name)
 }
 
 func (m *SetupModel) ensureRecommendedSettingsAvailable() {
@@ -124,6 +126,9 @@ func (m *SetupModel) validateCurrentInput() bool {
 		}
 		if m.nameTaken(val) {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
+			if !m.existingNames[val] && !workflow.DefaultVolumesFree(m.existingVolumes, val) {
+				m.inputErrs[m.inputFocus] = "'" + val + "' would reuse saved data that belongs to another Omnideck installation"
+			}
 			return false
 		}
 	case inputMemory:

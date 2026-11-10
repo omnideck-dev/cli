@@ -10,6 +10,9 @@ var (
 	ErrPortInUse = errors.New("port in use")
 	// ErrContainerConflict identifies an unrelated container using a requested name.
 	ErrContainerConflict = errors.New("container conflict")
+	// ErrPortOwned identifies a port another saved Omnideck installation
+	// uses. It also satisfies ErrPortInUse.
+	ErrPortOwned = errors.New("port owned by another installation")
 	// ErrInstanceNameTaken identifies a name or data volume that belongs to
 	// another saved Omnideck installation. Unlike ErrContainerConflict, the
 	// existing container must never be suggested for removal.
@@ -47,6 +50,17 @@ func InstanceNameTakenError(name string) error {
 // already uses name.
 func ContainerConflictError(name string) error {
 	return classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q; choose a different --name", name))
+}
+
+// InstallationPortError reports that another saved Omnideck installation
+// already uses port.
+func InstallationPortError(port string) error {
+	return classifyError(ErrPortInUse, classifyError(ErrPortOwned, fmt.Errorf("another Omnideck installation already uses port %s; choose a different --port", port)))
+}
+
+// PortInUseError reports that another app is listening on port.
+func PortInUseError(port string) error {
+	return classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s; choose a different --port", port))
 }
 
 func classifyError(kind, err error) error {
