@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/omnideck-dev/cli/config"
@@ -171,5 +172,34 @@ func TestRunRemoveJSONCancellationReportsCancelled(t *testing.T) {
 	errPayload := last["error"].(map[string]any)
 	if errPayload["code"] != ErrCodeCancelled {
 		t.Fatalf("code = %v, want %s", errPayload["code"], ErrCodeCancelled)
+	}
+}
+
+func TestRunRemoveJSONRefusesToDeleteDataAnotherInstanceUses(t *testing.T) {
+	instance := removeTestInstance(t)
+	other := *instance.Config
+	other.ContainerName = "other"
+	other.StateVolume = "demo-state"
+	eng := &mockEngine{
+		containerExists: map[string]bool{"demo": true},
+		containerStatus: map[string]string{"demo": "running"},
+		volumes:         map[string]bool{"demo-home": true, "demo-state": true},
+	}
+	out := captureStdout(t, func() {
+		_ = runRemoveJSON(eng, instance, workflow.RemoveInstanceOptions{
+			DeleteData: true, BackupData: false,
+			ListInstances: func() ([]config.InstanceInfo, error) {
+				return []config.InstanceInfo{instance, {Name: "other", Path: filepath.Join(t.TempDir(), "other.yaml"), Config: &other}}, nil
+			},
+		})
+	})
+	events := decodeNDJSON(t, out)
+	last := events[len(events)-1]
+	payload, _ := last["error"].(map[string]any)
+	if last["state"] != "error" || payload["code"] != ErrCodeContainerConflict || !strings.Contains(payload["hint"].(string), "do not remove it") {
+		t.Fatalf("terminal event = %v", last)
+	}
+	if len(eng.volumes) != 2 {
+		t.Fatalf("volumes = %v; nothing may be deleted", eng.volumes)
 	}
 }

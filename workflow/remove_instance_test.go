@@ -219,3 +219,61 @@ func TestRemoveInstanceRejectsBackupWithoutDeletionBeforeMutation(t *testing.T) 
 		t.Fatalf("instance changed before validation: %#v", eng)
 	}
 }
+
+func sharedRemovalInstances(t *testing.T, instance config.InstanceInfo, other config.Config) func() ([]config.InstanceInfo, error) {
+	t.Helper()
+	otherPath := filepath.Join(t.TempDir(), "other.yaml")
+	if err := config.Save(otherPath, &other); err != nil {
+		t.Fatal(err)
+	}
+	return func() ([]config.InstanceInfo, error) {
+		return []config.InstanceInfo{instance, {Name: "other", Path: otherPath, Config: &other}}, nil
+	}
+}
+
+// An earlier ensure could save a second instance file for another
+// installation's data. Deleting it through this record would destroy the
+// other installation's data, so nothing is removed.
+func TestRemoveInstanceRefusesToDeleteDataAnotherInstanceUses(t *testing.T) {
+	instance, eng := removalFixture(t)
+	other := *instance.Config
+	other.ContainerName = "other"
+	other.HomeVolume = "demo-home"
+	_, err := RemoveInstance(eng, instance, RemoveInstanceOptions{DeleteData: true, ListInstances: sharedRemovalInstances(t, instance, other)})
+	if !errors.Is(err, ErrInstanceNameTaken) {
+		t.Fatalf("err = %v, want ErrInstanceNameTaken", err)
+	}
+	if !eng.containerExists || len(eng.volumes) != 2 {
+		t.Fatalf("removal changed the runtime: container=%v volumes=%v", eng.containerExists, eng.volumes)
+	}
+	if _, statErr := os.Stat(instance.Path); statErr != nil {
+		t.Fatalf("saved settings were removed: %v", statErr)
+	}
+}
+
+// A container shared with another record stays in place; only this record goes.
+func TestRemoveInstanceKeepsAContainerAnotherInstanceUses(t *testing.T) {
+	instance, eng := removalFixture(t)
+	other := *instance.Config
+	other.HomeVolume, other.StateVolume = "other-home", "other-state"
+	result, err := RemoveInstance(eng, instance, RemoveInstanceOptions{ListInstances: sharedRemovalInstances(t, instance, other)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ContainerStopped || result.ContainerRemoved || !eng.containerExists || eng.status != "running" {
+		t.Fatalf("result=%#v exists=%v status=%s; the shared container must keep running", result, eng.containerExists, eng.status)
+	}
+	if _, statErr := os.Stat(instance.Path); !os.IsNotExist(statErr) {
+		t.Fatalf("this record's settings were kept: %v", statErr)
+	}
+}
+
+func TestRemoveInstanceStopsWhenOtherInstancesCannotBeChecked(t *testing.T) {
+	instance, eng := removalFixture(t)
+	_, err := RemoveInstance(eng, instance, RemoveInstanceOptions{ListInstances: func() ([]config.InstanceInfo, error) {
+		return nil, errors.New("permission denied")
+	}})
+	if err == nil || !eng.containerExists {
+		t.Fatalf("err=%v exists=%v; removal must not proceed blind", err, eng.containerExists)
+	}
+}

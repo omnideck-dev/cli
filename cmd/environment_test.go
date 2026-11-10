@@ -120,8 +120,9 @@ func TestValidateEnvironmentOwnershipRefusesAnotherInstallationsContainerOrData(
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			nameFlag = tc.instance
+			current, _ := loadEnvironmentConfig(config.InstancePath(tc.instance))
 			desired := &config.Config{ContainerName: tc.container, HomeVolume: tc.home, Memory: "2g", ShmSize: "1g", WebUIPort: "2400", Image: config.DefaultImage}
-			err := validateEnvironmentOwnership(desired)
+			err := validateEnvironmentOwnership(current, desired)
 			if taken := errors.Is(err, workflow.ErrInstanceNameTaken); taken != tc.wantTaken {
 				t.Fatalf("err = %v, want ErrInstanceNameTaken %v", err, tc.wantTaken)
 			}
@@ -129,6 +130,32 @@ func TestValidateEnvironmentOwnershipRefusesAnotherInstallationsContainerOrData(
 				t.Fatalf("err = %v", err)
 			}
 		})
+	}
+}
+
+// beta.9's ensure could save a second instance file for another
+// installation's container. Those installations must still start; only a
+// change to their data volumes is checked.
+func TestValidateEnvironmentOwnershipKeepsExistingSharedInstallationsWorking(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	shared := &config.Config{ContainerName: "omnideck-desktop", Memory: "2g", ShmSize: "1g", WebUIPort: "2337", Image: config.DefaultImage}
+	for _, name := range []string{"desktop", "omnideck-desktop"} {
+		if err := config.Save(config.InstancePath(name), shared); err != nil {
+			t.Fatal(err)
+		}
+	}
+	originalName := nameFlag
+	t.Cleanup(func() { nameFlag = originalName })
+	nameFlag = "omnideck-desktop"
+
+	desired := *shared
+	if err := validateEnvironmentOwnership(shared, &desired); err != nil {
+		t.Fatalf("an unchanged existing instance was refused: %v", err)
+	}
+	desired.HomeVolume = "desktop-home-2"
+	desired.StateVolume = "omnideck-desktop-state"
+	if err := validateEnvironmentOwnership(shared, &desired); !errors.Is(err, workflow.ErrInstanceNameTaken) {
+		t.Fatalf("moving onto a volume another installation uses: err = %v", err)
 	}
 }
 
