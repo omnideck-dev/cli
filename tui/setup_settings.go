@@ -126,6 +126,9 @@ func (m *SetupModel) validateCurrentInput() bool {
 		}
 		if m.nameTaken(val) {
 			m.inputErrs[m.inputFocus] = "an instance named '" + val + "' already exists"
+			if !m.existingNames[val] && !workflow.DefaultVolumesFree(m.existingVolumes, val) {
+				m.inputErrs[m.inputFocus] = "'" + val + "' would reuse saved data that belongs to another Omnideck installation"
+			}
 			return false
 		}
 	case inputMemory:
