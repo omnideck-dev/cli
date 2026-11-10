@@ -108,3 +108,15 @@ func TestValidatePlainSetupRejectsAnExistingInstanceName(t *testing.T) {
 		t.Fatalf("validatePlainSetup() over an unreadable file error = %v", err)
 	}
 }
+
+func TestSuggestAvailableRuntimeNameSkipsNamesWhoseVolumesAreTaken(t *testing.T) {
+	t.Setenv("OMNIDECK_CONFIG_DIR", t.TempDir())
+	existing := &config.Config{ContainerName: "omnideck", HomeVolume: "omnideck2-home", Memory: "2g", ShmSize: "1g", WebUIPort: "2337", Image: config.DefaultImage}
+	if err := config.Save(config.InstancePath("omnideck"), existing); err != nil {
+		t.Fatal(err)
+	}
+	name, err := suggestAvailableRuntimeName("omnideck", &mockEngine{})
+	if err != nil || name != "omnideck3" {
+		t.Fatalf("suggestAvailableRuntimeName() = %q, %v; want omnideck3", name, err)
+	}
+}

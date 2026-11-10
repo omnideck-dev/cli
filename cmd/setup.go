@@ -383,12 +383,13 @@ func suggestAvailableRuntimeName(initial string, eng engine.Engine) (string, err
 			reserved[instance.Config.ContainerName] = true
 		}
 	}
+	owned := workflow.OwnedVolumes(instances)
 	for suffix := 1; suffix < 10000; suffix++ {
 		candidate := initial
 		if suffix > 1 {
 			candidate = fmt.Sprintf("omnideck%d", suffix)
 		}
-		if reserved[candidate] || config.InstanceFileExists(candidate) {
+		if reserved[candidate] || !workflow.DefaultVolumesFree(owned, candidate) || config.InstanceFileExists(candidate) {
 			continue
 		}
 		exists, err := eng.ContainerExists(candidate)
@@ -419,13 +420,8 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 	if err := workflow.CheckInstanceOwnership(instances, "", cfg); err != nil {
 		return err
 	}
-	for _, instance := range instances {
-		if instance.Config == nil {
-			continue
-		}
-		if instance.Config.WebUIPortOrDefault() == cfg.WebUIPortOrDefault() {
-			return fmt.Errorf("another Omnideck installation already uses port %s; choose a different --port", cfg.WebUIPortOrDefault())
-		}
+	if err := workflow.CheckPortOwnership(instances, cfg.WebUIPortOrDefault()); err != nil {
+		return err
 	}
 	exists, err := eng.ContainerExists(cfg.ContainerName)
 	if err != nil {
@@ -435,7 +431,7 @@ func validatePlainSetup(cfg *config.Config, eng engine.Engine) error {
 		return workflow.ContainerConflictError(cfg.ContainerName)
 	}
 	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-		return fmt.Errorf("another app is already using port %s; choose a different --port", cfg.WebUIPortOrDefault())
+		return workflow.PortInUseError(cfg.WebUIPortOrDefault())
 	}
 	return nil
 }

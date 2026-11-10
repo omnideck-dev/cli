@@ -239,3 +239,34 @@ func TestCreateInstanceFailureDuringCancellationReportsContextCanceled(t *testin
 		t.Fatal("cleanup did not restore the caller's cancelled context")
 	}
 }
+
+// CreateVolume reuses a volume that already exists, so one another saved
+// instance owns would silently become shared. Creation stops before any
+// runtime change instead.
+func TestCreateInstanceRefusesAnotherInstancesVolumeOrPort(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		other config.Config
+		want  error
+	}{
+		{"volume", config.Config{ContainerName: "other", HomeVolume: "demo-home", WebUIPort: "2400"}, ErrInstanceNameTaken},
+		{"port", config.Config{ContainerName: "other", WebUIPort: "58231"}, ErrPortInUse},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			eng := &fakeCreationEngine{}
+			other := tc.other
+			err := CreateInstance(eng, testCreateConfig(), func() error {
+				t.Fatal("a refused instance must not be saved")
+				return nil
+			}, CreateInstanceOptions{ListInstances: func() ([]config.InstanceInfo, error) {
+				return []config.InstanceInfo{{Name: "other", Config: &other}}, nil
+			}})
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+			if len(eng.createdVolumes) != 0 {
+				t.Fatalf("created %v before refusing", eng.createdVolumes)
+			}
+		})
+	}
+}

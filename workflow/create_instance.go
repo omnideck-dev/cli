@@ -34,6 +34,10 @@ type CreateInstanceOptions struct {
 	// Verify runs an optional, non-destructive post-start check before the
 	// configuration is saved. A warning does not roll back a healthy instance.
 	Verify func() (detail string, warning bool)
+	// ListInstances returns every saved instance, so a new one never adopts
+	// a container, data volume, or port another one owns. Nil uses
+	// config.ListInstances.
+	ListInstances func() ([]config.InstanceInfo, error)
 }
 
 type InstanceCreationStage string
@@ -107,6 +111,23 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 	}()
 
 	opts.reportStage(string(CreateStageAvailability))
+	// CreateVolume reuses a volume that already exists, so a volume another
+	// saved instance owns would silently become shared, and removing either
+	// instance with its data would destroy the other's.
+	list := opts.ListInstances
+	if list == nil {
+		list = config.ListInstances
+	}
+	instances, listErr := list()
+	if listErr != nil {
+		return fmt.Errorf("checking existing installations: %w", listErr)
+	}
+	if err := CheckInstanceOwnership(instances, "", cfg); err != nil {
+		return err
+	}
+	if err := CheckPortOwnership(instances, cfg.WebUIPortOrDefault()); err != nil {
+		return err
+	}
 	exists, existsErr := eng.ContainerExists(cfg.ContainerName)
 	if existsErr != nil {
 		return fmt.Errorf("checking the name %q: %w", cfg.ContainerName, existsErr)
@@ -115,7 +136,7 @@ func CreateInstance(eng InstanceCreationEngine, cfg *config.Config, save func() 
 		return ContainerConflictError(cfg.ContainerName)
 	}
 	if !checks.PortAvailable(cfg.WebUIPortOrDefault()) {
-		return classifyError(ErrPortInUse, fmt.Errorf("another app is already using browser address number %s; choose a different --port", cfg.WebUIPortOrDefault()))
+		return PortInUseError(cfg.WebUIPortOrDefault())
 	}
 	opts.reportDone(CreateStageAvailability, "available", false)
 

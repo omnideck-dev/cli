@@ -11,13 +11,15 @@ import (
 	"github.com/omnideck-dev/cli/checks"
 	"github.com/omnideck-dev/cli/config"
 	"github.com/omnideck-dev/cli/engine"
+	"github.com/omnideck-dev/cli/workflow"
 )
 
 // nameTaken reports whether a new instance named name would collide with an
-// existing instance or container name, or overwrite an instance file that
-// could not be decoded and so is missing from existingNames.
+// existing instance or container name, reuse another instance's data
+// volumes, or overwrite an instance file that could not be decoded and so is
+// missing from existingNames.
 func (m *SetupModel) nameTaken(name string) bool {
-	return m.existingNames[name] || config.InstanceFileExists(name)
+	return m.existingNames[name] || !workflow.DefaultVolumesFree(m.existingVolumes, name) || config.InstanceFileExists(name)
 }
 
 func (m *SetupModel) ensureRecommendedSettingsAvailable() {

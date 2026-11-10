@@ -774,3 +774,16 @@ func TestWSLCgroupFailureShowsRecoveryWithoutCallingItATimeout(t *testing.T) {
 		}
 	}
 }
+
+func TestSetupTreatsANameWhoseVolumesAreTakenAsTaken(t *testing.T) {
+	m := NewSetupModel(SetupRequest{Mode: SetupAdditionalInstance, ExistingInstances: []config.InstanceInfo{{
+		Name:   "omnideck",
+		Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337", HomeVolume: "omnideck2-home"},
+	}}})
+	if !m.nameTaken("omnideck2") {
+		t.Fatal("omnideck2 would reuse omnideck's home volume")
+	}
+	if m.nameTaken("omnideck3") {
+		t.Fatal("omnideck3 is free")
+	}
+}

@@ -31,6 +31,39 @@ func CheckInstanceOwnership(instances []config.InstanceInfo, self string, cfg *c
 	return nil
 }
 
+// OwnedVolumes returns the data volume names saved instances use.
+func OwnedVolumes(instances []config.InstanceInfo) map[string]bool {
+	volumes := map[string]bool{}
+	for _, instance := range instances {
+		if instance.Config != nil {
+			volumes[instance.Config.HomeVolumeName()] = true
+			volumes[instance.Config.StateVolumeName()] = true
+		}
+	}
+	return volumes
+}
+
+// DefaultVolumesFree reports whether a new instance named name would get data
+// volumes none of owned uses. Name suggestions skip a name that fails this,
+// since CreateInstance would refuse it.
+func DefaultVolumesFree(owned map[string]bool, name string) bool {
+	cfg := config.Config{ContainerName: name}
+	return !owned[cfg.HomeVolumeName()] && !owned[cfg.StateVolumeName()]
+}
+
+// CheckPortOwnership returns ErrPortInUse when one of others, the saved
+// installations other than the one being created or changed, already uses
+// port. Two installations saved on one port would fight over it whenever
+// both run.
+func CheckPortOwnership(others []config.InstanceInfo, port string) error {
+	for _, other := range others {
+		if other.Config != nil && other.Config.WebUIPortOrDefault() == port {
+			return InstallationPortError(port)
+		}
+	}
+	return nil
+}
+
 // InstanceDefaultsOptions replaces the host probes used to choose defaults.
 // Nil fields use the real network and saved configuration directory.
 type InstanceDefaultsOptions struct {
@@ -71,13 +104,14 @@ func NewInstanceDefaultsWith(instances []config.InstanceInfo, opts InstanceDefau
 		}
 	}
 
+	owned := OwnedVolumes(instances)
 	cfg := config.DefaultConfig()
 	for suffix := 1; ; suffix++ {
 		name := "omnideck"
 		if suffix > 1 {
 			name = fmt.Sprintf("omnideck%d", suffix)
 		}
-		if !takenNames[name] && !instanceExists(name) {
+		if !takenNames[name] && !instanceExists(name) && DefaultVolumesFree(owned, name) {
 			cfg.ContainerName = name
 			break
 		}

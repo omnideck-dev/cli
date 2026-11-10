@@ -135,6 +135,7 @@ func validateEnvironmentOwnership(current, desired *config.Config) error {
 			return err
 		}
 	}
+	others := make([]config.InstanceInfo, 0, len(instances))
 	for _, instance := range instances {
 		if instance.Config == nil || instance.Name == self {
 			continue
@@ -143,11 +144,9 @@ func validateEnvironmentOwnership(current, desired *config.Config) error {
 		if current != nil && instance.Config.ContainerName == current.ContainerName {
 			continue
 		}
-		if instance.Config.WebUIPortOrDefault() == desired.WebUIPortOrDefault() {
-			return fmt.Errorf("another Omnideck installation already uses port %s", desired.WebUIPortOrDefault())
-		}
+		others = append(others, instance)
 	}
-	return nil
+	return workflow.CheckPortOwnership(others, desired.WebUIPortOrDefault())
 }
 
 // sameFile reports whether a and b name the same existing file.
@@ -177,9 +176,8 @@ func environmentJSONError(err error) *jsonCmdError {
 	}
 	message := err.Error()
 	lower := strings.ToLower(message)
+	// Podman's own port errors arrive as text; Omnideck's are typed.
 	if errors.Is(err, workflow.ErrPortInUse) ||
-		strings.Contains(lower, "already using port") ||
-		strings.Contains(lower, "already uses port") ||
 		strings.Contains(lower, "address already in use") ||
 		strings.Contains(lower, "already allocated") ||
 		strings.Contains(lower, "cannot listen on the tcp port") ||

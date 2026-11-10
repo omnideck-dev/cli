@@ -49,6 +49,17 @@ func ContainerConflictError(name string) error {
 	return classifyError(ErrContainerConflict, fmt.Errorf("another container already uses the name %q; choose a different --name", name))
 }
 
+// InstallationPortError reports that another saved Omnideck installation
+// already uses port.
+func InstallationPortError(port string) error {
+	return classifyError(ErrPortInUse, fmt.Errorf("another Omnideck installation already uses port %s; choose a different --port", port))
+}
+
+// PortInUseError reports that another app is listening on port.
+func PortInUseError(port string) error {
+	return classifyError(ErrPortInUse, fmt.Errorf("another app is already using port %s; choose a different --port", port))
+}
+
 func classifyError(kind, err error) error {
 	if err == nil {
 		return nil

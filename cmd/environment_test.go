@@ -67,7 +67,11 @@ func TestEnvironmentJSONErrorUsesWorkflowClassifications(t *testing.T) {
 		want string
 	}{
 		{name: "port", err: errors.Join(workflow.ErrPortInUse, errors.New("localized detail")), want: ErrCodePortInUse},
-		{name: "saved installation port wording", err: errors.New("another Omnideck installation already uses port 2337"), want: ErrCodePortInUse},
+		{name: "saved installation port", err: workflow.InstallationPortError("2337"), want: ErrCodePortInUse},
+		{name: "another app on the port", err: workflow.PortInUseError("2337"), want: ErrCodePortInUse},
+		// Omnideck's own port errors are typed; only Podman's arrive as text.
+		{name: "untyped Omnideck wording", err: errors.New("another Omnideck installation already uses port 2337"), want: ErrCodeInternal},
+		{name: "podman wording", err: errors.New("rootlessport listen tcp 127.0.0.1:2337: bind: address already in use"), want: ErrCodePortInUse},
 		{name: "container", err: errors.Join(workflow.ErrContainerConflict, errors.New("localized detail")), want: ErrCodeContainerConflict},
 	}
 	for _, tt := range tests {

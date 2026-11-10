@@ -29,3 +29,18 @@ func TestNewInstanceDefaultsReservesNamesOfUnreadableConfigs(t *testing.T) {
 		t.Fatalf("defaults = %s:%s, want omnideck2:2337", cfg.ContainerName, cfg.WebUIPort)
 	}
 }
+
+func TestNewInstanceDefaultsSkipsNamesWhoseVolumesAreTaken(t *testing.T) {
+	// An instance saved with a custom home volume that matches the next
+	// suggested name's default.
+	instances := []config.InstanceInfo{
+		{Name: "omnideck", Config: &config.Config{ContainerName: "omnideck", WebUIPort: "2337", HomeVolume: "omnideck2-home"}},
+	}
+	cfg := NewInstanceDefaultsWith(instances, InstanceDefaultsOptions{
+		PortAvailable:  func(string) bool { return true },
+		InstanceExists: func(string) bool { return false },
+	})
+	if cfg.ContainerName != "omnideck3" {
+		t.Fatalf("suggested %q, want omnideck3 (omnideck2-home belongs to omnideck)", cfg.ContainerName)
+	}
+}
